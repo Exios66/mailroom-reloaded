@@ -1,6 +1,6 @@
 # mailroom-reloaded Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. **Execution method chosen by the user: subagent-driven, with every implementer and reviewer subagent dispatched with `model: "sonnet"`.** Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the compressed Digital Mailroom. It runs end to end locally on CrewAI Flows, a ModernBERT primary classifier and a deterministic route gate, with OTel/Phoenix/Grafana observability, SAND-37-parity evaluation cards, and Docker/Modal deployment.
 
@@ -25,7 +25,10 @@
 - `crewai>=1.8,<2`. Models are addressed as `openai/<model>` with an explicit `base_url`. Set `CREWAI_DISABLE_TELEMETRY=true` before `crewai` is imported.
 - Providers: `llamafile`, `openrouter`, `vllm`, `mock`. No Ollama.
 - Frozen prompt bytes are sha256-locked to `prompts/frozen_v1/lineage.json` (from `L/src/llm/frozen_v1/lineage.json`) and `prompts/sand37/lineage.json` (from `S/config/prompts/eval_environment_lineage.json`).
-- Dataset `Lucius-Morningstar/mailroom-dataset`: default revision `v9.2`; SAND-37 reproduction revision `ed7576b6`; seed 42.
+- Dataset `Lucius-Morningstar/mailroom-dataset`: default revision `ed7576b6` (SAND-37, the BERT canon and llm-mailroom 0.8.0); `v9.2` opt-in; seed 42.
+- The gate and calibration are fitted on `split="train"` only; KPIs are reported on `split="test"` only.
+- vLLM requests send `extra_body={"chat_template_kwargs":{"enable_thinking":False}}` (SAND-37 engine condition).
+- Tool rounds never carry `response_format`; the final turn uses `tool_choice="none"` with the strict `response_format`.
 - GPU price default: L4 `$0.80` per GPU-hour.
 - Confidence defaults: `low 0.70`, `high 0.95`, `retry_max 2`. `judge_band_high` by class: contract 0.97, merger_agreement 0.97, corporate_record 0.97, correspondence 0.94, insurance_claim 0.92.
 - Specialist run conditions (input cap chars / output cap tokens / temperature):
@@ -262,7 +265,9 @@
   - `test_inline_fallback_when_tools_rejected`: the server returns 400 on any request with `tools`. The client retries without `tools`, with the tool results inlined in the system message, and `parsed` is schema-valid.
   - `test_length_cap_raises`: `finish_reason="length"` raises `LengthFinishReasonError`.
   - `test_cold_start_retry_not_budgeted`: two 503 responses then 200 succeed. The `LLMResult` is returned, and `Usage.calls` counts only the successful call.
-  - `test_label_logprob`: `exp(label_logprob)` == product of the scripted token probabilities for the label value tokens.
+  - `test_two_phase_tools_then_schema`: no request carries both `tools` and `response_format`. The final request has `tool_choice="none"` and the strict `response_format`.
+  - `test_label_logprob_from_label_line`: the model emits `LABEL: correspondence/memo` and then the JSON. `exp(label_logprob)` equals the product of the scripted token probabilities on the label line only.
+  - `test_vllm_disables_thinking`: vLLM provider requests carry `chat_template_kwargs.enable_thinking == False`.
   - `@pytest.mark.live test_live_tool_call_and_schema`: against the configured provider.
 - [ ] **Step 2: Run the tests and confirm they fail.**
 - [ ] **Step 3: Implement.**
@@ -358,7 +363,7 @@
 **Interfaces:**
 - Consumes: `call_structured`, `tools_for("sorter")`, `load_prompt("sorter_v14")`, `Handoff`, `subclass_vocab`.
 - Produces:
-  - `SortResult(doc_type, doc_subclass, confidence: float, confidence_source: Literal["logprob","self_report"], doc_type_disagree: bool, disagree_reason: str | None, usage: Usage)`
+  - `SortResult(doc_type, doc_subclass, confidence: float, raw_confidence: float, calibrated: bool, mode: SortMode, confidence_source: Literal["logprob","self_report"], doc_type_disagree: bool, disagree_reason: str | None, usage: Usage)`
   - `sort(text: str, handoff: Handoff, *, attempt: int = 0) -> SortResult`
 
   In `SUBCLASS_ONLY` mode the system prompt is `sorter_v14 + "\n\n" + sorter_subclass_scope.format(doc_type=..., subclasses=...)`, and the output schema enum restricts `doc_subclass` to that vocabulary. In `FULL` mode the BERT `prior` is appended to the user message.
@@ -368,7 +373,8 @@
 - [ ] **Step 1: Write the failing tests** (FakeOpenAI).
   - `test_subclass_only_prompt_scoped`: the system message contains `sorter_v14` verbatim as a prefix and the allowed list. The JSON schema enum equals `subclass_vocab("correspondence")`.
   - `test_disagree_flag_propagates`
-  - `test_confidence_from_logprobs`: `confidence_source == "logprob"`.
+  - `test_confidence_from_logprobs`: `confidence_source == "logprob"`, and `raw_confidence` is kept beside the calibrated `confidence`.
+  - `test_calibration_applied`: with a `models/calibration.json` holding temperature T for (provider, model, class), `confidence == sigmoid(logit(raw)/T)`. With no file, `calibrated is False`.
   - `test_self_report_fallback`
   - `test_sorter_uses_list_subclasses_tool`: a scripted tool call, and the result is valid.
   - `test_input_truncated_to_sorter_cap`: the cap comes from `taxonomy.agents.sorter`.
@@ -385,7 +391,8 @@
 - Consumes: `call_structured`, `response_format`, `assess_payload`, `load_prompt`, `RunConditions`, `tools_for(<specialist>)`.
 - Produces:
   - `ExtractResult(doc_type, data: dict | None, schema_valid: bool, parse_error: str | None, confidence: float | None, error_kind: str | None, calls: int, usage: Usage)`
-  - `extract(text: str, doc_type: str, doc_subclass: str | None, *, prompt_set="frozen_v1", attempt=0) -> ExtractResult`
+  - `extract(text: str, doc_type: str, doc_subclass: str | None, *, prompt_set="frozen_v1", tools: bool | None = None, attempt=0) -> ExtractResult`. `tools=None` means `taxonomy.agents.<specialist>.tools`, forced to False for `sand37`.
+  - `extraction_confidence(schema_valid, coverage, mean_token_prob) -> float`, the spec §6 formula, using `taxonomy.yaml` `required_fields.<doc_type>`.
   - `prepare_input(text, doc_type, cond) -> list[str]`, which returns:
     - one capped string for the frozen classes;
     - head+tail 15k/15k for frozen merger;
@@ -403,6 +410,8 @@
   - `test_dagger_resample_once_on_length`: length, then OK, gives `calls == 2` for that window.
   - `test_length_cap_error_kind`: frozen contract with a length cap gives `error_kind == "LengthFinishReasonError"` and `data is None`.
   - `test_malformed_json_one_repair`
+  - `test_parity_mode_tools_off`: with `prompt_set="sand37"` or `tools=False`, the requests carry no `tools` key.
+  - `test_extraction_confidence_formula`: with schema_valid True, coverage 0.5 and mean token probability 0.9, `confidence == 0.6*0.5 + 0.4*0.9`. With schema_valid False it is 0.
   - `test_no_ground_truth_in_messages` uses the GT leak helper `assert_no_gt(requests, gt_row)` from `tests/helpers.py` (created here, reused in Task 20).
 - [ ] **Step 2: Implement**, porting the class prompts' user-message template from `L/src/agents/<class>_specialist.py` and the dagger windowing from `S/src/mailroom_sandbox/job/specialist_posture.py`.
 - [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_specialists.py -v`. Expected: PASS.
@@ -421,6 +430,8 @@
   - `BandGate(taxonomy)`
   - `LearnedGate(band: BandGate, coef_path: Path)`, which overrides only when `low <= confidence < high`
   - `load_gate() -> RouteGate`
+  - `fit_calibration(rows, out: Path) -> dict`: per (provider, model, doc_type), temperature scaling by 1-D minimisation of NLL. Writes `models/calibration.json` and returns ECE before and after.
+  - `ece(confidences, correct, bins=10) -> float`
   - `train_gate(rows: list[dict], out: Path) -> dict` (metrics). It fits sklearn `LogisticRegression` per stage on labels from `retry_expected` / `review_expected` and writes `{"stage": {"features": [...], "coef": [...], "intercept": float, "threshold": float}}`.
 
 **Decision rules (BandGate)**
@@ -444,6 +455,8 @@
   - `test_learned_gate_only_in_medium_band`: a model coefficient that always says `human_review` does not change a 0.99 or a 0.10 decision.
   - `test_deterministic`: identical features give an identical decision over 100 calls.
   - `test_train_gate_writes_json` uses 40 synthetic rows.
+  - `test_fit_refuses_test_split`: `train_gate` and `fit_calibration` raise `ValueError` when any row has `split == "test"`.
+  - `test_fit_calibration_reduces_ece`: on synthetic overconfident data, ECE after calibration is below ECE before.
 - [ ] **Step 2: Implement.**
 - [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_gate.py -v`. Expected: PASS.
 - [ ] **Step 4: Commit.** `git commit -am "feat: deterministic route gate replacing reviewer nodes"`
@@ -457,8 +470,8 @@
 - Consumes: `make_llm`, `crewai_tool`, `tools_for`, `load_prompt`.
 - Produces:
   - `JudgeVerdict(label: Literal["complete","partial","incomplete"], score: float, field_findings: list[FieldFinding])`
-  - `FieldFinding(field, verdict: Literal["correct","partial","wrong","missing","hallucinated"], rationale)`
-  - `JudgeGrade(doc_id, doc_type, fields: list[FieldFinding], overall: float)`
+  - `FieldFinding(field, verdict: Literal["correct","partial","wrong","missing","hallucinated","gt_suspect"], rationale)`
+  - `JudgeGrade(doc_id, doc_type, fields: list[FieldFinding], classification: ClassificationFinding(verdict: Literal["correct","incorrect","gt_suspect"], rationale), overall: float, usage: Usage)`
   - `judge_verify(text, doc_type, data, ctx) -> JudgeVerdict`
   - `judge_grade(text, doc_type, data, ctx) -> JudgeGrade` (requires `ctx.eval_mode`; otherwise raises `ValueError`)
   - `ArbiterDecision(action: Literal["accept","accept_with_caveats","re_extract","escalate"], caveats: list[str])`
@@ -475,6 +488,9 @@
   - `test_judge_verify_has_no_gt_tool`: the request `tools` list has no `get_ground_truth`.
   - `test_arbiter_returns_decision`
   - `test_boss_reassign`
+  - `test_judge_uses_configured_model`: the judge LLM resolves `agents.judge.model`, not the specialist model, and the card flag `judge_same_model` is set when they match.
+  - `test_judge_grade_gt_suspect_allowed`: `FieldFinding.verdict` accepts `gt_suspect`.
+  - `test_judge_grades_classification`: `JudgeGrade.classification` has `verdict` and `rationale`.
   - `test_crewai_telemetry_disabled`: `os.environ["CREWAI_DISABLE_TELEMETRY"] == "true"` after `import mailroom_reloaded.agents`.
   - `@pytest.mark.live test_live_agent_tool_use`
 - [ ] **Step 2: Implement.** Set the env var in `mailroom_reloaded/__init__.py` before anything imports crewai.
@@ -644,13 +660,13 @@
 - Produces:
   - `BlindDoc(filename, doc_text, content_sha256)`. Frozen, with no label fields.
   - `GroundTruth(filename, expected, expected_subclass, fields: dict, cuad_clause_labels, maud_clause_labels, retry_expected, review_expected, expected_stage)`
-  - `load_split(revision="v9.2", split="test", *, local_dir: Path | None = None) -> tuple[list[BlindDoc], dict[str, GroundTruth]]`. It verifies `content_sha256` and raises `DatasetIntegrityError` on a mismatch.
+  - `load_split(revision="ed7576b6", split="test", *, local_dir: Path | None = None) -> tuple[list[BlindDoc], dict[str, GroundTruth]]`. It verifies `content_sha256` and raises `DatasetIntegrityError` on a mismatch.
   - `sample(docs, gts, *, per_class: int, seed=42, classes=None) -> list[BlindDoc]`. It is nested: the n=20 draw is a prefix of the n=50 draw.
   - `EvalContext(run_id, ground_truth: dict[str, GroundTruth])`
   - `run_eval(cfg: EvalConfig) -> run_id`
   - `EvalConfig(revision, per_class, seed, classes, concurrency, posture_label, gpu, gpus, prompt_set, merger_mode, mode: Literal["pipeline","specialist_cell"])`
 
-  `pipeline` mode runs the full flow. `specialist_cell` mode feeds GT-class docs straight to `extract`, as SAND-37 does. Per-document records go to the SQLite table `eval_docs`: `run_id`, `filename`, `stage` outputs, `latency`, `tokens`, `calls`, `error_kind`, `schema_valid`, `gate features` and `judge grade`. A `grade` step runs after archive only when an `eval_ctx` is present.
+  Runs use `MailroomFlow.kickoff_async` under `asyncio.Semaphore(concurrency)`. `EvalConfig` also has `judge_sample_rate: float = 1.0` (seeded). `pipeline` mode runs the full flow. `specialist_cell` mode feeds GT-class docs straight to `extract`, as SAND-37 does. Per-document records go to the SQLite table `eval_docs`: `run_id`, `filename`, `stage` outputs, `latency`, `tokens`, `calls`, `error_kind`, `schema_valid`, `gate features` and `judge grade`. A `grade` step runs after archive only when an `eval_ctx` is present.
 
 **Steps:**
 
@@ -658,6 +674,8 @@
   - `test_blind_doc_has_no_label_attrs`
   - `test_sha_mismatch_raises`
   - `test_nested_sampling`
+  - `test_concurrency_bounded`: with concurrency 4, at most 4 FakeOpenAI requests are in flight at once.
+  - `test_judge_sample_rate`: rate 0.5 with seed 42 grades a deterministic half.
   - `test_eval_run_records_rows` uses the mini dataset (10 docs, 2 per class) with the mock provider.
   - `test_no_gt_leak_in_agent_requests`: `assert_no_gt` over every FakeOpenAI request except the judge's `get_ground_truth` tool result.
 - [ ] **Step 2: Implement.** Use `datasets.load_dataset(REPO, "default"|"ground_truth", revision=...)` behind the `eval` extra. `local_dir` reads JSONL for tests and offline runs.
@@ -681,7 +699,7 @@
   - `render_card_md(card) -> str`
   - `build_master(run_ids) -> (dict, str)`, with the tables of `S/reports/SAND-37/SAND-37-MASTER-SCORE-COST-CARD.md`: posture table, serving efficiency, quality and cost by specialist, cost.
 
-  Micro F1 pools TP/FP/FN across documents. F2 is `fbeta(P, R, beta=2)` on pooled counts. `judge_scorer_agreement` is the share of fields where the judge verdict ∈ {correct, partial} iff the field score ≥ 0.5.
+  TP/FP/FN follow the table in spec §8, with `match_threshold` 0.5. `sorter_kpis` also returns `by_path` (`SUBCLASS_ONLY`/`FULL`), `resort_rate` and `ece`. `gate_kpis(rows)` returns the decision mix and agreement with `retry_expected`/`review_expected`/`expected_stage`. `cell_cost` takes `pricing: Literal["gpu_hour","per_token"]`; per-token pricing uses `cost_models` in the taxonomy. Judge tokens and cost go in a separate `judge` block. Micro F1 pools TP/FP/FN across documents. F2 is `fbeta(P, R, beta=2)` on pooled counts. `judge_scorer_agreement` is the share of fields where the judge verdict ∈ {correct, partial} iff the field score ≥ 0.5.
 
 **Steps:**
 
@@ -689,6 +707,9 @@
   - `test_sorter_kpis_exact_vs_primary`: 4 rows = (right/right, right/wrong-sub, wrong/right-sub-name, wrong/wrong). Expected `exact_match 0.25`, `primary_accuracy 0.5`, `subclass_accuracy 0.5`, `subclass_accuracy_given_primary 0.5`.
   - `test_micro_vs_mean_f1`: doc A has TP=9, FN=1; doc B has TP=0, FP=1. Expected micro F1 = 2·9/(2·9+1+1) = 0.9; mean doc F1 = (0.947+0)/2.
   - `test_f2_weights_recall`
+  - `test_wrong_value_counts_fp_and_fn`: a ground-truth value "ACME" predicted as "Globex" gives tp=0, fp=1, fn=1.
+  - `test_sorter_kpis_by_path`
+  - `test_per_token_cost`: 1M prompt tokens + 1M completion tokens at $0.2/$0.6 cost $0.80.
   - `test_telemetry_delta_from_fixtures`: the fixture texts are real Prometheus exposition. Prefix hit rate = Δhits/Δqueries, TTFT mean = Δsum/Δcount.
   - `test_cost_matches_sand37_cell`: wall 37.8 s, 1 GPU, $0.80 gives busy $0.0084. With ok 20/20, $/ok doc 0.00042.
   - `test_token_split_recovers_known_I`: synthetic rows with I=2702, r=4.46 recover I ± 1%.
@@ -714,6 +735,8 @@
   - traces: otlp → batch → `otlphttp/phoenix` (`http://phoenix:6006/v1/traces`)
   - metrics: otlp + `prometheus` receiver (scrape `vllm:8001/metrics`, `dcgm-exporter:9400/metrics` and each URL in `VLLM_METRICS_URLS`) + `docker_stats` → batch → `prometheus` exporter `:8889`
 - Prometheus scrapes `otel-collector:8889`.
+- Volumes: `mailroom_data`, `hf_cache` (shared by `vllm` and `app`), `llamafile_models`, `phoenix_data`, `prometheus_data`, `grafana_data`.
+- The Phoenix project comes from resource attribute `openinference.project.name`: `mailroom-live` for live runs, `eval-<run_id>` for eval runs (set in `setup_tracing(project=...)`, Task 18). Grafana dashboards take a `run_id` variable.
 - Dashboards:
   - **Pipeline:** documents by status, node p95, gate decisions, BERT route mix, queue depth, cost.
   - **Serving & GPU:** TTFT, TPOT, running/waiting requests, KV usage, preemptions, prefix-cache hit rate, GPU util/memory/power per GPU, tokens/s per replica.
@@ -760,6 +783,31 @@
 - [ ] **Step 3: Run the tests.** Run `uv run pytest tests/deploy/test_modal_config.py -v`. Expected: PASS.
 - [ ] **Step 4: Commit.** `git commit -am "feat: Modal vLLM deploy with metrics and posture runbook"`
 
+### Task 24: Behavioural conformance suite
+
+**Files:**
+- Create: `src/mailroom_reloaded/eval/conformance.py`, `tests/eval/test_conformance.py`
+- Modify: `src/mailroom_reloaded/cli.py` (`mailroom conformance --provider X`)
+
+**Interfaces:**
+- Consumes: Tasks 11, 12, 14, 20.
+- Produces:
+  - `Invariant(role, name, check: Callable[[RoleRun], bool])`
+  - `INVARIANTS`: the spec §11 conformance table.
+  - `run_conformance(provider, *, per_class=2, revision="ed7576b6") -> ConformanceCard(provider, model, roles: dict[str, RoleStats(tool_call_success_rate, invariant_pass_rate, failures: list[str])])`. Fixtures come from the train split. Results are written as JSON and Markdown under `runs/conformance/`.
+
+**Steps:**
+
+- [ ] **Step 1: Write the failing tests** (FakeOpenAI scripted per role).
+  - `test_sorter_subclass_only_doc_type_change_without_flag_fails_invariant`
+  - `test_specialist_extra_key_fails_invariant`
+  - `test_judge_live_mode_gt_tool_call_fails_invariant`
+  - `test_card_rates`: 3 of 4 tool calls succeed, so `tool_call_success_rate == 0.75`.
+- [ ] **Step 2: Implement.**
+- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_conformance.py -v`. Expected: PASS.
+- [ ] **Step 4: Run live.** Run `uv run mailroom conformance --provider llamafile` (and later `vllm`). Expected: a card is written; record the pass rates in the PR description.
+- [ ] **Step 5: Commit.** `git commit -am "feat: behavioural conformance suite for all LLM roles"`
+
 ---
 
 ## Self-review notes
@@ -777,7 +825,7 @@
   | §8 metrics / cards / telemetry | 18, 20, 21 |
   | §9 Docker / Modal | 22, 23 |
   | §10 error handling | 7, 9, 12, 16, 17 |
-  | §11 testing | per task |
+  | §11 testing | per task, plus 24 (conformance) |
 
 - **Type names used across tasks:** `Handoff`/`SortMode` (10 → 11, 16), `SortResult`/`ExtractResult` (11, 12 → 13, 16), `GateFeatures`/`GateDecision` (13 → 16), `ToolContext` (8 → 14, 16, 20), `EvalContext` (20 → 16), `Usage`/`LLMResult` (7 → all callers), `MailroomState` (16 → 15, 17, 19).
 - **Open item:** the "Jev" model named in the request was not found in any repo or doc. `RouteGate` is the slot for it; Task 13 ships the deterministic default.
