@@ -21,7 +21,7 @@ uv run mailroom serve --watch                              # API + embedded watc
 - `drain_once` lists processable inbox files (skips dotfiles and `*.meta`),
   records `queue_depth`, and processes them serially or through a bounded
   `ThreadPoolExecutor` (`watcher.py:48-53`, `watcher.py:163-191`). `--concurrency`
-  is clamped to 1–32 (`cli.py:74`, `watcher.py:114`).
+  is clamped to 1–32 (`cli.py` `watch`, `watcher.py:114`).
 - `watchdog` observers wake the poller on create/modify/move; a 1 s poll is the
   fallback (`watcher.py:40`, `watcher.py:226-258`).
 - On startup `resume_processing` re-runs every manifest still in status

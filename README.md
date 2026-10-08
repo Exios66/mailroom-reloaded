@@ -95,16 +95,16 @@ Console script `mailroom` (`pyproject.toml:51-52`), defined in
 
 | Command | Key flags (defaults) | What it does |
 | --- | --- | --- |
-| `mailroom serve` | `--host`, `--port`, `--watch/--no-watch` (on) | Runs the FastAPI app + `/ui` under uvicorn, optionally with the embedded watcher (`cli.py:50-68`). |
-| `mailroom watch` | `--worker-id cli-watcher`, `--concurrency 1` (1–32) | Drains `inbox/` forever as a standalone watcher (`cli.py:71-81`). |
-| `mailroom run <file>` | `--worker-id cli` | Runs one document through the pipeline, prints `doc_id`/`status`/`doc_type`/`route_trail` (`cli.py:84-102`). |
-| `mailroom eval` | see below | Runs an evaluation posture, prints its `run_id` (`cli.py:105-144`). |
-| `mailroom train-gate` | `--rows` (required), `--out models/route_gate.json`, `--calibration` | Fits the route gate or temperature calibration from JSONL rows (`cli.py:147-165`). |
+| `mailroom serve` | `--host`, `--port`, `--watch/--no-watch` (on) | Runs the FastAPI app + `/ui` under uvicorn, optionally with the embedded watcher (`cli.py` `serve`). |
+| `mailroom watch` | `--worker-id cli-watcher`, `--concurrency 1` (1–32) | Drains `inbox/` forever as a standalone watcher (`cli.py` `watch`). |
+| `mailroom run <file>` | `--worker-id cli` | Runs one document through the pipeline, prints `doc_id`/`status`/`doc_type`/`route_trail` (`cli.py` `run`). |
+| `mailroom eval` | see below | Runs an evaluation posture, prints its `run_id` (`cli.py` `eval`). |
+| `mailroom train-gate` | `--rows` (required), `--out models/route_gate.json`, `--calibration` | Fits the route gate or temperature calibration from JSONL rows (`cli.py` `train_gate_command`). |
 | `mailroom card` | `--run-id` (repeatable), `--doc-type`, `--master`, `--out runs` | Writes a `mailroom.card/v1` JSON+MD per run (or the aggregated SAND-37 master card) and echoes the Markdown path (`cli.py` `card`). |
 | `mailroom conformance` | `--provider`, `--per-class 2`, `--revision ed7576b6`, `--split train`, `--local-dir`, `--out runs/conformance` | Runs the spec §11 behavioural conformance suite and writes a JSON+MD card (`cli.py` `conformance`). |
 | `mailroom gmail auth\|poll\|watch` | `--limit`, `--process/--no-process`, `--worker-id` | Gmail attachment intake; needs the `gmail` extra. See [docs/gmail-intake.md](docs/gmail-intake.md). |
 
-`mailroom eval` flags (`cli.py:105-122`): `--revision ed7576b6`, `--per-class 20`,
+`mailroom eval` flags (`cli.py` `eval`): `--revision ed7576b6`, `--per-class 20`,
 `--seed 42`, `--classes ""`, `--concurrency 8`, `--posture-label pipeline`,
 `--gpu L4`, `--gpus 1`, `--prompt-set frozen_v1`, `--merger-mode frozen`,
 `--mode pipeline|specialist_cell`, `--judge-sample-rate 1.0`, `--split test`,

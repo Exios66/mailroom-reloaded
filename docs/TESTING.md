@@ -17,7 +17,7 @@ uv run pytest -q
 `addopts = "-m 'not live'"`, and registers the `live` marker. So the default run
 **deselects every `@pytest.mark.live` test**; you do not need `-m "not live"`
 yourself. The scoring-parity test is additionally skipped unless the pinned
-upstream package is installed (`tests/scoring/test_parity.py:7` uses
+upstream package is installed (`tests/scoring/test_parity.py:8` uses
 `pytest.importorskip("llm_dojo_scoring")`, provided by the `parity` extra,
 `pyproject.toml:49`).
 
@@ -100,7 +100,7 @@ see `src/mailroom_reloaded/scoring/PARITY.md`).
 When the pinned `llm-dojo-scoring` is installed
 (`uv sync --extra parity`), `tests/scoring/test_parity.py` asserts the vendored
 `scoring/` subset reproduces upstream `score_extraction` on ten fixture pairs
-(`tests/scoring/test_parity.py:7`, `tests/scoring/test_parity.py:15-25`).
+(`tests/scoring/test_parity.py:8`, `tests/scoring/test_parity.py:15-25`).
 Without the extra, the whole file is skipped.
 
 ## Dev-server suite
