@@ -353,6 +353,55 @@ doc_classes:
       keywords: entity_list:name
       claim_checklist: entity_list:free_text
 
+# Required-field taxonomy for extraction-confidence coverage (spec §6):
+# `required_field_coverage` is the share of a class's required fields that the
+# extraction left non-empty. Derived from the ground-truth `gt_presence`
+# non-empty ("populated") rate on the TRAIN split of
+# `Lucius-Morningstar/mailroom-dataset` @ revision `ed7576b6`
+# (`ground_truth` config), selecting fields at presence >= 0.8. Entries are
+# extraction-schema field names (schemas/extraction.py) so `_coverage()` can
+# index the predicted payload directly.
+#
+# Presence rates on train (gt_fields key -> extraction schema field):
+#   contract          cuad_clause_labels 0.843 -> cuad_clauses
+#   merger_agreement  maud_clause_labels 1.000 -> maud_clauses
+#   corporate_record  intent / subject_matter / keywords         1.000
+#   correspondence    intent / subject_matter / keywords         1.000
+#   insurance_claim   listed fields 1.000 (supporting_documents 0.995)
+# Below the 0.8 cut (excluded): insurance_claim.adjuster 0.136,
+# insurance_claim.denial_reasons 0.034, and any schema field with no
+# ground-truth surface on train (e.g. contract.parties,
+# corporate_record.entity_name). Removing this block re-enables the
+# specialists.py fallback (all schema fields except reasoning/confidence).
+required_fields:
+  contract:
+    - cuad_clauses
+  merger_agreement:
+    - maud_clauses
+  corporate_record:
+    - intent
+    - subject_matter
+    - keywords
+  correspondence:
+    - intent
+    - subject_matter
+    - keywords
+  insurance_claim:
+    - claim_number
+    - policy_number
+    - insurer
+    - insured_party
+    - claim_type
+    - date_of_loss
+    - date_filed
+    - claimed_amount
+    - damages_description
+    - coverage_determination
+    - supporting_documents
+    - intent
+    - subject_matter
+    - keywords
+
 file_extensions:
   - .txt
   - .pdf
