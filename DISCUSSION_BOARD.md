@@ -23,15 +23,23 @@ this is a ledger, not a governance board.
 
 ---
 
-### [Jev gate + docs + CodeRabbit sync] Opt-in Jev route gate landed on PR #5 — orchestrator
+### [Jev gate + docs] Opt-in Jev probabilistic scorer / route gate landed on PR #5 — orchestrator
 - **Status:** done (Task 24 Step 4 live run still env-blocked)
+- **Sources (issue #8):** hosted Jev `typesafe/jev-1.13` via OpenRouter Decisions API
+  (`OPENROUTER_API_KEY`, 32k ctx) and TypeSafe native `/v1/systemone` (`TYPESAFE_API_KEY`,
+  64k ctx); offline `alibiserikbay/JevK5` (4.2B `qwen3_5_text`, read letter logits / 1.22)
+  via a local server.
 - **Files:** `agents/jev.py`, `eval/jev_calibration.py`, `agents/gate.py`, `cli.py` (`jev`),
-  `settings.py`, `config/taxonomy.yaml`, `docs/JEV.md`, README/ARCHITECTURE/CONFIGURATION/EVALUATION.
-- **Evidence:** `uv run pytest -q` → 582 passed, 1 skipped, 2 deselected; `uv run ruff check .` clean
-  (after rebasing onto CodeRabbit `2bdebcf`, `9f34df0`).
-- **Commits:** `24ae367` Jev scorer + gate; docs commit; pushed fast-forward to `origin`.
-- **Notes:** Jev is off by default and needs `models/jev_calibration.json`; `verify_threshold`
-  is fit but not yet consumed by `JevGate`; shipped calibration does not transfer (issue #8).
+  `settings.py`, `config/taxonomy.yaml`, `.env.example`, `docs/JEV.md`,
+  README/ARCHITECTURE/CONFIGURATION/EVALUATION.
+- **Evidence:** `uv run pytest -q` → 584 passed, 1 skipped, 2 deselected;
+  `uv run ruff check .` clean; Jev tests proven no-network (fake transport).
+- **Commits:** `6691524` Jev scorer + gate; `007a0de` docs; `6d20939` consume
+  `verify_threshold`; rebased over CodeRabbit `2bdebcf` / `9f34df0`.
+- **Notes:** Jev is off by default and needs `models/jev_calibration.json`. `JevGate` now uses
+  the official three-tier pattern: `<verify` → `human_review`; `verify <= c < accept` → `verify`
+  (never downgrading a Jev escalation choice); `>= accept` → the chosen action. Shipped
+  calibration does not transfer (issue #8).
 
 ---
 
