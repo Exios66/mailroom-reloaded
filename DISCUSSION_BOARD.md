@@ -23,15 +23,27 @@ this is a ledger, not a governance board.
 
 ---
 
-### [F1] `required_fields` taxonomy block missing — lucius (HF dataset)
-- **Status:** needs_attention / in_progress
-- **Finding:** `extraction_confidence` reads `taxonomy.raw["required_fields"][doc_type]`
-  (`agents/specialists.py`) but `config/taxonomy.yaml` has no such block, so the
-  coverage denominator silently falls back to all schema fields. Spec §6 requires
-  the per-class lists derived from train-split GT presence ≥ 0.8.
-- **Owner:** `lucius` — derive from `Lucius-Morningstar/mailroom-dataset` @ `ed7576b6`
-  (train split, `ground_truth` config); do not fabricate values.
-- **Commit:** <pending>
+### [Task 19 + HF audit] API/CLI/UI + ModernBERT & dataset verification — subagent + lucius
+- **Status:** done (with three HF-derived fixes queued)
+- **Files:** `src/mailroom_reloaded/api/*`, `cli.py`, `tests/api/*`;
+  `config/taxonomy.yaml` (`required_fields`), `tests/agents/test_specialists.py`.
+- **Evidence:** `uv run pytest tests/api -v` → 7 passed; `uv run pytest -q` → 297 passed, 3 skipped.
+- **Commits:** `6d7f2cc` /v1 API, runs UI and CLI; `d76b12a` dataset-derived `required_fields`.
+- **HF verification (lucius):**
+  - Model `Lucius-Morningstar/mailroom-modernbert-classifier` @ `ac8948c0`
+    (tag `m9a-local-20260927-014429`); 8192 context; 5 trainable doc classes.
+  - Dataset `mailroom-dataset` @ `ed7576b6`; training/eval = `mailroom-modernbert-training`
+    `documents` (2680/299/**323**); test split overlaps training `content_sha256` 323/323.
+  - **F1 fixed:** `required_fields` derived from train-split GT presence ≥ 0.8.
+  - **BERT-1 (open, harness, blocks feature):** `ingest/bert.py` calls
+    `classify_document(text)`; real signature is `classify_document(bundle, title, doc_text)`.
+    Use `classify_document_default(text, filename=...)`.
+  - **BERT-3 (open):** `no_model`/`bundle_missing` markers only reachable via
+    `classify_document_default`; the current path maps missing bundle → `error`.
+  - **HF-DS-3 (open, harness):** `eval/dataset.py` reads `content_sha256` off the
+    blind row (absent; it lives in `ground_truth`) and GT `fields` (actual column is
+    `gt_fields` JSON) → live eval would drop all field GT.
+  - **§5 gap:** the BERT-manifest `content_sha256` overlap check is unimplemented.
 
 ---
 
