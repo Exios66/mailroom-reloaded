@@ -188,6 +188,93 @@ def conformance(ctx: typer.Context) -> None:
     raise typer.Exit(code=1)
 
 
+gmail_app = typer.Typer(
+    name="gmail",
+    help="Gmail attachment intake (requires the optional 'gmail' extra).",
+    no_args_is_help=True,
+)
+app.add_typer(gmail_app, name="gmail")
+
+
+def _gmail_failure(exc: Exception) -> typer.Exit:
+    """Print a Gmail command failure and return a non-zero exit."""
+    typer.echo(f"mailroom gmail: {exc}", err=True)
+    return typer.Exit(code=1)
+
+
+def _drain_inbox(worker_id: str) -> int:
+    from mailroom_reloaded.settings import get_settings
+    from mailroom_reloaded.storage.bins import Bins
+    from mailroom_reloaded.watcher import Watcher
+
+    return Watcher(Bins(get_settings().base_dir), worker_id, 1).drain_once()
+
+
+@gmail_app.command()
+def auth() -> None:
+    """Run the OAuth installed-app flow and cache a token under the data dir."""
+    from mailroom_reloaded.intake import gmail as gmail_intake
+
+    try:
+        intake = gmail_intake.GmailIntake.from_env()
+        intake.authenticate()
+    except (gmail_intake.GmailNotInstalled, gmail_intake.GmailAuthError) as exc:
+        raise _gmail_failure(exc) from exc
+    typer.echo(f"Authenticated. Token cached at {intake.config.token_path}")
+
+
+@gmail_app.command()
+def poll(
+    limit: int = typer.Option(25, "--limit", min=1, max=200),
+    process: bool = typer.Option(
+        False, "--process/--no-process", help="Drain the inbox once after importing."
+    ),
+    worker_id: str = typer.Option("gmail-cli", "--worker-id"),
+) -> None:
+    """Fetch new Gmail attachments into ``inbox/`` and print the created doc_ids."""
+    from mailroom_reloaded.intake import gmail as gmail_intake
+
+    try:
+        doc_ids = gmail_intake.poll_and_ingest(limit=limit)
+    except (gmail_intake.GmailNotInstalled, gmail_intake.GmailAuthError) as exc:
+        raise _gmail_failure(exc) from exc
+    summary: dict = {"doc_ids": doc_ids, "count": len(doc_ids)}
+    if process and doc_ids:
+        summary["processed"] = _drain_inbox(worker_id)
+    typer.echo(json.dumps(summary))
+
+
+@gmail_app.command("watch")
+def gmail_watch(
+    interval: float = typer.Option(30.0, "--interval", min=1.0),
+    limit: int = typer.Option(25, "--limit", min=1, max=200),
+    process: bool = typer.Option(
+        False, "--process/--no-process", help="Drain the inbox after each poll."
+    ),
+    worker_id: str = typer.Option("gmail-cli", "--worker-id"),
+) -> None:
+    """Poll Gmail on an interval until interrupted (Ctrl-C)."""
+    import time
+
+    from mailroom_reloaded.intake import gmail as gmail_intake
+
+    typer.echo(f"Polling Gmail every {interval:g}s (Ctrl-C to stop)...")
+    try:
+        while True:
+            try:
+                doc_ids = gmail_intake.poll_and_ingest(limit=limit)
+            except (gmail_intake.GmailNotInstalled, gmail_intake.GmailAuthError) as exc:
+                raise _gmail_failure(exc) from exc
+            if doc_ids:
+                summary: dict = {"doc_ids": doc_ids, "count": len(doc_ids)}
+                if process:
+                    summary["processed"] = _drain_inbox(worker_id)
+                typer.echo(json.dumps(summary))
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        typer.echo("Stopped.")
+
+
 def main() -> None:
     """Console-script entry point (``mailroom = mailroom_reloaded.cli:main``)."""
     app()

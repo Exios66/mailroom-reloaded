@@ -32,18 +32,21 @@ from typing import Literal
 import structlog
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     FastAPI,
     File,
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from mailroom_reloaded.intake import gmail as gmail_intake
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.settings import get_settings
 from mailroom_reloaded.storage import audit_log, catalog
@@ -273,6 +276,61 @@ def _eval_runs() -> list[dict]:
     except Exception:  # noqa: BLE001 - table absent until the first eval run
         return []
     return [{"run_id": r[0], "documents": int(r[1])} for r in rows]
+
+
+# --------------------------------------------------------------------------- intake
+
+
+def _gmail_poll_task() -> None:
+    """Background fetch+ingest kicked off by a Gmail Pub/Sub push.
+
+    Errors are swallowed and logged: a webhook must acknowledge even when the
+    mailbox is temporarily unreachable, and Pub/Sub already retries.
+    """
+    try:
+        created = gmail_intake.poll_and_ingest()
+        logger.info("gmail_push_ingested", count=len(created))
+    except Exception:
+        logger.warning("gmail_push_ingest_failed", exc_info=True)
+
+
+@api.post("/intake/gmail", status_code=204)
+async def gmail_push_endpoint(
+    request: Request, background: BackgroundTasks
+) -> Response:
+    """Accept a Gmail Pub/Sub push and ingest in the background.
+
+    The envelope's ``message.data`` is Base64URL-encoded JSON; the route
+    validates it, schedules the fetch, and returns 204/200 immediately so the
+    Pub/Sub push is acknowledged. Same bearer guard as every other ``/v1`` route.
+    """
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    try:
+        notification = gmail_intake.decode_pubsub_push(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info(
+        "gmail_push_received",
+        email_address=notification.email_address,
+        history_id=notification.history_id,
+    )
+    background.add_task(_gmail_poll_task)
+    return Response(status_code=204)
+
+
+@api.post("/intake/gmail/poll")
+def gmail_poll_endpoint(limit: int = Query(default=25, ge=1, le=200)) -> dict:
+    """On-demand demo upload: fetch new Gmail attachments, return created doc_ids."""
+    try:
+        doc_ids = gmail_intake.poll_and_ingest(limit=limit)
+    except gmail_intake.GmailNotInstalled as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except gmail_intake.GmailAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return {"doc_ids": doc_ids, "count": len(doc_ids)}
 
 
 # --------------------------------------------------------------------------- app
