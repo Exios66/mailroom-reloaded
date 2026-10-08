@@ -149,10 +149,13 @@ jev:
   # (openrouter -> openrouter.ai/api/alpha/decisions, typesafe -> api.typesafe.ai,
   #  local -> http://127.0.0.1:8090/v1/systemone).
   base_url: ""
-  # Sampling temperature sent with each decision request.
+  # Sampling temperature for the local JevK5 transport only; NOT sent to the
+  # hosted OpenRouter/TypeSafe requests (they expose no temperature field).
   temperature: 1.0
-  # Minimum Jev confidence for its chosen action to be trusted; below this (or
-  # when the noul "escalate?" answer says escalate) the gate maps to human_review.
+  # Upper edge of the uncertainty band: at/above this Jev's chosen action is
+  # trusted. Between the fitted verify_threshold (models/jev_calibration.json)
+  # and this the gate maps to `verify`; below verify (or when the noul
+  # "escalate?" answer says escalate) it maps to `human_review`.
   accept_threshold: 0.8
   # Per-request HTTP timeout in seconds.
   timeout_s: 10.0

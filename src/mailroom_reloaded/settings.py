@@ -180,12 +180,17 @@ class JevConfig:
     Resolution order per field is ``MAILROOM_JEV_<FIELD>`` -> ``JEV_<FIELD>`` ->
     the taxonomy ``jev:`` block -> a default. ``model``/``base_url`` default per
     provider; the numeric fields use the module defaults.
+
+    ``temperature`` is reserved for the **local** transport (the local JevK5
+    runtime uses 1.22): it is NOT included in hosted OpenRouter/TypeSafe
+    requests, whose APIs expose no such field.
     """
 
     provider: Literal["off", "openrouter", "typesafe", "local"]
     model: str
     base_url: str
     api_key: str | None
+    # Reserved for the local JevK5 transport; NOT sent in hosted requests.
     temperature: float
     accept_threshold: float
     timeout_s: float
@@ -226,17 +231,23 @@ def _jev_scalar(
     return cast(value)
 
 
-def _jev_api_key(settings: Settings) -> str | None:
-    """Resolve the API key.
+def _jev_api_key(settings: Settings, provider: str) -> str | None:
+    """Resolve the API key with provider-specific precedence.
 
-    Order: ``MAILROOM_JEV_API_KEY`` -> ``JEV_API_KEY`` -> ``TYPESAFE_API_KEY`` ->
-    ``OPENROUTER_API_KEY`` -> ``settings.openrouter_api_key``. It may be ``None``
-    for the ``local`` provider (no auth header is then sent).
+    ``MAILROOM_JEV_API_KEY`` -> ``JEV_API_KEY`` always win. Otherwise the
+    provider's own variable is preferred (``openrouter`` -> ``OPENROUTER_API_KEY``;
+    ``typesafe`` -> ``TYPESAFE_API_KEY``), then the other provider's variable,
+    then ``settings.openrouter_api_key``. It may be ``None`` for the ``local``
+    provider (no auth header is then sent).
     """
     value = _jev_env("API_KEY")
     if value:
         return value
-    for key in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"):
+    order = {
+        "openrouter": ("OPENROUTER_API_KEY", "TYPESAFE_API_KEY"),
+        "typesafe": ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"),
+    }.get(provider, ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"))
+    for key in order:
         value = os.environ.get(key)
         if value:
             return value
@@ -248,7 +259,8 @@ def jev_config() -> JevConfig:
 
     Not cached on purpose: env changes (tests, CLI overrides) take effect
     immediately. Unknown providers collapse to ``off`` so the default pipeline
-    behaviour is unchanged.
+    behaviour is unchanged. ``temperature`` is reserved for the local transport
+    and is not sent to hosted endpoints.
     """
     taxonomy = dict(load_taxonomy().raw.get("jev") or {})
     provider = (
@@ -261,7 +273,7 @@ def jev_config() -> JevConfig:
         provider=provider,  # type: ignore[arg-type]
         model=_jev_field("MODEL", taxonomy) or defaults["model"],
         base_url=_jev_field("BASE_URL", taxonomy) or defaults["base_url"],
-        api_key=_jev_api_key(get_settings()),
+        api_key=_jev_api_key(get_settings(), provider),
         temperature=_jev_scalar("TEMPERATURE", taxonomy, _JEV_DEFAULTS["temperature"], float),
         accept_threshold=_jev_scalar(
             "ACCEPT_THRESHOLD", taxonomy, _JEV_DEFAULTS["accept_threshold"], float

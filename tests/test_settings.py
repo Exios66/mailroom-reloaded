@@ -175,3 +175,27 @@ def test_jev_config_api_key_order(monkeypatch):
     assert jev_config().api_key == "jv"
     monkeypatch.setenv("MAILROOM_JEV_API_KEY", "mjv")
     assert jev_config().api_key == "mjv"
+
+
+@pytest.mark.parametrize(
+    "provider,expected",
+    [("openrouter", "or"), ("typesafe", "ts")],
+)
+def test_jev_config_api_key_prefers_provider_key(monkeypatch, provider, expected):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", provider)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts")
+
+    assert jev_config().api_key == expected
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "typesafe"])
+def test_jev_config_jev_api_key_overrides_provider_key(monkeypatch, provider):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", provider)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts")
+    monkeypatch.setenv("JEV_API_KEY", "jv")
+
+    assert jev_config().api_key == "jv"

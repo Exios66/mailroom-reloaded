@@ -9,10 +9,12 @@ The client posts a single envelope to the configured endpoint::
     {"model": <cfg.model>, "state": <state>, "questions": {name: question}}
 
 Each question is built by :func:`choice`, :func:`noul` or :func:`score`, which
-return ``(name, {"type", "instructions", "criteria"})``. ``noul`` normalizes a
-missing ``criteria`` to an empty mapping. The response is parsed from an
-``answers`` mapping (keyed by question name) or an ``answers`` list of objects
-carrying a ``name``/``question``/``id`` field:
+return ``(name, {"type", "instructions", "criteria"})``. ``noul`` omits the
+``criteria`` key entirely when none is supplied: the OpenRouter Decisions
+``noul`` schema requires ``criteria`` to hold ``true``/``false`` when present,
+and TypeSafe native omits it. The response is parsed from an ``answers``
+mapping (keyed by question name) or an ``answers`` list of objects carrying a
+``name``/``question``/``id`` field:
 
 * choice: ``{"type": "choice", "choice": str, "probabilities": {...},
   "confidence": float}`` — when ``confidence`` is absent it defaults to the
@@ -28,6 +30,7 @@ raises :class:`JevError` immediately.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -68,6 +71,8 @@ __all__ = [
 # Probability at which the noul ("escalate to a human?") answer maps to review.
 _NOUL_ESCALATE = 0.5
 
+logger = logging.getLogger(__name__)
+
 
 class JevError(RuntimeError):
     """Raised when Jev returns a non-2xx response after retries are exhausted."""
@@ -97,12 +102,16 @@ def choice(
 def noul(
     name: str, instructions: str, criteria: Mapping[str, str] | None = None
 ) -> tuple[str, dict[str, Any]]:
-    """Build a ``noul`` question (missing criteria normalizes to an empty mapping)."""
-    return name, {
-        "type": "noul",
-        "instructions": instructions,
-        "criteria": dict(criteria or {}),
-    }
+    """Build a ``noul`` question.
+
+    ``criteria`` is omitted entirely when none is supplied: the hosted schema
+    rejects an empty/none ``criteria`` (it must carry ``true``/``false`` when
+    present) while TypeSafe native omits it.
+    """
+    question: dict[str, Any] = {"type": "noul", "instructions": instructions}
+    if criteria:
+        question["criteria"] = dict(criteria)
+    return name, question
 
 
 def score(
@@ -388,9 +397,12 @@ class JevGate:
 def load_jev_gate(taxonomy: Taxonomy | None = None) -> RouteGate | None:
     """Return a :class:`JevGate` when enabled and calibrated, else ``None``.
 
-    Requires ``jev_config().enabled`` and a readable
-    ``<base_dir>/models/jev_calibration.json``. The default (Jev off) returns
-    ``None`` so ``load_gate`` keeps its existing learned/band behaviour.
+    Requires ``jev_config().enabled`` and a valid
+    ``<base_dir>/models/jev_calibration.json``. A missing, corrupt or
+    invariant-violating calibration is ignored (a warning is logged) so the
+    deterministic band gate is used instead of crashing the document run. The
+    default (Jev off) returns ``None`` so ``load_gate`` keeps its existing
+    learned/band behaviour.
     """
     cfg = jev_config()
     if not cfg.enabled:
@@ -398,5 +410,9 @@ def load_jev_gate(taxonomy: Taxonomy | None = None) -> RouteGate | None:
     path: Path = get_settings().base_dir / "models" / "jev_calibration.json"
     if not path.is_file():
         return None
-    calibration = load_jev_calibration(path)
+    try:
+        calibration = load_jev_calibration(path)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("ignoring unusable Jev calibration at %s: %s", path, exc)
+        return None
     return JevGate(BandGate(taxonomy or load_taxonomy()), JevClient(cfg), calibration)
