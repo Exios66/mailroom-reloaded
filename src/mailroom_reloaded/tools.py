@@ -51,7 +51,7 @@ class SearchParams(_Params):
 
 
 class GroundTruthParams(_Params):
-    doc_id: str
+    """No model-supplied arguments: the document id comes from the context."""
 
 
 @dataclass(frozen=True)
@@ -65,9 +65,15 @@ class ToolDef:
 
     def bind(self, ctx: ToolContext) -> ToolDef:
         """Return a copy whose ``fn(**params)`` is validated and closes over ``ctx``."""
-        raw = self.fn if not self.bound else None
-        if raw is None:
+        if self.bound:
             return self
+        raw = self.fn
+        if self.eval_only and not (ctx.eval_mode and ctx.ground_truth is not None):
+            return replace(
+                self,
+                fn=lambda **_: "error: unavailable outside evaluation mode",
+                bound=True,
+            )
 
         def call(**kwargs: Any) -> str:
             try:
@@ -150,7 +156,7 @@ def _search_source(ctx: ToolContext, query: str) -> str:
         i = low.find(ql, pos)
         if i < 0:
             break
-        start = max(last_end, i - (SNIPPET_CHARS - len(q)) // 2)
+        start = max(last_end, i - max(0, SNIPPET_CHARS - len(q)) // 2)
         end = min(len(text), start + SNIPPET_CHARS)
         snippets.append(text[start:end])
         last_end = end
@@ -158,10 +164,10 @@ def _search_source(ctx: ToolContext, query: str) -> str:
     return _dumps({"query": q, "snippets": snippets})
 
 
-def _get_ground_truth(ctx: ToolContext, doc_id: str) -> str:
+def _get_ground_truth(ctx: ToolContext) -> str:
     if ctx.ground_truth is None:
         return "error: ground truth unavailable"
-    return _dumps(ctx.ground_truth(doc_id))
+    return _dumps(ctx.ground_truth(ctx.doc_id))
 
 
 TOOLS: dict[str, ToolDef] = {

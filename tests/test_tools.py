@@ -57,7 +57,7 @@ def test_ground_truth_absent_outside_eval():
 def test_ground_truth_returns_json():
     ctx = _ctx(eval_mode=True, ground_truth=lambda d: {"id": d})
     t = {t.name: t for t in tools_for("judge", ctx)}["get_ground_truth"]
-    assert json.loads(t.fn(doc_id="d1")) == {"id": "d1"}
+    assert json.loads(t.fn()) == {"id": "d1"}
 
 
 def test_crewai_tool_runs():
@@ -98,3 +98,39 @@ def test_openai_spec_and_other_tools():
 
 def test_unknown_role_empty():
     assert tools_for("nobody", _ctx()) == []
+
+
+def test_crewai_ground_truth_gated_outside_eval():
+    gt = lambda d: {"secret": d}  # noqa: E731
+    for ctx in (
+        _ctx(eval_mode=False, ground_truth=gt),
+        _ctx(eval_mode=True, ground_truth=None),
+    ):
+        out = crewai_tool(TOOLS["get_ground_truth"], context=ctx).run()
+        assert "secret" not in out and "error" in out
+
+
+def test_ground_truth_uses_ctx_doc_id_only():
+    ctx = _ctx(doc_id="mine", eval_mode=True, ground_truth=lambda d: {"id": d})
+    t = {t.name: t for t in tools_for("judge", ctx)}["get_ground_truth"]
+    assert json.loads(t.fn()) == {"id": "mine"}
+    out = t.fn(doc_id="other")
+    assert out.startswith("error:") and "other" not in json.loads(t.fn()).values()
+
+
+def test_ctx_closure_distinct_contexts():
+    a = TOOLS["search_source"].bind(_ctx(doc_text="needle in A"))
+    b = TOOLS["search_source"].bind(_ctx(doc_text="nothing here"))
+    assert json.loads(a.fn(query="needle"))["snippets"]
+    assert json.loads(b.fn(query="needle"))["snippets"] == []
+
+
+def test_snippets_contain_query_and_long_query():
+    t = TOOLS["search_source"].bind(_ctx(doc_text="x" * 900 + "Needle" + "y" * 900))
+    for q in ("needle", "NEEDLE"):
+        for s in json.loads(t.fn(query=q))["snippets"]:
+            assert q.lower() in s.lower()
+    long_q = "z" * 500
+    t2 = TOOLS["search_source"].bind(_ctx(doc_text="a" + long_q + "b"))
+    snips = json.loads(t2.fn(query=long_q))["snippets"]
+    assert snips and len(snips[0]) <= 400 and snips[0].startswith("z")
