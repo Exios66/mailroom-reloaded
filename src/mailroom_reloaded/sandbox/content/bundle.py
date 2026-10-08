@@ -12,6 +12,11 @@ from mailroom_reloaded.sandbox.content.lock import ContentLock, verify_bundle
 
 
 def _open(path: Path):
+    """Return a streaming tar reader for a Zstandard bundle.
+
+    Raise RuntimeError if zstandard is unavailable; file, decompression, and
+    tar errors propagate. The caller must close the returned reader.
+    """
     try:
         import zstandard
     except ImportError as exc:  # pragma: no cover
@@ -21,6 +26,11 @@ def _open(path: Path):
 
 
 def read_content_json(bundle: Path | str) -> dict:
+    """Decode the first content.json member without extracting or verifying the bundle.
+
+    Raise ValueError if no matching member exists. File, archive, decompression,
+    and JSON decoding errors propagate, as does RuntimeError for missing zstandard.
+    """
     with _open(Path(bundle)) as tf:
         for m in tf:
             if m.name.lstrip("./") == "content.json":
@@ -31,7 +41,14 @@ def read_content_json(bundle: Path | str) -> dict:
 
 
 def extract_bundle(bundle: Path | str, dest: Path | str, lock: ContentLock | None = None) -> Path:
-    """Verify (when a lock is given) then safely extract into ``dest``."""
+    """Verify (when a lock is given) then safely extract into ``dest``.
+
+    Create directories, overwrite matching files, and return the resolved
+    destination. Only regular files and directories resolving inside ``dest``
+    are accepted; other members raise ValueError. Earlier writes remain on failure.
+    A digest mismatch raises LockError before extraction. File, archive, and
+    decompression errors propagate, as does RuntimeError for missing zstandard.
+    """
     if lock is not None:
         verify_bundle(bundle, lock)
     dest = Path(dest).resolve()
@@ -52,7 +69,13 @@ def extract_bundle(bundle: Path | str, dest: Path | str, lock: ContentLock | Non
 
 
 def fetch_url(url: str, out: Path | str, *, timeout: float = 60.0) -> Path:
-    """Optional download. Only reachable via ``pull --url --allow-network``."""
+    """Download to ``out``, overwriting it, and return its path.
+
+    Require an initial HTTPS URL or raise ValueError; redirects follow urllib's
+    policy. ``timeout`` is in seconds for blocking socket operations. The parent
+    directory must exist. Network and file errors propagate and may leave a
+    truncated output. CLI callers enforce ``--allow-network`` separately.
+    """
     if not url.startswith("https://"):
         raise ValueError("only https URLs are allowed")
     out = Path(out)

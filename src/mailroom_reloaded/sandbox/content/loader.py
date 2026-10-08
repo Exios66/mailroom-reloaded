@@ -26,7 +26,10 @@ SMOKE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "smoke"
 
 
 def schemas_dir() -> Path:
-    """Repo-root ``schemas/`` (dev checkout) or the copy shipped in the wheel."""
+    """Return repo-root ``schemas/`` (dev checkout) or the copy shipped in the wheel.
+
+    Raise FileNotFoundError if neither contains scenario.v2.json.
+    """
     here = Path(__file__).resolve()
     for cand in (here.parents[4] / "schemas", here.parents[1] / "schemas"):
         if (cand / "scenario.v2.json").is_file():
@@ -41,6 +44,7 @@ class ValidationReport:
 
     @property
     def ok(self) -> bool:
+        """Return whether no errors were collected, even if nothing was checked."""
         return not self.errors
 
 
@@ -57,6 +61,10 @@ class ContentSet:
 
 
 def _validator(name: str):
+    """Load a named schema as a Draft 2020-12 validator.
+
+    Missing jsonschema, schema file access, and JSON decoding errors propagate.
+    """
     import jsonschema
 
     schema = json.loads((schemas_dir() / name).read_text(encoding="utf-8"))
@@ -64,6 +72,7 @@ def _validator(name: str):
 
 
 def _check(v, obj: Any, label: str, rep: ValidationReport) -> None:
+    """Count one checked object and append labeled schema errors to ``rep``."""
     rep.checked += 1
     for e in sorted(v.iter_errors(obj), key=lambda e: list(e.path)):
         loc = "/".join(map(str, e.path)) or "<root>"
@@ -71,6 +80,12 @@ def _check(v, obj: Any, label: str, rep: ValidationReport) -> None:
 
 
 def _yaml_dir(d: Path, v, rep: ValidationReport, root: Path) -> dict[str, dict]:
+    """Load recursive .yaml files by stem, recording schema errors in ``rep``.
+
+    Return an empty mapping if ``d`` is absent. Duplicate stems retain the last
+    file in sorted path order, including invalid objects. File and YAML parsing
+    errors propagate; paths outside ``root`` raise ValueError when labeled.
+    """
     out: dict[str, dict] = {}
     for p in sorted(d.rglob("*.yaml")) if d.is_dir() else []:
         obj = yaml.safe_load(p.read_text(encoding="utf-8"))
@@ -80,6 +95,11 @@ def _yaml_dir(d: Path, v, rep: ValidationReport, root: Path) -> dict[str, dict]:
 
 
 def _verify_manifest(root: Path, manifest: dict, rep: ValidationReport) -> None:
+    """Append missing-file and digest errors for entries in manifest's ``files``.
+
+    Unlisted files are ignored and ``rep.checked`` is unchanged. Errors reading
+    existing files propagate as OSError.
+    """
     for rel, sha in manifest.get("files", {}).items():
         p = root / rel
         if not p.is_file():
@@ -89,8 +109,18 @@ def _verify_manifest(root: Path, manifest: dict, rep: ValidationReport) -> None:
 
 
 def load_content(root: Path | str = SMOKE_DIR, *, strict: bool = False) -> ContentSet:
-    """Load ``root``. Raises CompatError on incompatible metadata; schema and
-    manifest problems are collected in ``report`` (raised as ValueError if ``strict``)."""
+    """Load a content directory or smoke export, defaulting to committed smoke fixtures.
+
+    Prefer content.json over manifest.json when both exist. Return parsed data
+    and a report of schema errors, smoke manifest digest/missing-file errors,
+    and a missing or empty registry. ``strict`` raises ValueError for those
+    reported errors; otherwise invalid objects remain in the returned data.
+
+    Incompatible metadata raises CompatError regardless of ``strict``. Missing
+    metadata files or schemas raise FileNotFoundError. File, JSON/YAML parsing,
+    and missing jsonschema dependency errors propagate rather than entering the
+    report; a smoke manifest missing schema_version raises KeyError.
+    """
     root = Path(root)
     rep = ValidationReport()
     if (root / "content.json").is_file():
