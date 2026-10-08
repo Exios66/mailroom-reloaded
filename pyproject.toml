@@ -61,6 +61,10 @@ packages = ["src/mailroom_reloaded"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: end-to-end tests that need a running dev server or live provider (deselected by default)",
+]
 
 [tool.ruff]
 # Vendored verbatim from llm-dojo-scoring v0.21.0 (see scoring/PARITY.md); keep upstream bytes.

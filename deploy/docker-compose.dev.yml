@@ -1,0 +1,207 @@
+# mailroom-reloaded DEV topology (spec §9). Standalone and self-contained — it
+# does not need deploy/docker-compose.yml. Run from the repo root:
+#
+#   docker compose -f deploy/docker-compose.dev.yml up -d --build           # full local stack
+#   scripts/dev.sh up                                                      # same, via helper
+#   docker compose -f deploy/docker-compose.dev.yml --profile local-llm up -d  # + llamafile (CPU)
+#
+# Differences from the production compose:
+#   * `app` runs `uvicorn --reload` with the repository `src/` bind-mounted, so
+#     edits are picked up live.
+#   * the watcher ALWAYS runs as its own container (`MAILROOM_EMBED_WATCHER=0`
+#     on `app`) and shares the same `./data` bind mount.
+#   * state lives in repo `./data` (bind mount) for easy inspection and `reset`.
+#   * DEFAULT_PROVIDER defaults to `mock`; no GPU is required or referenced.
+#   * Phoenix/Prometheus/Grafana keep the documented ports 6006/9090/3000.
+#
+# `docker compose -f deploy/docker-compose.dev.yml config -q` is valid with no
+# profiles activated; `local-llm` is the only profile and is entirely optional.
+name: mailroom-dev
+
+x-dev-app-env: &dev-app-env
+  MAILROOM_BASE_DIR: /data
+  DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-mock}
+  VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8001/v1}
+  LLAMAFILE_BASE_URL: ${LLAMAFILE_BASE_URL:-http://llamafile:8080/v1}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  MAILROOM_API_TOKEN: ${MAILROOM_API_TOKEN:-}
+  MAILROOM_TRACE_MASK: ${MAILROOM_TRACE_MASK:-0}
+  MAILROOM_EMBED_WATCHER: "0"
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_SERVICE_NAME: mailroom-dev
+  HF_HOME: /hf_cache
+  PYTHONPATH: /app/src
+
+x-dev-build: &dev-build
+  context: ..
+  dockerfile: deploy/Dockerfile.dev
+
+# Live code + dev state, shared by `app` and `watcher`.
+x-dev-app-volumes: &dev-app-volumes
+  - ../data:/data
+  - ../src:/app/src
+  - ../tests:/app/tests:ro
+
+services:
+  app:
+    build: *dev-build
+    image: mailroom-reloaded-dev:latest
+    restart: unless-stopped
+    command:
+      - uvicorn
+      - mailroom_reloaded.api.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/src
+    ports: ["127.0.0.1:8000:8000"]
+    environment: *dev-app-env
+    volumes: *dev-app-volumes
+    depends_on:
+      otel-collector:
+        condition: service_started
+      otel-targets:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # Split watcher: shares ./data and drains the inbox while `app` only serves.
+  watcher:
+    build: *dev-build
+    image: mailroom-reloaded-dev:latest
+    restart: unless-stopped
+    command: ["mailroom", "watch"]
+    environment: *dev-app-env
+    volumes: *dev-app-volumes
+    depends_on: [otel-collector]
+    healthcheck:
+      disable: true
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    # docker_stats needs the Docker socket (read-only) and a matching group.
+    user: "0:0"
+    environment:
+      VLLM_METRICS_SCHEME: ${VLLM_METRICS_SCHEME:-http}
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:8889:8889"
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - otel_targets:/etc/otelcol/targets:ro
+    depends_on:
+      phoenix:
+        condition: service_started
+      otel-targets:
+        condition: service_completed_successfully
+
+  # Writes an empty Prometheus file_sd targets file so the Collector's
+  # prometheus receiver has something valid to read (dev has no vLLM scrapes).
+  otel-targets:
+    image: busybox:1.37.0
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - 'printf "%s" "[{\"targets\":[]}]" > /targets/vllm.json'
+    volumes:
+      - otel_targets:/targets
+
+  phoenix:
+    image: arizephoenix/phoenix:version-11.6.2
+    restart: unless-stopped
+    ports: ["127.0.0.1:6006:6006"]
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6006', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:9090:9090"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on: [otel-collector]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on: [prometheus]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # Optional CPU-only local LLM. Enable with `--profile local-llm` and set
+  # DEFAULT_PROVIDER=llamafile. No GPU is ever required.
+  llamafile:
+    profiles: ["local-llm"]
+    build:
+      context: ./llamafile
+      args:
+        LLAMAFILE_VERSION: ${LLAMAFILE_VERSION:-0.10.4}
+    image: mailroom-llamafile:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      LLAMAFILE_MODEL: ${LLAMAFILE_MODEL:-/models/model.gguf}
+      LLAMAFILE_ALIAS: ${LLAMAFILE_ALIAS:-qwen3:7b}
+      LLAMAFILE_CTX: ${LLAMAFILE_CTX:-16384}
+      LLAMAFILE_GPU: ${LLAMAFILE_GPU:-disable}
+    volumes:
+      - llamafile_models:/models:ro
+
+volumes:
+  phoenix_data:
+  prometheus_data:
+  grafana_data:
+  otel_targets:
+  llamafile_models:
