@@ -4,7 +4,7 @@ Lightweight work log. Each agent appends an entry when it lands a unit: what it
 built, the files, the evidence, and the commit SHA. Newest first. No ceremony —
 this is a ledger, not a governance board.
 
-**Branch:** `feat/mailroom-reloaded-completion` (from `main` @ `afef7f9`)
+**Branch:** `feat/mailroom-reloaded-completion` (from `main` @ `ce1c1ff`)
 **Plan:** `docs/superpowers/plans/2026-10-07-mailroom-reloaded.md`
 **Spec:** `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`
 
@@ -20,6 +20,50 @@ this is a ledger, not a governance board.
 - **Commit:** <sha> <subject>
 - **Notes:** <deviations, seams, follow-ups>
 ```
+
+---
+
+### [F1] `required_fields` taxonomy block missing — lucius (HF dataset)
+- **Status:** needs_attention / in_progress
+- **Finding:** `extraction_confidence` reads `taxonomy.raw["required_fields"][doc_type]`
+  (`agents/specialists.py`) but `config/taxonomy.yaml` has no such block, so the
+  coverage denominator silently falls back to all schema fields. Spec §6 requires
+  the per-class lists derived from train-split GT presence ≥ 0.8.
+- **Owner:** `lucius` — derive from `Lucius-Morningstar/mailroom-dataset` @ `ed7576b6`
+  (train split, `ground_truth` config); do not fabricate values.
+- **Commit:** <pending>
+
+---
+
+### [Tasks 17, 20 + adversarial review] Watcher/review, eval runner, docstring pass — subagents
+- **Status:** done
+- **Files:** `src/mailroom_reloaded/watcher.py`, `review.py`, `eval/dataset.py`,
+  `eval/runner.py`, `tests/test_watcher_review.py`, `tests/eval/*`;
+  docstring pass across `agents/*`, `pipeline/*`, `eval/train_gate.py`.
+- **Evidence:** `uv run pytest tests/test_watcher_review.py -v` → 5 passed;
+  `uv run pytest tests/eval -v` → 7 passed; `uv run pytest -q` → 287 passed, 3 skipped;
+  `interrogate` in-scope → 100% (was 36.5%).
+- **Commit:** `8cf6d3d` Reloaded unit tests
+- **Notes:** adversarial reviewer verdict "revise": no fabricated work, no fictional
+  passes; F1 is the only substantive gap. F2 (length-capped usage undercount),
+  F3 (audit event named `node_failed` not `ingest_failed`), F4 (cooperative deadline
+  cannot preempt a hung node), F5 (weak `test_report_no_llm` seam) noted, non-blocking.
+
+---
+
+### [Tasks 13, 15, 16] Gate training + pipeline spine — subagents + CodeRabbit
+- **Status:** done
+- **Files:** `src/mailroom_reloaded/eval/train_gate.py`,
+  `pipeline/{state,guards,report,archivist,flow}.py`, `tests/agents/test_gate.py`,
+  `tests/pipeline/*`.
+- **Evidence:** `uv run pytest tests/pipeline -v` → 13 passed;
+  `uv run pytest tests/agents/test_gate.py -v` → 61 passed;
+  `uv run pytest -q` → 275 passed, 3 skipped.
+- **Commits:** `6ad17ec` MailroomFlow with gate routing, guards, report and archive;
+  CodeRabbit autofixes `f1707f3` (train-only splits), `fd0b53e` (docstrings).
+- **Notes:** CrewAI `@listen("extract")` on method `extract` is rejected by
+  crewai 1.15.25 (self-loop) — route labels renamed to `do_extract`/`do_verify`/
+  `do_boss`; `run_document` owns deterministic control flow.
 
 ---
 
