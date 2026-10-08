@@ -58,6 +58,7 @@ __all__ = [
     "CARD_SCHEMA",
     "DEFAULT_OUT_DIR",
     "INVARIANTS",
+    "NA",
     "ConformanceCard",
     "Invariant",
     "RoleRun",
@@ -78,6 +79,14 @@ _ARBITER_ACTIONS = frozenset({"accept", "accept_with_caveats", "re_extract", "es
 _BOSS_ACTIONS = frozenset({"reassign_class", "accept", "human_review"})
 
 _MISSING = object()
+
+#: The marker rendered/emitted for a rate whose denominator is undefined.
+NA = "n/a"
+
+
+def _rate(value: float | None) -> float | str:
+    """A JSON rate: the number itself, or ``NA`` when the denominator is undefined."""
+    return NA if value is None else value
 
 
 # --------------------------------------------------------------------------- records
@@ -124,11 +133,25 @@ class Invariant:
 
 @dataclass
 class RoleStats:
-    """Per-role conformance result: tool-call and invariant pass rates."""
+    """Per-role conformance result: tool-call and invariant pass rates.
 
-    tool_call_success_rate: float
-    invariant_pass_rate: float
+    A rate is ``None`` when its denominator is undefined -- no tool calls were
+    recorded, or no invariants/runs were collected. An undefined denominator is
+    never a passing ``1.0``: it serializes as ``"n/a"`` and cannot be mistaken
+    for a role that ran cleanly.
+    """
+
+    tool_call_success_rate: float | None
+    invariant_pass_rate: float | None
     failures: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """The JSON shape, with undefined rates rendered as the ``"n/a"`` marker."""
+        return {
+            "tool_call_success_rate": _rate(self.tool_call_success_rate),
+            "invariant_pass_rate": _rate(self.invariant_pass_rate),
+            "failures": list(self.failures),
+        }
 
 
 @dataclass
@@ -266,8 +289,8 @@ def build_role_stats(runs: Iterable[RoleRun]) -> RoleStats:
     """Aggregate tool-call success and invariant pass rates for one role."""
     run_list = list(runs)
     calls = [tc for run in run_list for tc in run.tool_calls]
-    tool_rate = (
-        sum(1 for tc in calls if tc.ok) / len(calls) if calls else 1.0
+    tool_rate: float | None = (
+        sum(1 for tc in calls if tc.ok) / len(calls) if calls else None
     )
 
     checked = 0
@@ -289,7 +312,7 @@ def build_role_stats(runs: Iterable[RoleRun]) -> RoleStats:
                 passed += 1
             else:
                 failures.append(f"{invariant.name}:{run.filename}")
-    invariant_rate = passed / checked if checked else 1.0
+    invariant_rate: float | None = passed / checked if checked else None
     return RoleStats(tool_rate, invariant_rate, failures)
 
 
@@ -598,20 +621,13 @@ def _card_dict(card: ConformanceCard) -> dict[str, Any]:
         "revision": card.revision,
         "split": card.split,
         "per_class": card.per_class,
-        "roles": {
-            role: {
-                "tool_call_success_rate": stats.tool_call_success_rate,
-                "invariant_pass_rate": stats.invariant_pass_rate,
-                "failures": list(stats.failures),
-            }
-            for role, stats in card.roles.items()
-        },
+        "roles": {role: stats.to_dict() for role, stats in card.roles.items()},
     }
 
 
-def _pct(value: float) -> str:
-    """Render a 0..1 rate as a percentage string."""
-    return f"{value * 100:.1f}%"
+def _pct(value: float | None) -> str:
+    """Render a 0..1 rate as a percentage, or ``n/a`` when undefined."""
+    return NA if value is None else f"{value * 100:.1f}%"
 
 
 def render_card_md(card: ConformanceCard) -> str:

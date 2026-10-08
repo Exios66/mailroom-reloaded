@@ -11,7 +11,7 @@ import json
 from typer.testing import CliRunner
 
 from mailroom_reloaded import cli
-from mailroom_reloaded.eval import cards
+from mailroom_reloaded.eval import cards, conformance
 
 runner = CliRunner()
 
@@ -61,3 +61,45 @@ def test_card_multi_run_writes_master(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "master.json").exists()
     assert (tmp_path / "master.md").read_text() == "# master\n"
+
+
+def test_conformance_command_writes_card(tmp_path, monkeypatch) -> None:
+    seen: dict = {}
+
+    def fake_run(provider, **kwargs):
+        seen["provider"] = provider
+        seen["out_dir"] = kwargs.get("out_dir")
+        return conformance.ConformanceCard(
+            provider=provider or "mock",
+            model="fake-model",
+            roles={"sorter": conformance.RoleStats(1.0, 1.0, [])},
+        )
+
+    monkeypatch.setattr(conformance, "run_conformance", fake_run)
+
+    result = runner.invoke(
+        cli.app,
+        ["conformance", "--provider", "mock", "--out", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen["provider"] == "mock"
+    assert seen["out_dir"] == tmp_path
+    payload = json.loads(result.stdout)
+    assert payload["out"] == str(tmp_path)
+    assert payload["roles"]["sorter"]["tool_call_success_rate"] == 1.0
+
+
+def test_card_master_flag_single_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        cards, "build_master", lambda run_ids: ({"runs": list(run_ids)}, "# master\n")
+    )
+
+    result = runner.invoke(
+        cli.app,
+        ["card", "--run-id", "r", "--master", "--out", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "master.json").exists()
+    assert (tmp_path / "master.md").exists()

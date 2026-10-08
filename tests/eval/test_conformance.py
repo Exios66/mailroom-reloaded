@@ -161,6 +161,121 @@ def test_card_rates(monkeypatch, tmp_path):
     assert "sorter" in render_card_md(card)
 
 
+def test_record_tool_calls_marks_error_output_failed():
+    """A tool returning an error string is recorded as a failed call (rate 0.0)."""
+    from mailroom_reloaded.tools import NoParams, ToolContext, ToolDef
+
+    tool = ToolDef("boom", "always errors", NoParams, lambda _ctx: "error: boom")
+    calls: list[ToolCall] = []
+    with cf._record_tool_calls("sorter", calls):
+        outcome = tool.bind(ToolContext()).fn()
+
+    assert outcome == "error: boom"
+    assert [tc.ok for tc in calls] == [False]
+
+    run = RoleRun(
+        role="sorter",
+        filename=CORRESPONDENCE_01,
+        doc_type="correspondence",
+        mode="full",
+        parsed={
+            "doc_type": "correspondence",
+            "doc_subclass": None,
+            "doc_type_disagree": False,
+        },
+        tool_calls=calls,
+    )
+    assert cf.build_role_stats([run]).tool_call_success_rate == 0.0
+
+
+def test_card_rates_flags_invariant_violation(monkeypatch, tmp_path):
+    """A real sorter run that changes doc_type without the flag lowers the rate."""
+    violating = RoleRun(
+        role="sorter",
+        filename=CORRESPONDENCE_01,
+        doc_type="correspondence",
+        mode="subclass_only",
+        parsed={
+            "doc_type": "contract",
+            "doc_subclass": None,
+            "doc_type_disagree": False,
+        },
+        tool_calls=[ToolCall("sorter", "list_subclasses", True)],
+    )
+    runs = {
+        "sorter": [violating],
+        "specialists": [],
+        "judge": [],
+        "arbiter": [],
+        "boss": [],
+    }
+    monkeypatch.setattr(cf, "_collect_runs", lambda **_: runs)
+
+    card = run_conformance("mock", per_class=1, out_dir=tmp_path)
+    stats = card.roles["sorter"]
+    assert stats.invariant_pass_rate is not None
+    assert stats.invariant_pass_rate < 1.0
+    assert "subclass_only_doc_type_guard" in {f.split(":")[0] for f in stats.failures}
+
+    payload = json.loads((tmp_path / "conformance-mock.json").read_text("utf-8"))
+    assert payload["roles"]["sorter"]["invariant_pass_rate"] < 1.0
+
+
+def test_empty_role_is_not_reported_as_passing(monkeypatch, tmp_path):
+    """A role with no collected runs reports n/a, never a vacuous 1.0."""
+    runs: dict[str, list[RoleRun]] = {role: [] for role in cf._ROLES}
+    monkeypatch.setattr(cf, "_collect_runs", lambda **_: runs)
+
+    card = run_conformance("mock", per_class=1, out_dir=tmp_path)
+    for role in cf._ROLES:
+        stats = card.roles[role]
+        assert stats.tool_call_success_rate != 1.0
+        assert stats.invariant_pass_rate != 1.0
+        assert stats.invariant_pass_rate is None
+
+    payload = json.loads((tmp_path / "conformance-mock.json").read_text("utf-8"))
+    assert payload["roles"]["sorter"]["tool_call_success_rate"] == "n/a"
+    assert payload["roles"]["sorter"]["invariant_pass_rate"] == "n/a"
+    assert "n/a" in render_card_md(card)
+
+
+def test_judge_live_seam_never_calls_ground_truth(mock_provider, monkeypatch):
+    """The live judge path never offers/fetches ground truth and never leaks it."""
+    from helpers import assert_no_gt
+
+    from mailroom_reloaded.agents.judge import ClassificationFinding, JudgeGrade
+    from mailroom_reloaded.eval.dataset import BlindDoc, GroundTruth, sha256_text
+    from mailroom_reloaded.llm.usage import Usage
+
+    text = "Dear Sir or Madam,\n\nPlease review the attached draft.\n"
+    doc = BlindDoc("correspondence_01.txt", text, sha256_text(text))
+    gt = GroundTruth(
+        filename=doc.filename,
+        expected="correspondence",
+        expected_subclass="letter",
+        fields={"claim_number": "GT-SECRET-CLAIM-9911"},
+    )
+
+    stub = JudgeGrade(
+        doc_id=cf.doc_id_for_sha(doc.content_sha256),
+        doc_type="correspondence",
+        classification=ClassificationFinding(verdict="correct"),
+        overall=1.0,
+        usage=Usage(),
+    )
+    monkeypatch.setattr(cf, "judge_grade", lambda *args, **kwargs: stub)
+
+    mock_provider.reply('{"label": "complete", "score": 0.9, "field_findings": []}')
+    runs = cf._judge_runs(doc, gt, {"party_name": "Acme"})
+
+    live = next(run for run in runs if run.mode == "live")
+    assert all(tc.name != "get_ground_truth" for tc in live.tool_calls)
+    for request in mock_provider.requests:
+        offered = [t["function"]["name"] for t in request.get("tools", [])]
+        assert "get_ground_truth" not in offered
+    assert_no_gt(mock_provider.requests, gt.fields)
+
+
 # --------------------------------------------------------------------------- real harness
 
 

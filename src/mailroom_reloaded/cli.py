@@ -234,12 +234,7 @@ def conformance(
                 "provider": card.provider,
                 "model": card.model,
                 "roles": {
-                    role: {
-                        "tool_call_success_rate": stats.tool_call_success_rate,
-                        "invariant_pass_rate": stats.invariant_pass_rate,
-                        "failures": stats.failures,
-                    }
-                    for role, stats in card.roles.items()
+                    role: stats.to_dict() for role, stats in card.roles.items()
                 },
                 "out": str(out),
             }
