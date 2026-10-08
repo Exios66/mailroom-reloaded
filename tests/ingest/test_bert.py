@@ -32,6 +32,7 @@ def verdict(**kw):
 def install_fake(monkeypatch, fn):
     pkg = types.ModuleType("mailroom_ml")
     inf = types.ModuleType("mailroom_ml.inference")
+    inf.classify_document_default = fn
     inf.classify_document = fn
     pkg.inference = inf
     monkeypatch.setitem(sys.modules, "mailroom_ml", pkg)
@@ -121,9 +122,35 @@ def test_ok_mapping(monkeypatch):
     assert v.window_agreement == 1.0 and v.n_windows == 1
 
 
-def test_signature_without_kwargs(monkeypatch):
-    install_fake(monkeypatch, lambda text: {"doc_type": "contract", "n_windows": 1})
+def test_default_seam_receives_filename(monkeypatch):
+    seen = {}
+
+    def fn(text, *, filename=None, **kw):
+        seen["text"] = text
+        seen["filename"] = filename
+        return {"doc_type": "contract", "n_windows": 1}
+
+    install_fake(monkeypatch, fn)
     assert classify_primary("hello", cfg()).doc_type == "contract"
+    assert seen == {"text": "hello", "filename": None}
+    classify_primary("hello", cfg(), filename="agreement.txt")
+    assert seen == {"text": "hello", "filename": "agreement.txt"}
+
+
+def test_prefers_default_seam_over_raw_classify(monkeypatch):
+    calls = []
+    pkg = types.ModuleType("mailroom_ml")
+    inf = types.ModuleType("mailroom_ml.inference")
+    inf.classify_document_default = (
+        lambda text, *, filename=None: calls.append("default")
+        or {"status": "ok", "doc_type": "contract", "n_windows": 1}
+    )
+    inf.classify_document = lambda *a, **k: calls.append("document")
+    pkg.inference = inf
+    monkeypatch.setitem(sys.modules, "mailroom_ml", pkg)
+    monkeypatch.setitem(sys.modules, "mailroom_ml.inference", inf)
+    assert classify_primary("hello", cfg()).doc_type == "contract"
+    assert calls == ["default"]
 
 
 def test_error_never_raises(monkeypatch):
@@ -151,6 +178,60 @@ def test_missing_model_file(monkeypatch):
 def test_missing_model_marker(monkeypatch):
     install_fake(monkeypatch, lambda *a, **k: {"status": "bundle_missing"})
     assert classify_primary("hello", cfg()).reason == "no_model"
+
+
+@pytest.mark.parametrize("marker", ["no_model", "bundle_missing", "model_missing"])
+def test_default_seam_missing_bundle_marker(monkeypatch, marker):
+    def fn(text, *, filename=None, **kw):
+        return {"status": "failure", "route": "llm", "reason": marker, "doc_type": None}
+
+    install_fake(monkeypatch, fn)
+    v = classify_primary("hello", cfg())
+    assert not v.available and v.reason == "no_model"
+    assert decide_handoff(v, cfg()).mode is SortMode.FULL
+
+
+def test_route_llm_without_doc_type_is_unavailable(monkeypatch):
+    def fn(text, *, filename=None, **kw):
+        return {"status": "ok", "route": "llm", "reason": "gate_fail", "doc_type": None}
+
+    install_fake(monkeypatch, fn)
+    v = classify_primary("hello", cfg())
+    assert not v.available
+    assert decide_handoff(v, cfg()).mode is SortMode.FULL
+
+
+def test_model_side_oversize_maps_too_long(monkeypatch):
+    def fn(text, *, filename=None, **kw):
+        return {"status": "ok", "route": "llm", "reason": "oversize_chars", "doc_type": None}
+
+    install_fake(monkeypatch, fn)
+    assert classify_primary("hello", cfg()).reason == "too_long"
+
+
+def test_default_seam_ok_maps_verdict_fields(monkeypatch):
+    def fn(text, *, filename=None, **kw):
+        assert filename == "doc.txt"
+        return {
+            "status": "ok",
+            "doc_type": "correspondence",
+            "subclass": "email",
+            "route": "fast_path",
+            "calibrated_confidence": 0.93,
+            "subclass_confidence": 0.8,
+            "margin": 0.5,
+            "agreement": 1.0,
+            "n_windows": 1,
+            "n_class_windows": 1,
+            "per_head": {"doc_type": {"pred": "correspondence", "windows": ["correspondence"]}},
+        }
+
+    install_fake(monkeypatch, fn)
+    v = classify_primary("hello", cfg(), filename="doc.txt")
+    assert v.available and v.reason == "ok"
+    assert (v.doc_type, v.subclass, v.route) == ("correspondence", "email", "fast_path")
+    assert v.calibrated_confidence == 0.93 and v.margin == 0.5
+    assert v.window_agreement == 1.0 and v.n_windows == 1
 
 
 def test_long_doc_does_not_call_model_past_cap(monkeypatch):

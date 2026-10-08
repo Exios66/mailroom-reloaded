@@ -42,6 +42,7 @@ from mailroom_reloaded.ingest.bert import (
     decide_handoff,
 )
 from mailroom_reloaded.ingest.clerk import ingest as _ingest
+from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.pipeline.archivist import archive_document
 from mailroom_reloaded.pipeline.guards import (
     NODE_DEADLINES,
@@ -163,6 +164,14 @@ class MailroomFlow(Flow[MailroomState]):
         verdict = classify_primary(state.text)
         state.bert = verdict
         state.handoff = decide_handoff(verdict, load_taxonomy().bert)
+        route = (
+            "unavailable"
+            if not verdict.available
+            else "fast_path"
+            if state.handoff.mode is SortMode.SUBCLASS_ONLY
+            else "defer"
+        )
+        M.bert_route.add(1, {"route": route})
 
     @guarded("sort", NODE_DEADLINES["sort"], 0)
     def _node_sort(self) -> None:
@@ -195,6 +204,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.extract = result
         state.usage_total = state.usage_total + result.usage
         self._llm_calls += 1
+        M.schema_valid.add(1 if result.schema_valid else 0, {"doc_type": doc_type})
 
     @guarded("verify", NODE_DEADLINES["verify"], 0)
     def _node_verify(self) -> None:
@@ -309,6 +319,16 @@ class MailroomFlow(Flow[MailroomState]):
 
     def _record_node(self, node_name: str, elapsed: float) -> None:
         """Mark ``node_name`` complete, snapshot state and append the audit entry."""
+        M.node_duration.record(elapsed, {"node": node_name})
+        if node_name == "report_catalog_archive":
+            M.documents.add(
+                1,
+                {
+                    "stage": "pipeline",
+                    "status": "archived",
+                    "doc_type": self._effective_doc_type(),
+                },
+            )
         manifest = self._manifest
         if node_name not in manifest.completed_nodes:
             manifest.completed_nodes.append(node_name)
@@ -322,6 +342,7 @@ class MailroomFlow(Flow[MailroomState]):
         """Fail the document: move to ``failed/``, update the manifest, audit, raise."""
         state = self.state
         state.status = "failed"
+        M.documents.add(1, {"stage": "pipeline", "status": "failed"})
         manifest = self._manifest
         manifest.status = "failed"
         try:
@@ -346,6 +367,7 @@ class MailroomFlow(Flow[MailroomState]):
         state = self.state
         state.route_trail.append("human_review")
         state.status = "parked"
+        M.documents.add(1, {"stage": "pipeline", "status": "parked"})
         manifest = self._manifest
         manifest.status = "parked"
         try:
@@ -539,6 +561,13 @@ class MailroomFlow(Flow[MailroomState]):
         return next_node(self._manifest, NODE_ORDER)
 
     def _drive(self) -> MailroomState:
+        """Open the per-document span and run the deterministic node walk under it."""
+        state = self.state
+        with self._tracer.start_as_current_span("mailroom.document") as span:
+            span.set_attribute("mailroom.doc_id", state.doc_id)
+            return self._drive_nodes()
+
+    def _drive_nodes(self) -> MailroomState:
         """Deterministically walk the guarded nodes and gates to a terminal bin."""
         self._resume_done = set(self._manifest.completed_nodes)
         state = self.state

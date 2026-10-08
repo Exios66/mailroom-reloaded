@@ -27,6 +27,7 @@ from typing import Any
 
 import structlog
 
+from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.pipeline import flow as _flow
 from mailroom_reloaded.schemas.manifest import Manifest
 from mailroom_reloaded.storage.bins import Bins
@@ -161,6 +162,7 @@ class Watcher:
         if not self._startup_done:
             self.resume_processing()
         files = [f for f in sorted(self.bins.inbox.iterdir()) if _is_processable(f)]
+        M.queue_depth.set(len(files), {"bin": "inbox"})
         if not files:
             return 0
         if self.concurrency <= 1:
@@ -174,12 +176,15 @@ class Watcher:
         if claimed is None:
             logger.debug("claim_lost", file=str(path), worker_id=self.worker_id)
             return False
+        M.inflight.set(1, {"worker": self.worker_id})
         try:
             _flow.run_document(claimed, worker_id=self.worker_id)
             return True
         except Exception:
             logger.exception("watcher_document_crashed", file=str(claimed))
             return True
+        finally:
+            M.inflight.set(0, {"worker": self.worker_id})
 
     # ------------------------------------------------------------- loop
     def run_forever(self, poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS) -> None:

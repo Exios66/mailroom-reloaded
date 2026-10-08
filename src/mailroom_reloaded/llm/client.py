@@ -21,6 +21,7 @@ os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
 from crewai import LLM
 
+from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.settings import get_settings, load_taxonomy
 
 from .tooling import (
@@ -197,6 +198,34 @@ def _build_request(
     return req
 
 
+def _token_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """USD cost for one call from ``taxonomy.cost_models`` (0.0 when unpriced)."""
+    specs = load_taxonomy().raw.get("cost_models") or {}
+    spec = specs.get(model) or {}
+    per_input = float(spec.get("input_per_million", 0.0) or 0.0)
+    per_output = float(spec.get("output_per_million", 0.0) or 0.0)
+    return prompt_tokens / 1_000_000 * per_input + completion_tokens / 1_000_000 * per_output
+
+
+def _record_usage_metrics(role: str, r: ResolvedModel, usage: Usage) -> None:
+    """Emit the per-call OTel metrics (llm_calls, tokens, duration, cost)."""
+    labels = {"role": role, "provider": r.provider, "model": r.model}
+    M.llm_calls.add(max(usage.calls, 1), labels)
+    token_attrs = {
+        "gen_ai.request.model": r.model,
+        "gen_ai.provider.name": r.provider,
+    }
+    M.token_usage.record(usage.prompt_tokens, {**token_attrs, "gen_ai.token.type": "input"})
+    M.token_usage.record(
+        usage.completion_tokens, {**token_attrs, "gen_ai.token.type": "output"}
+    )
+    M.operation_duration.record(
+        usage.latency_s, {**token_attrs, "gen_ai.operation.name": "chat"}
+    )
+    cost = _token_cost(r.model, usage.prompt_tokens, usage.completion_tokens)
+    M.cost_usd.add(cost, labels)
+
+
 def call_structured(
     role: str,
     messages: list[dict[str, Any]],
@@ -240,10 +269,15 @@ def call_structured(
         final["logprobs"] = True
     resp, u = chat_create(client, final)
     usage = usage + u
+    _record_usage_metrics(role, r, usage)
     if loop is not None and loop.reject_key is not None:
         mark_no_tools(loop.reject_key)  # inline retry worked, so the rejection was about tools
     choice = resp.choices[0]
     finish = choice.finish_reason or "stop"
+    M.length_capped.add(
+        1 if finish == "length" else 0,
+        {"role": role, "provider": r.provider, "model": r.model},
+    )
     if finish == "length":
         raise LengthFinishReasonError(f"{role}: output hit the length cap")
     content = choice.message.content or ""

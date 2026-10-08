@@ -27,7 +27,9 @@ from mailroom_reloaded.eval.dataset import (
     BlindDoc,
     DatasetIntegrityError,
     GroundTruth,
+    bert_manifest_overlap,
     doc_id_for_sha,
+    load_manifest_sha256,
     load_split,
     sample,
     sha256_text,
@@ -243,6 +245,89 @@ def test_sha_mismatch_raises(tmp_path):
     )
     with pytest.raises(DatasetIntegrityError):
         load_split(local_dir=tmp_path)
+
+
+def _real_columns(tmp_path, *, sha=None, blind_sha=None, with_gt_sha=True):
+    """Write a blind/GT pair mirroring the live ``ed7576b6`` columns."""
+    body = "REAL COLUMN DOC\ncontract body\n"
+    actual = sha256_text(body)
+    metadata = {"content_sha256": blind_sha} if blind_sha else {}
+    blind = {"filename": "real.txt", "doc_text": body, "prompt": "", "metadata": metadata}
+    gt = {
+        "filename": "real.txt",
+        "expected": "contract",
+        "expected_subclass": "services",
+        "gt_fields": json.dumps(
+            {
+                "party_or_sender": "gt-canary-real-party",
+                "cuad_clause_labels": json.dumps(
+                    {"Governing Law": [{"start": 0, "text": "Delaware"}]}
+                ),
+                "maud_clause_labels": json.dumps({"consideration_type": ["cash"]}),
+                "gt_presence": json.dumps({"party_or_sender": "populated"}),
+            }
+        ),
+        "retry_expected": False,
+        "review_expected": False,
+        "expected_stage": "proceed",
+    }
+    if with_gt_sha:
+        gt["content_sha256"] = sha if sha is not None else actual
+    (tmp_path / "default.jsonl").write_text(json.dumps(blind) + "\n", encoding="utf-8")
+    (tmp_path / "ground_truth.jsonl").write_text(json.dumps(gt) + "\n", encoding="utf-8")
+    return body, actual
+
+
+def test_real_columns_join_verifies_and_parses_gt_fields(tmp_path):
+    body, actual = _real_columns(tmp_path)
+    docs, gts = load_split(local_dir=tmp_path)
+    assert len(docs) == 1
+    doc = docs[0]
+    assert (doc.filename, doc.doc_text, doc.content_sha256) == ("real.txt", body, actual)
+    for forbidden in ("expected", "fields", "cuad_clause_labels", "maud_clause_labels"):
+        assert not hasattr(doc, forbidden)
+    gt = gts["real.txt"]
+    assert gt.expected == "contract" and gt.expected_subclass == "services"
+    assert gt.fields["party_or_sender"] == "gt-canary-real-party"
+    assert gt.fields["cuad_clause_labels"] == {
+        "Governing Law": [{"start": 0, "text": "Delaware"}]
+    }
+    assert gt.cuad_clause_labels == ["Governing Law"]
+    assert gt.maud_clause_labels == ["consideration_type"]
+
+
+def test_real_columns_sha_mismatch_raises(tmp_path):
+    _real_columns(tmp_path, sha="0" * 64)
+    with pytest.raises(DatasetIntegrityError):
+        load_split(local_dir=tmp_path)
+
+
+def test_blind_metadata_hash_is_a_fallback(tmp_path):
+    _, actual = _real_columns(tmp_path, with_gt_sha=False)
+    with pytest.raises(DatasetIntegrityError):
+        load_split(local_dir=tmp_path)
+    _real_columns(tmp_path, blind_sha=actual, with_gt_sha=False)
+    docs, _ = load_split(local_dir=tmp_path)
+    assert docs[0].content_sha256 == actual
+
+
+def test_bert_manifest_overlap(tmp_path):
+    docs = [
+        BlindDoc("a.txt", "alpha", sha256_text("alpha")),
+        BlindDoc("b.txt", "beta", sha256_text("beta")),
+    ]
+    manifest = tmp_path / "documents.jsonl"
+    manifest.write_text(
+        json.dumps({"filename": "a.txt", "content_sha256": sha256_text("alpha")}) + "\n",
+        encoding="utf-8",
+    )
+    assert load_manifest_sha256(manifest) == {sha256_text("alpha")}
+    assert bert_manifest_overlap(docs, manifest) == {"a.txt": True, "b.txt": False}
+    assert bert_manifest_overlap(docs, tmp_path) == {"a.txt": True, "b.txt": False}
+    assert bert_manifest_overlap(docs, tmp_path / "nope.jsonl") == {
+        "a.txt": False,
+        "b.txt": False,
+    }
 
 
 def test_nested_sampling():

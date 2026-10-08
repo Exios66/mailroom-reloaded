@@ -1,8 +1,11 @@
 """Blind/ground-truth dataset loader and nested sampler (spec section 8, Task 20).
 
 Ground truth comes from ``Lucius-Morningstar/mailroom-dataset`` at revision
-``ed7576b6`` (SAND-37). Configs are ``default`` (blind) and ``ground_truth``,
-joined on ``filename``; ``content_sha256`` is verified at load so a corrupted or
+``ed7576b6`` (SAND-37). Configs are ``default`` (blind: ``filename``,
+``doc_text``, ``prompt``, ``metadata`` -- no labels, no hash) and
+``ground_truth`` (labels in the ``gt_fields`` JSON blob, plus ``expected`` /
+``expected_subclass`` / ``content_sha256``), joined on ``filename``;
+``content_sha256`` (``sha256(doc_text)``) is verified at load so a corrupted or
 truncated document cannot silently reach the pipeline.
 
 The blind side carries no label fields at all (``BlindDoc``). Ground truth lives
@@ -13,6 +16,7 @@ agents' path by construction").
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import random
@@ -23,10 +27,13 @@ from typing import Any
 __all__ = [
     "DEFAULT_REVISION",
     "REPO",
+    "TRAINING_REPO",
     "BlindDoc",
     "DatasetIntegrityError",
     "EvalContext",
     "GroundTruth",
+    "bert_manifest_overlap",
+    "load_manifest_sha256",
     "load_split",
     "sample",
 ]
@@ -34,9 +41,18 @@ __all__ = [
 REPO = "Lucius-Morningstar/mailroom-dataset"
 DEFAULT_REVISION = "ed7576b6"
 
+#: The ModernBERT training set: its ``documents`` config carries the
+#: ``content_sha256`` values the spec section 5 leakage check compares against.
+TRAINING_REPO = "Lucius-Morningstar/mailroom-modernbert-training"
+TRAINING_CONFIG = "documents"
+
 #: Candidate source columns for the blind text and its declared hash.
 _TEXT_KEYS = ("doc_text", "text", "content", "document", "body")
 _SHA_KEYS = ("content_sha256", "sha256", "content_hash")
+
+#: Ground-truth columns accepted as a fallback for label fields when the live
+#: ``gt_fields`` blob is absent (local JSONL fixtures).
+_FIELD_KEYS = ("fields", "extraction", "ground_truth_fields")
 
 
 class DatasetIntegrityError(Exception):
@@ -105,17 +121,63 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _parse_json_container(value: Any) -> Any:
+    """Parse a stringified JSON list/object; leave scalars/bare strings alone."""
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "[{" or stripped[-1] not in "]}":
+        return value
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return value
+    return parsed if isinstance(parsed, (list, dict)) else value
+
+
+def _parse_gt_fields(raw: Any) -> dict[str, Any]:
+    """Parse a Hub ``gt_fields`` value (JSON/Python string or mapping).
+
+    Values that are themselves stringified JSON containers (the Hub shape --
+    ``"cuad_clause_labels": "{}"``) are parsed one level in. Anything
+    unparseable degrades to ``{}`` so a malformed row cannot abort the load.
+    """
+    if isinstance(raw, dict):
+        obj: Any = raw
+    elif isinstance(raw, str) and raw.strip():
+        try:
+            obj = json.loads(raw)
+        except (ValueError, TypeError):
+            try:
+                obj = ast.literal_eval(raw)
+            except (ValueError, SyntaxError):
+                return {}
+    else:
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    return {str(key): _parse_json_container(value) for key, value in obj.items()}
+
+
 def _as_list(value: Any) -> list[str]:
-    if isinstance(value, (list, tuple)):
-        return [str(v) for v in value]
+    """Coerce a clause-label field to a list of label names.
+
+    The live Hub shape is a mapping ``{clause: [spans...]}``; fixtures use a
+    plain list. A mapping yields its keys, a list yields its stringified
+    items, and a stringified container is parsed first.
+    """
     if isinstance(value, str) and value.strip():
         try:
-            loaded = json.loads(value)
+            value = json.loads(value)
         except ValueError:
             return [value]
-        if isinstance(loaded, list):
-            return [str(v) for v in loaded]
-    return []
+    if isinstance(value, dict):
+        return [str(k) for k in value]
+    if isinstance(value, (list, tuple, set)):
+        return [str(v) for v in value]
+    if value is None:
+        return []
+    return [str(value)]
 
 
 def _row_get(row: Any, keys: tuple[str, ...], default: Any = None) -> Any:
@@ -132,10 +194,29 @@ def _row_get(row: Any, keys: tuple[str, ...], default: Any = None) -> Any:
     return default
 
 
-def _blind_from_row(row: Any) -> BlindDoc:
+def _metadata_sha(row: Any) -> Any:
+    """``content_sha256`` from the blind row's ``metadata`` blob, if present."""
+    meta = _row_get(row, ("metadata",))
+    if isinstance(meta, str):
+        meta = _as_dict(meta)
+    if isinstance(meta, dict):
+        return _row_get(meta, _SHA_KEYS)
+    return None
+
+
+def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
+    """Build a verified :class:`BlindDoc`.
+
+    ``declared`` is the hash from the joined ``ground_truth`` row (the live
+    layout); when absent the call falls back to a hash on the blind row
+    itself, then to the blind ``metadata`` blob (the historical layout).
+    """
     filename = str(_row_get(row, ("filename", "file", "name"), "")).strip()
     text = str(_row_get(row, _TEXT_KEYS, "") or "")
-    declared = _row_get(row, _SHA_KEYS)
+    if declared is None:
+        declared = _row_get(row, _SHA_KEYS)
+    if declared is None:
+        declared = _metadata_sha(row)
     if not filename:
         raise DatasetIntegrityError("blind row is missing a filename")
     if declared is None:
@@ -153,13 +234,22 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
     filename = str(_row_get(row, ("filename", "file", "name"), "")).strip()
     if not filename:
         raise DatasetIntegrityError("ground-truth row is missing a filename")
+    parsed = _parse_gt_fields(_row_get(row, ("gt_fields",)))
+    fields = parsed or _as_dict(_row_get(row, _FIELD_KEYS))
+
+    def clause(key: str, fallback: tuple[str, ...]) -> list[str]:
+        value = parsed.get(key)
+        if value is None or value == [] or value == {}:
+            value = _row_get(row, fallback)
+        return _as_list(value)
+
     return GroundTruth(
         filename=filename,
         expected=_row_get(row, ("expected", "expected_doc_type", "label", "doc_type")),
         expected_subclass=_row_get(row, ("expected_subclass", "doc_subclass", "subclass")),
-        fields=_as_dict(_row_get(row, ("fields", "extraction", "ground_truth_fields"))),
-        cuad_clause_labels=_as_list(_row_get(row, ("cuad_clause_labels", "cuad_clauses"))),
-        maud_clause_labels=_as_list(_row_get(row, ("maud_clause_labels", "maud_clauses"))),
+        fields=fields,
+        cuad_clause_labels=clause("cuad_clause_labels", ("cuad_clause_labels", "cuad_clauses")),
+        maud_clause_labels=clause("maud_clause_labels", ("maud_clause_labels", "maud_clauses")),
         retry_expected=_row_get(row, ("retry_expected",)),
         review_expected=_row_get(row, ("review_expected",)),
         expected_stage=_row_get(row, ("expected_stage",)),
@@ -173,6 +263,48 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         if line:
             rows.append(json.loads(line))
     return rows
+
+
+# --------------------------------------------------------------------------- §5 manifest
+
+
+def load_manifest_sha256(manifest: Any) -> set[str]:
+    """Content hashes from a local BERT-training ``documents`` manifest.
+
+    Accepts a JSONL file or a directory of JSONL files (the training set's
+    ``documents`` export). Best-effort and offline by design: unreadable or
+    malformed inputs are skipped, and no Hub network access is attempted.
+    """
+    base = Path(manifest)
+    if base.is_file():
+        files = [base]
+    elif base.is_dir():
+        files = sorted(base.glob("*.jsonl"))
+    else:
+        return set()
+    shas: set[str] = set()
+    for path in files:
+        try:
+            rows = _read_jsonl(path)
+        except (OSError, ValueError):
+            continue
+        for row in rows:
+            sha = _row_get(row, _SHA_KEYS)
+            if sha:
+                shas.add(str(sha))
+    return shas
+
+
+def bert_manifest_overlap(docs: list[BlindDoc], manifest: Any) -> dict[str, bool]:
+    """Report which blind documents appear in the BERT training manifest.
+
+    Spec §5 leakage check: a ``True`` entry means the document's
+    ``content_sha256`` is in ``TRAINING_REPO``'s ``documents`` set, so its
+    fast-path accuracy must be excluded from the KPIs. ``manifest`` is a
+    local JSONL file/dir; an unreadable manifest yields all-``False``.
+    """
+    known = load_manifest_sha256(manifest)
+    return {doc.filename: doc.content_sha256 in known for doc in docs}
 
 
 # --------------------------------------------------------------------------- loaders
@@ -213,8 +345,13 @@ def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> li
 def _join(
     blind_rows: list[Any], gt_rows: list[Any]
 ) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
-    docs = [_blind_from_row(row) for row in blind_rows]
-    gts = {gt.filename: gt for gt in (_ground_truth_from_row(row) for row in gt_rows)}
+    pairs = [(_ground_truth_from_row(row), _row_get(row, _SHA_KEYS)) for row in gt_rows]
+    gts = {gt.filename: gt for gt, _ in pairs}
+    sha_by_name = {gt.filename: sha for gt, sha in pairs if sha is not None}
+    docs: list[BlindDoc] = []
+    for row in blind_rows:
+        name = str(_row_get(row, ("filename", "file", "name"), "")).strip()
+        docs.append(_blind_from_row(row, sha_by_name.get(name)))
     return docs, gts
 
 

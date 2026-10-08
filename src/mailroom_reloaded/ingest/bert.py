@@ -41,8 +41,18 @@ def _unavailable(reason: Reason) -> BertVerdict:
     return BertVerdict(available=False, reason=reason)
 
 
-def classify_primary(text: str, cfg: BertCfg | None = None) -> BertVerdict:
-    """Classify with mailroom_ml. Never raises."""
+def classify_primary(
+    text: str, cfg: BertCfg | None = None, *, filename: str | None = None
+) -> BertVerdict:
+    """Classify with ``mailroom_ml``. Never raises (fail-open to FULL).
+
+    Prefers the ``classify_document_default`` seam -- the real public entry
+    point that resolves the default bundle and maps a missing model to the
+    ``no_model`` / ``bundle_missing`` / ``model_missing`` markers -- and
+    falls back to the legacy ``classify_document`` callable if the installed
+    package predates it. ``filename`` is threaded through so the classifier
+    can derive its window title.
+    """
     try:
         cfg = cfg if cfg is not None else load_taxonomy().bert
         if not cfg.enabled:
@@ -53,17 +63,37 @@ def classify_primary(text: str, cfg: BertCfg | None = None) -> BertVerdict:
             inference = importlib.import_module("mailroom_ml.inference")
         except ImportError:
             return _unavailable("no_package")
-        classifier = inference.classify_document
-        try:
-            result = classifier(text)
-        except FileNotFoundError:
-            return _unavailable("no_model")
-        except Exception:
-            logger.exception("bert_classify_failed")
-            return _unavailable("error")
+        default_seam = getattr(inference, "classify_document_default", None)
+        if default_seam is not None:
+            try:
+                result = default_seam(text, filename=filename)
+            except FileNotFoundError:
+                return _unavailable("no_model")
+            except Exception:
+                logger.exception("bert_classify_failed")
+                return _unavailable("error")
+        else:
+            classifier = getattr(inference, "classify_document", None)
+            if classifier is None:
+                return _unavailable("no_package")
+            try:
+                result = classifier(text)
+            except FileNotFoundError:
+                return _unavailable("no_model")
+            except Exception:
+                logger.exception("bert_classify_failed")
+                return _unavailable("error")
         if not isinstance(result, dict):
             return _unavailable("error")
-        if result.get("status") in _MISSING_MARKERS or result.get("reason") in _MISSING_MARKERS:
+        status = result.get("status")
+        reason = result.get("reason")
+        if status in _MISSING_MARKERS or reason in _MISSING_MARKERS:
+            return _unavailable("no_model")
+        if reason == "oversize_chars":
+            return _unavailable("too_long")
+        if status == "failure" or reason == "bert_error":
+            return _unavailable("error")
+        if result.get("route") == "llm" and result.get("doc_type") is None:
             return _unavailable("no_model")
         return BertVerdict(
             available=True,

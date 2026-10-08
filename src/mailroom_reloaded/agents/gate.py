@@ -9,6 +9,7 @@ from typing import Literal, Protocol
 
 import numpy as np
 
+from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.settings import Taxonomy, get_settings, load_taxonomy
 
 Stage = Literal["classify", "extract"]
@@ -170,9 +171,21 @@ def load_gate() -> RouteGate:
     """Return a ``LearnedGate`` when ``models/route_gate.json`` exists, else bands."""
     band = BandGate(load_taxonomy())
     path = get_settings().base_dir / "models" / "route_gate.json"
-    if path.exists():
-        return LearnedGate(band, path)
-    return band
+    gate: RouteGate = LearnedGate(band, path) if path.exists() else band
+    return _ObservedGate(gate)
+
+
+class _ObservedGate:
+    """Wrap a route gate so every decision is counted (``mailroom.gate.decisions``)."""
+
+    def __init__(self, inner: RouteGate) -> None:
+        self._inner = inner
+
+    def decide(self, f: GateFeatures) -> GateDecision:
+        """Delegate to ``inner`` and record the decision by stage and action."""
+        decision = self._inner.decide(f)
+        M.gate_decisions.add(1, {"stage": f.stage, "decision": decision.action})
+        return decision
 
 
 def ece(confidences, correct, bins: int = 10) -> float:
