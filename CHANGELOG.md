@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sandbox M6 content loader (stacked on M0): `mailroom_reloaded.sandbox.content` (loader, compat check, `sandbox/content.lock` + bundle sha256 verifier, bundle extraction), `mailroom sandbox content pull|validate|build|bump|status`, committed smoke fixtures under `src/mailroom_reloaded/sandbox/fixtures/smoke/` (content v0.5.0) and `sandbox/content.lock` pinning v0.5.0 (tag not yet published).
 - Sandbox M0 contracts: top-level `schemas/` (scenario v2, registry v1, overlay v1, gen_spec v1, persona_behavior v1, content-file schemas copied from content v0.5.0; new relation-kind, signal-kind and event-kind enum schemas), `docs/SANDBOX_CONTENT.md` (IDs, vocabulary, schema-major compat policy), `sandbox` extra (`jsonschema`) and example-validation tests.
 
 ## [0.2.0] - 2026-10-08
