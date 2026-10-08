@@ -11,7 +11,7 @@ Three paths, fastest first. Everything runs from the repo root.
 ## 0. Prerequisites
 
 - Python `>=3.11,<3.13` and [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- git; Docker + compose plugin for B and C; Node 20+ only for the TUI unit tests
+- git; Docker Engine 28.0.0 or newer + compose plugin for B and C; Node 20+ only for the TUI unit tests
 
 ```bash
 git clone https://github.com/Exios66/mailroom-reloaded.git
