@@ -39,12 +39,18 @@ def append(
     engine: Engine | None = None,
 ) -> AuditLogEntry:
     """Append an entry. A repeat of (doc_id, node, event) with an identical payload
-    returns the existing entry and stores nothing (resume-safe)."""
+    returns the existing entry and stores nothing (resume-safe).
+
+    Note: the chain detects edits, deletions in the middle and reordering, but
+    truncation of the tail is undetectable without an external anchor."""
     engine = engine or get_engine()
     payload = payload or {}
-    for _ in range(10):
+    for _ in range(50):
         try:
-            with engine.begin() as conn:
+            with engine.connect() as conn:
+                # Take the write lock before reading so concurrent appenders serialize
+                # (busy_timeout makes waiters block rather than fail).
+                conn.exec_driver_sql("BEGIN IMMEDIATE")
                 rows = conn.execute(
                     select(t).where(t.c.doc_id == doc_id).order_by(t.c.seq)
                 ).all()
@@ -54,6 +60,7 @@ def append(
                         if existing.payload == json.loads(
                             json.dumps(payload, default=str)
                         ):
+                            conn.rollback()
                             return existing
                 last = rows[-1] if rows else None
                 entry = AuditLogEntry(
@@ -77,6 +84,7 @@ def append(
                         entry_hash=entry.entry_hash,
                     )
                 )
+                conn.commit()
                 return entry
         except IntegrityError:
             continue  # concurrent writer took this seq; retry

@@ -102,3 +102,29 @@ def test_catalog_upsert_get_list(engine):
         "d1"
     ]
     assert len(catalog.list(2, 2, engine=engine)) == 1
+
+
+def _worker(path, k, n):
+    eng = init_db(path)
+    for i in range(n):
+        audit_log.append("shared", f"w{k}", f"e{i}", {"k": k, "i": i}, engine=eng)
+    eng.dispose()
+
+
+def test_concurrent_appends_across_processes(tmp_path):
+    import multiprocessing as mp
+
+    path = tmp_path / "c.db"
+    eng = init_db(path)
+    procs, n = 4, 30
+    ctx = mp.get_context("spawn")
+    ps = [ctx.Process(target=_worker, args=(path, k, n)) for k in range(procs)]
+    for p in ps:
+        p.start()
+    for p in ps:
+        p.join(60)
+        assert p.exitcode == 0
+    es = audit_log.entries("shared", engine=eng)
+    assert len(es) == procs * n
+    assert audit_log.verify_chain(es).ok
+    eng.dispose()

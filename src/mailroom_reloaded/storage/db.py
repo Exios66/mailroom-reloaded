@@ -58,6 +58,9 @@ def _pragmas(dbapi_conn, _record) -> None:
     cur.execute("PRAGMA journal_mode=WAL")
     cur.execute("PRAGMA busy_timeout=5000")
     cur.close()
+    # Take manual control of transactions (SQLAlchemy pysqlite recipe) so callers can
+    # issue BEGIN IMMEDIATE themselves; single statements autocommit.
+    dbapi_conn.isolation_level = None
 
 
 def init_db(path: str | Path) -> Engine:
