@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import glob
 import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -68,6 +69,42 @@ def resolve_review(
         if doc_subclass:
             payload["doc_subclass"] = doc_subclass
 
+    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
+    worker_id = f"review-{worker_reviewer}"
+    # Claim the parked file by atomic rename so only one concurrent resolver wins.
+    claimed = bins.claim(path, worker_id)
+    if claimed is None:
+        logger.info("review_claim_lost", doc_id=doc_id)
+        return None
+
+    try:
+        return _resolve_claimed(
+            bins, manifest, claimed, action, payload, doc_type, doc_subclass,
+            reviewer, worker_id,
+        )
+    except BaseException:
+        # Keep the doc parked: put the file back and restore the parked manifest.
+        try:
+            if claimed.is_file():
+                os.replace(claimed, path)
+            save_manifest(bins, manifest)
+        except OSError:
+            logger.exception("review_restore_failed", doc_id=doc_id)
+        raise
+
+
+def _resolve_claimed(
+    bins: Bins,
+    manifest: Manifest,
+    path: Path,
+    action: ReviewAction,
+    payload: dict[str, Any],
+    doc_type: str | None,
+    doc_subclass: str | None,
+    reviewer: str,
+    worker_id: str,
+) -> MailroomState:
+    doc_id = manifest.doc_id
     if action == "reject":
         dest = bins.move(path, "failed")
         state = _restore_state(manifest)
@@ -87,10 +124,9 @@ def resolve_review(
         if doc_subclass:
             overrides["doc_subclass"] = doc_subclass
 
-    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
     state = _flow.run_document(
         path,
-        worker_id=f"review-{worker_reviewer}",
+        worker_id=worker_id,
         resume_from="extract",
         overrides=overrides,
     )

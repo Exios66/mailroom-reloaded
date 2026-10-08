@@ -351,11 +351,13 @@ def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
 
     class FakeWatcher:
         def __init__(self, *args):
-            pass
+            self.ready = threading.Event()
 
         def run_forever(self):
             started.set()
             try:
+                if failure != "lock":
+                    self.ready.set()
                 if failure:
                     raise error
                 assert stopped.wait(5)
@@ -375,10 +377,17 @@ def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
     assert stopped.is_set()
     assert finished.is_set()
     assert not application.state.watcher_thread.is_alive()
-    if failure:
+    events = [c.args[0] for c in log.info.call_args_list]
+    if failure == "lock":
+        log.exception.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.args[0] == "embedded_watcher_not_started"
+        assert "embedded_watcher_started" not in events
+    elif failure:
         log.exception.assert_called_once_with("embedded_watcher_failed")
     else:
         log.exception.assert_not_called()
+        assert "embedded_watcher_started" in events
 
 
 # ---------------------------------------------------------------- review fixes

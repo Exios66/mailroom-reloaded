@@ -29,6 +29,7 @@ import json
 import os
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -432,14 +433,23 @@ async def lifespan(application: FastAPI):
     watcher = None
     watcher_thread = None
     if _embed_watcher_enabled():
-        from mailroom_reloaded.watcher import Watcher
+        from mailroom_reloaded.watcher import Watcher, WatcherLockHeld
 
         watcher = Watcher(_bins(), f"api-{os.getpid()}", 1)
+        settled = threading.Event()  # set once started, or once it gave up
+
         def run_watcher() -> None:
             try:
                 watcher.run_forever()
+            except WatcherLockHeld:
+                logger.warning(
+                    "embedded_watcher_not_started",
+                    reason="another watcher holds watcher.lock",
+                )
             except Exception:
                 logger.exception("embedded_watcher_failed")
+            finally:
+                settled.set()
 
         watcher_thread = threading.Thread(
             target=run_watcher, name="mailroom-embedded-watcher", daemon=True
@@ -447,7 +457,19 @@ async def lifespan(application: FastAPI):
         watcher_thread.start()
         application.state.watcher = watcher
         application.state.watcher_thread = watcher_thread
-        logger.info("embedded_watcher_started")
+        ready = getattr(watcher, "ready", None)
+
+        def _wait_started() -> bool:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if ready is not None and ready.is_set():
+                    return True
+                if settled.wait(0.02):
+                    return ready is not None and ready.is_set()
+            return ready is not None and ready.is_set()
+
+        if await asyncio.to_thread(_wait_started):
+            logger.info("embedded_watcher_started")
     try:
         yield
     finally:
