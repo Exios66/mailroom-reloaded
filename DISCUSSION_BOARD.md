@@ -49,6 +49,17 @@ this is a ledger, not a governance board.
   (domain-specific). **Caveat:** 68/250 states were truncated to 60k chars (OpenRouter
   `max_tokens_exceeded`); a features-based harvest over `_jev_state(GateFeatures)` is the
   faithful follow-up. Shipped calibration does not transfer (issue #8).
+- **Features-mode harvest (live, 2026-10-08):** `scripts/jev_harvest.py --mode features` now
+  sends the compact production `_jev_state(GateFeatures)` + `_jev_questions()` (never
+  truncated); `scripts/jev_export_gate_features.py` exports `eval_docs.gate_features` + GT
+  labels. Ran a bounded train eval (125 docs → 91 usable gate-feature rows, Jev route
+  agreement 0.923). **Refit is degenerate:** every `retry_expected`/`review_expected` in the
+  dataset is `"false"`, so the threshold search plateaus at `accept=1.0` and ECE worsens
+  (0.329→0.367) — the labels carry no positive escalation examples. **Restored** the
+  docs-mode fit (temp 1.520, accept 0.777, verify 0.741, ECE 0.0245, n=250); the
+  features-mode code path is correct and will fit meaningfully once labels are non-degenerate.
+- **Also fixed:** `eval/runner._write_doc` now creates parent dirs, so nested Enron filenames
+  (`owner/folder/n.`) no longer abort the eval run (regression test added).
 
 ---
 
