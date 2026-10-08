@@ -35,11 +35,20 @@ this is a ledger, not a governance board.
 - **Evidence:** `uv run pytest -q` → 610 passed, 1 skipped, 2 deselected;
   `uv run ruff check .` clean; Jev tests proven no-network (fake transport).
 - **Commits:** `6691524` Jev scorer + gate; `007a0de` docs; `6d20939` consume
-  `verify_threshold`; rebased over CodeRabbit `2bdebcf` / `9f34df0`.
-- **Notes:** Jev is off by default and needs `models/jev_calibration.json`. `JevGate` now uses
-  the official three-tier pattern: `<verify` → `human_review`; `verify <= c < accept` → `verify`
-  (never downgrading a Jev escalation choice); `>= accept` → the chosen action. Shipped
-  calibration does not transfer (issue #8).
+  `verify_threshold`; `22a2689` adversarial fixes; `32060e8` doc corrections; `3025e2e` `.env`
+  support + `scripts/jev_harvest.py`.
+- **Calibration (live, 2026-10-08):** `scripts/jev_harvest.py` sampled the train split
+  (50/class, 250 docs) and asked Jev the doc-type `choice` question — accuracy **0.952**
+  (238/250); `mailroom jev calibrate` fit `data/models/jev_calibration.json`: temperature
+  **1.520**, accept **0.777**, verify **0.741**, ECE **0.0271 → 0.0245** (n=250). With
+  `MAILROOM_JEV_PROVIDER=openrouter` (from `.env`), `load_gate()` returns a **`JevGate`**.
+- **Notes:** Jev is off by default and needs `<base_dir>/models/jev_calibration.json`. `JevGate`
+  uses the official three-tier pattern: `<verify` → `human_review`; `verify <= c < accept` →
+  `verify` (never downgrading a Jev escalation choice); `>= accept` → the chosen action.
+  `JEV_*` now resolves from `.env` like other settings (os.environ wins). Artifact is gitignored
+  (domain-specific). **Caveat:** 68/250 states were truncated to 60k chars (OpenRouter
+  `max_tokens_exceeded`); a features-based harvest over `_jev_state(GateFeatures)` is the
+  faithful follow-up. Shipped calibration does not transfer (issue #8).
 
 ---
 
