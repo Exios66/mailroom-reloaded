@@ -44,9 +44,9 @@ class FakeOpenAI:
     def length_capped(self, content: str = '{"partial": ') -> FakeOpenAI:
         return self.reply(content, finish_reason="length")
 
-    def fail(self, status: int, times: int = 1) -> FakeOpenAI:
+    def fail(self, status: int, times: int = 1, message: str = "scripted failure") -> FakeOpenAI:
         for _ in range(times):
-            self._queue.append({"kind": "fail", "status": status})
+            self._queue.append({"kind": "fail", "status": status, "message": message})
         return self
 
     def reject_tools(self) -> FakeOpenAI:
@@ -81,7 +81,7 @@ class FakeOpenAI:
                     return JSONResponse({"error": {"message": "script exhausted"}}, status_code=418)
                 item = self._queue.popleft()
             if item["kind"] == "fail":
-                return JSONResponse({"error": {"message": "scripted failure"}}, status_code=item["status"])
+                return JSONResponse({"error": {"message": item["message"]}}, status_code=item["status"])
             return JSONResponse(self._completion(item, body))
 
         return app
@@ -99,7 +99,7 @@ class FakeOpenAI:
                     "function": {"name": item["name"], "arguments": json.dumps(item["args"])},
                 }
             ]
-            finish = "tool_calls"
+            finish = item.get("finish_reason", "tool_calls")
         else:
             message["content"] = item["content"]
             finish = item["finish_reason"]

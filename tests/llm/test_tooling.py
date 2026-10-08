@@ -2,9 +2,10 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
+import pytest
 from pydantic import BaseModel
 
-from mailroom_reloaded.llm.client import call_structured
+from mailroom_reloaded.llm.client import LengthFinishReasonError, call_structured
 from mailroom_reloaded.llm.tooling import ToolLike
 
 RF = {
@@ -70,7 +71,8 @@ def test_tool_spec_built_from_params_model(mock_provider):
     assert mock_provider.requests[0]["tool_choice"] == "auto"
 
 
-def test_tool_loop_cap_three_rounds(mock_provider):
+def test_tool_loop_cap_three_rounds(vllm_provider):
+    mock_provider = vllm_provider
     for _ in range(3):
         mock_provider.tool_call("list_subclasses", {"doc_type": "contract"})
     mock_provider.reply('{"label": "memo"}')
@@ -82,7 +84,8 @@ def test_tool_loop_cap_three_rounds(mock_provider):
     assert res.parsed == {"label": "memo"}
 
 
-def test_two_phase_tools_then_schema(mock_provider):
+def test_two_phase_tools_then_schema(vllm_provider):
+    mock_provider = vllm_provider
     mock_provider.tool_call("list_subclasses", {"doc_type": "contract"})
     mock_provider.reply("done").reply('{"label": "memo"}')
     _run()
@@ -162,3 +165,45 @@ def test_tool_arguments_are_json_encoded_in_history(mock_provider):
     assistant = next(m for m in mock_provider.requests[1]["messages"] if m["role"] == "assistant")
     call = assistant["tool_calls"][0]
     assert json.loads(call["function"]["arguments"]) == {"doc_type": "contract"}
+
+
+def test_final_turn_has_no_tool_choice_off_vllm(mock_provider):
+    mock_provider.reply("d").reply('{"label": "m"}')
+    _run()
+    assert "tool_choice" not in mock_provider.requests[-1]
+    assert "tools" not in mock_provider.requests[-1]
+
+
+def test_context_overflow_400_propagates_and_does_not_poison_cache(mock_provider):
+    import openai
+
+    from mailroom_reloaded.llm import tooling
+
+    mock_provider.fail(400, message="maximum context length is 8192 tokens, you sent 9000")
+    with pytest.raises(openai.BadRequestError):
+        _run()
+    assert tooling._NO_TOOLS == set()
+    assert len(mock_provider.requests) == 1
+
+
+def test_tool_unsupported_400_falls_back_and_caches(mock_provider):
+    from mailroom_reloaded.llm import tooling
+
+    mock_provider.fail(400, message="This model does not support tool calling")
+    mock_provider.reply('{"label": "m"}')
+    res = _run()
+    assert res.parsed == {"label": "m"}
+    assert len(tooling._NO_TOOLS) == 1
+
+
+def test_length_on_discarded_draft_does_not_raise(mock_provider):
+    mock_provider.length_capped("rambling draft").reply('{"label": "m"}')
+    res = _run()
+    assert res.parsed == {"label": "m"} and res.finish_reason == "stop"
+
+
+def test_length_on_tool_call_round_raises(mock_provider):
+    mock_provider.tool_call("list_subclasses", {"doc_type": "contract"})
+    mock_provider._queue[-1]["finish_reason"] = "length"
+    with pytest.raises(LengthFinishReasonError):
+        _run()

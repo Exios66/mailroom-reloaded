@@ -23,3 +23,10 @@ def mock_provider(monkeypatch, fake_openai):  # noqa: F811
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
+
+
+@pytest.fixture
+def vllm_provider(monkeypatch, fake_openai):  # noqa: F811
+    monkeypatch.setenv("DEFAULT_PROVIDER", "vllm")
+    monkeypatch.setenv("VLLM_BASE_URL", fake_openai.base_url)
+    return fake_openai

@@ -27,6 +27,7 @@ from .tooling import (
     LengthFinishReasonError,
     ToolLike,
     chat_create,
+    mark_no_tools,
     run_tool_loop,
 )
 from .usage import Usage
@@ -225,23 +226,22 @@ def call_structured(
     tool_rounds = 0
     final_messages = req["messages"]
     tools_in_play = False
-    if tools and r.supports_tools is not False:
+    loop = None
+    if tools:
         loop = run_tool_loop(client, req, list(tools))
         usage, tool_rounds, final_messages = usage + loop.usage, loop.rounds, loop.messages
         tools_in_play = not loop.inline
-    elif tools:
-        from .tooling import inline_messages
-
-        final_messages, _ = inline_messages(final_messages, list(tools), [])
     final: dict[str, Any] = {**req, "messages": final_messages}
     if response_format is not None:
         final["response_format"] = response_format
-    if tools_in_play:
+    if tools_in_play and r.provider == "vllm":  # others reject tool_choice without tools
         final["tool_choice"] = "none"
     if logprobs and r.supports_logprobs:
         final["logprobs"] = True
     resp, u = chat_create(client, final)
     usage = usage + u
+    if loop is not None and loop.reject_key is not None:
+        mark_no_tools(loop.reject_key)  # inline retry worked, so the rejection was about tools
     choice = resp.choices[0]
     finish = choice.finish_reason or "stop"
     if finish == "length":

@@ -47,6 +47,7 @@ class ToolLoopResult:
     rounds: int
     usage: Usage
     inline: bool = False
+    reject_key: tuple[str, str] | None = None  # set when round 1 was rejected for tool support
     tool_log: list[tuple[str, dict[str, Any], str]] = field(default_factory=list)
 
 
@@ -56,6 +57,19 @@ _NO_TOOLS: set[tuple[str, str]] = set()
 
 def reset_tool_support_cache() -> None:
     _NO_TOOLS.clear()
+
+
+_TOOL_REJECTION_MARKERS = ("tool", "function")
+
+
+def is_tool_rejection(exc: Exception) -> bool:
+    """A 400 whose body says the endpoint/model does not support tool calling."""
+    text = str(exc).lower()
+    return any(m in text for m in _TOOL_REJECTION_MARKERS)
+
+
+def mark_no_tools(key: tuple[str, str]) -> None:
+    _NO_TOOLS.add(key)
 
 
 def tool_spec(tool: ToolLike) -> dict[str, Any]:
@@ -181,6 +195,7 @@ def run_tool_loop(
     tool_map = {t.name: t for t in tools}
     log: list[tuple[str, dict[str, Any], str]] = []
     rounds = 0
+    reject_key: tuple[str, str] | None = None
     messages = list(base_messages)
     if key not in _NO_TOOLS:
         specs = [tool_spec(t) for t in tools]
@@ -191,16 +206,18 @@ def run_tool_loop(
                     client, {**phase, "messages": messages, "tools": specs, "tool_choice": "auto"}
                 )
             except openai.BadRequestError as exc:
+                if not is_tool_rejection(exc):
+                    raise
                 logger.warning("llm_tools_rejected", model=req.get("model"), detail=str(exc)[:200])
-                _NO_TOOLS.add(key)
+                reject_key = key if rounds == 0 else None
                 break
             usage = usage + u
             choice = resp.choices[0]
+            calls = choice.message.tool_calls or []
+            if not calls:  # draft reply is discarded, so a length cap on it is irrelevant
+                return ToolLoopResult(messages, rounds, usage, False, None, log)
             if choice.finish_reason == "length":
                 raise LengthFinishReasonError("output hit the length cap during a tool round")
-            calls = choice.message.tool_calls or []
-            if not calls:
-                return ToolLoopResult(messages, rounds, usage, False, log)
             messages.append(
                 {
                     "role": "assistant",
@@ -225,7 +242,7 @@ def run_tool_loop(
                 messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
             rounds += 1
         else:
-            return ToolLoopResult(messages, rounds, usage, False, log)
+            return ToolLoopResult(messages, rounds, usage, False, None, log)
     # Endpoint rejected (now or earlier) tool calling: inline fallback.
     inlined, log = inline_messages(base_messages, tools, log)
-    return ToolLoopResult(inlined, rounds, usage, True, log)
+    return ToolLoopResult(inlined, rounds, usage, True, reject_key, log)
