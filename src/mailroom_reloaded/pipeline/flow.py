@@ -387,6 +387,18 @@ class MailroomFlow(Flow[MailroomState]):
         manifest.state = state.model_dump(mode="json")
         save_manifest(self._bins, manifest)
         audit_log.append(state.doc_id, "human_review", "parked", {"reason": reason})
+        try:
+            catalog.upsert(
+                CatalogRecord(
+                    doc_id=state.doc_id,
+                    filename=manifest.filename,
+                    doc_type=self._effective_doc_type(),
+                    doc_subclass=self._effective_subclass(),
+                    status="parked",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - catalog is best-effort durability
+            logger.warning("catalog_upsert_failed", doc_id=state.doc_id, error=str(exc))
         return state
 
     # --------------------------------------------------------------- routes
@@ -406,7 +418,9 @@ class MailroomFlow(Flow[MailroomState]):
             doc_type_disagree=s.doc_type_disagree if s is not None else False,
             resorted=state.resorted,
         )
-        action = self._gate.decide(features).action
+        decision = self._gate.decide(features)
+        action = decision.action
+        self._audit_gate("classify", decision, features.confidence)
         M.gate_decisions.add(1, {"stage": "classify", "decision": action})
         return {
             "proceed": "do_extract",
@@ -435,7 +449,9 @@ class MailroomFlow(Flow[MailroomState]):
             ),
             resorted=state.resorted,
         )
-        action = self._gate.decide(features).action
+        decision = self._gate.decide(features)
+        action = decision.action
+        self._audit_gate("extract", decision, features.confidence)
         M.gate_decisions.add(1, {"stage": "extract", "decision": action})
         return {
             "proceed": "report",
@@ -444,6 +460,16 @@ class MailroomFlow(Flow[MailroomState]):
             "boss": "do_boss",
             "human_review": "human_review",
         }.get(action, "human_review")
+
+    def _audit_gate(self, stage: str, decision, conf: float | None) -> None:
+        """Record a gate decision (small, JSON-safe) in the audit chain."""
+        payload = {
+            "action": str(decision.action),
+            "reason": str(getattr(decision, "reason", ""))[:200],
+            "source": str(getattr(decision, "source", "")),
+            "confidence": round(float(conf), 4) if isinstance(conf, (int, float)) else None,
+        }
+        audit_log.append(self.state.doc_id, f"gate_{stage}", "gate_decision", payload)
 
     def _arbiter_route(self) -> str:
         """Map the arbiter decision to a driver target."""

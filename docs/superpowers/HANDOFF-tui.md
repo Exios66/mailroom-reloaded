@@ -1,8 +1,8 @@
 # Handoff: browser TUI (`/tui`)
 
-Status as of 2026-10-08: **all 8 tasks implemented and live-verified** in a real browser (boot, ls/inspect/audit, themes, persistence, auth, offline, mobile). Remaining: PR review/merge. See docs/TUI.md for the checklist and commands.
+Status as of 2026-10-08: **built, merged and hardened.** All 8 tasks were implemented and live-verified in a real browser, merged to `feat/mailroom-reloaded-completion` via PR #13, then hardened on `feat/jev-tui-hardening` (`jev` command, gate audit display, review fixes, docs). Remaining: PR review/merge of the hardening branch and the live-browser checklist re-run with committed screenshots. See docs/TUI.md for the checklist and commands and the Status section of the plan for per-task evidence.
 
-- Branch: `feat/tui-brand-theme` (from `feat/mailroom-reloaded-completion` @ `3865485`). Not merged; PR #5 is a separate, still-open effort.
+- Branch history: `feat/tui-brand-theme` (merged, #13) then `feat/jev-tui-hardening` (based on the completion branch). PR #5 (completion) is still open.
 - Plan: [plans/2026-10-08-mailroom-tui.md](plans/2026-10-08-mailroom-tui.md) (8 tasks, each ends in a commit).
 - Prior build context: [plans/2026-10-07-mailroom-reloaded.md](plans/2026-10-07-mailroom-reloaded.md), tracking issue Exios66/mailroom-reloaded#1.
 
@@ -42,8 +42,8 @@ Only the **Terminal** edition applies. Do not mix console (unprefixed) or `obs-`
 
 1. ~~Banner art~~ **Resolved:** the kit's banner is damaged, so `banner.txt` / `banner-compact.txt` are original `MAILROOM` wordmarks (block + box-drawing). Swap them if the owner supplies the original.
 2. **Execution method** for the plan (subagent-driven vs inline).
-3. Whether the kit's *proposed* light theme should ship (the plan includes it as a selectable theme).
+3. ~~Light theme~~ **Resolved:** ships as a selectable theme, labelled proposed, not the default.
 
 ## Definition of done
 
-All eight tasks committed; `uv run pytest -q` and `uv run ruff check .` green; the nine-point live browser checklist in Task 8 passed with screenshots; `docs/TUI.md` written; PR opened against `feat/mailroom-reloaded-completion` (or `main` after PR #5 merges) linking issue #1.
+Met except screenshots: all eight tasks committed; `uv run pytest -q` and `uv run ruff check .` green; the nine-point live browser checklist passed in-session (screenshots not committed); `docs/TUI.md` written; PR #13 merged against `feat/mailroom-reloaded-completion` (or `main` after PR #5 merges) linking issue #1.

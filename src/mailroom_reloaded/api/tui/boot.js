@@ -4,6 +4,7 @@
 
 export const BANNER_MS = 900;
 export const LINE_MS = 160;
+const CATALOG_LIMIT = 500;
 
 const CLOSED = 'mailroom closed — no api connection';
 const LOCKED_STATUS = 'locked — api token required';
@@ -46,6 +47,8 @@ function reasonOf(err) {
  */
 export async function boot(ctx, opts = {}) {
   const { reducedMotion = false, signal, banner = '', bannerCompact = '', compact = false } = opts;
+  const crtOn = opts.crt === undefined ? true : Boolean(opts.crt);
+  const themeLabel = opts.theme || 'amber';
   const sleep = typeof opts.sleep === 'function' ? opts.sleep : defaultSleep;
   const { out, api, setStatus } = ctx;
 
@@ -75,7 +78,7 @@ export async function boot(ctx, opts = {}) {
   out.banner(compact ? bannerCompact : banner);
   await pause(BANNER_MS);
   await say('mailroom@floor — mailroom-reloaded visual engine');
-  await say('boot: tty · crt on · theme amber', 'dim');
+  await say(`boot: tty · crt ${crtOn ? 'on' : 'off'} · theme ${themeLabel}`, 'dim');
 
   // api /health
   let health;
@@ -108,7 +111,7 @@ export async function boot(ctx, opts = {}) {
   // catalog count: the limit=1 probe above returns at most one row, so count with a wider page.
   let catalog;
   try {
-    catalog = await api.get('/v1/documents', { limit: 500 });
+    catalog = await api.get('/v1/documents', { limit: CATALOG_LIMIT });
   } catch (err) {
     if (err && err.kind === 'unauthorized') {
       await say(TOKEN_LINE, 'error');
@@ -124,7 +127,8 @@ export async function boot(ctx, opts = {}) {
       : catalog && Array.isArray(catalog.documents)
         ? catalog.documents.length
         : 0;
-  await say(`[ ok ] catalog · ${docCount} documents`, 'success');
+  const shown = docCount >= CATALOG_LIMIT ? `${docCount}+` : String(docCount);
+  await say(`[ ok ] catalog · ${shown} documents`, 'success');
 
   // eval runs: optional detail, a failure here does not close the terminal.
   try {
@@ -133,6 +137,19 @@ export async function boot(ctx, opts = {}) {
     await say(`[ ok ] eval runs · ${runCount}`, 'success');
   } catch (err) {
     await say(`[ !! ] eval runs · ${reasonOf(err)}`, 'error');
+  }
+
+  // jev gate: optional detail; failures (including 401) are silent.
+  try {
+    const jev = await api.get('/v1/jev');
+    if (jev && jev.enabled) {
+      const state = jev.calibrated ? 'calibrated' : 'uncalibrated';
+      await say(`[ ok ] jev · ${String(jev.provider || 'jev')} ${state}`, 'success');
+    } else if (jev) {
+      await say('[ -- ] jev · off', 'dim');
+    }
+  } catch {
+    // non-fatal
   }
 
   return finish('live');

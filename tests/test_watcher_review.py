@@ -432,3 +432,47 @@ def test_catalog_failure_sets_pending_and_startup_reconciles(
     rec = catalog.get(doc_id)
     assert rec is not None and rec.status == "archived"
     assert load_manifest(bins, doc_id).catalog_pending is None
+
+def test_parked_document_is_cataloged_as_parked(env, mock_provider, monkeypatch):
+    """Parked documents appear in the catalog so status listings can find them."""
+    from mailroom_reloaded.storage import catalog
+
+    _bins, parked = _park(env, mock_provider, monkeypatch)
+
+    rec = catalog.get(parked.doc_id)
+    assert rec is not None and rec.status == "parked"
+    assert [r.doc_id for r in catalog.list(status="parked")] == [parked.doc_id]
+
+
+def test_reject_updates_catalog_to_failed(env, mock_provider, monkeypatch):
+    """Rejecting a parked document moves its catalog row out of 'parked'."""
+    from mailroom_reloaded.storage import catalog
+
+    _bins, parked = _park(env, mock_provider, monkeypatch)
+    resolve_review(parked.doc_id, "reject", reviewer="bob")
+
+    rec = catalog.get(parked.doc_id)
+    assert rec is not None and rec.status == "failed"
+    assert catalog.list(status="parked") == []
+
+
+def test_approve_updates_catalog_to_archived(env, mock_provider, monkeypatch):
+    """Resolving a parked document by correction archives the catalog row."""
+    from mailroom_reloaded.storage import catalog
+
+    _bins, parked = _park(env, mock_provider, monkeypatch)
+
+    def fake_extract(text, doc_type, doc_subclass, **kwargs):
+        return ExtractResult(
+            doc_type, {"field": "value"}, True, None, 0.99, None, 1,
+            Usage(prompt_tokens=5, completion_tokens=5, calls=1),
+        )
+
+    monkeypatch.setattr(flow_mod, "_extract", fake_extract)
+    resolve_review(
+        parked.doc_id, "correct", doc_type="insurance_claim", doc_subclass="fnol"
+    )
+
+    rec = catalog.get(parked.doc_id)
+    assert rec is not None and rec.status == "archived"
+    assert catalog.list(status="parked") == []

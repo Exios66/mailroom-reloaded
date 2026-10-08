@@ -61,11 +61,11 @@ docs/TUI.md
 **Interfaces:**
 - Produces: `GET /tui` and `GET /tui/` (HTML), static mount `/tui/assets/*` for every file in `api/tui/`. `/tui` is public like `/ui`; `/v1` stays token-gated. `index.html` links `assets/tokens.css`, `assets/tui.css`, and `<script type="module" src="assets/main.js">`.
 
-- [ ] **Step 1: Write failing tests** in `tests/api/test_tui_serving.py` using the `TestClient` fixture pattern from `tests/api/test_api.py`: `test_tui_page_served` (200, `text/html`, body contains `id="output"` and `assets/main.js`), `test_tui_assets_served` (`/tui/assets/tokens.css` 200 and contains `--term-amber: #ffb86c` and `--term-bg-deep: #050709`), `test_tui_asset_traversal_rejected` (`/tui/assets/..%2f..%2fsettings.py` is 404), `test_tui_public_with_token_set` (token configured, `/tui` 200, `/v1/documents` 401), `test_ui_unchanged` (`/ui` still 200).
-- [ ] **Step 2: Run** `uv run pytest tests/api/test_tui_serving.py -v`. Expected: FAIL (404).
-- [ ] **Step 3: Implement.** Extract every `--term-*` declaration from the kit's dark `:root`, the `light` block and the `hc` block of `project/tokens.css` into `tokens.css` under selectors `:root`, `:root[data-theme="light"]`, `:root[data-theme="hc"]`; add `:root[data-phosphor="green"]` (maps `--term-amber`/`-bright` to `--term-phosphor`/`-bright`) and `[data-phosphor="cyan"]` likewise; add the shape/spacing tokens (`--term-pad-y/x`, `--term-list-gap`, radii). Header comment names the artifact URL and version `1791433356-cf55`. `index.html` is the skeleton: `header.status-bar`, `main#output.terminal`, `.prompt-line`, `.ambient-skyline`, `.crt-overlay`, `.grain`, plus a `<noscript>` line `tui needs javascript — the runs page works without it: /ui`. Add `StaticFiles(directory=_TUI_DIR)` mounted at `/tui/assets` and the two page routes in `create_app()`.
-- [ ] **Step 4: Run** the same command. Expected: PASS. Then `uv run pytest tests/api -q` stays green.
-- [ ] **Step 5: Commit** `feat(tui): serve /tui with vendored terminal brand tokens`.
+- [x] **Step 1: Write failing tests** in `tests/api/test_tui_serving.py` using the `TestClient` fixture pattern from `tests/api/test_api.py`: `test_tui_page_served` (200, `text/html`, body contains `id="output"` and `assets/main.js`), `test_tui_assets_served` (`/tui/assets/tokens.css` 200 and contains `--term-amber: #ffb86c` and `--term-bg-deep: #050709`), `test_tui_asset_traversal_rejected` (`/tui/assets/..%2f..%2fsettings.py` is 404), `test_tui_public_with_token_set` (token configured, `/tui` 200, `/v1/documents` 401), `test_ui_unchanged` (`/ui` still 200).
+- [x] **Step 2: Run** `uv run pytest tests/api/test_tui_serving.py -v`. Expected: FAIL (404).
+- [x] **Step 3: Implement.** Extract every `--term-*` declaration from the kit's dark `:root`, the `light` block and the `hc` block of `project/tokens.css` into `tokens.css` under selectors `:root`, `:root[data-theme="light"]`, `:root[data-theme="hc"]`; add `:root[data-phosphor="green"]` (maps `--term-amber`/`-bright` to `--term-phosphor`/`-bright`) and `[data-phosphor="cyan"]` likewise; add the shape/spacing tokens (`--term-pad-y/x`, `--term-list-gap`, radii). Header comment names the artifact URL and version `1791433356-cf55`. `index.html` is the skeleton: `header.status-bar`, `main#output.terminal`, `.prompt-line`, `.ambient-skyline`, `.crt-overlay`, `.grain`, plus a `<noscript>` line `tui needs javascript — the runs page works without it: /ui`. Add `StaticFiles(directory=_TUI_DIR)` mounted at `/tui/assets` and the two page routes in `create_app()`.
+- [x] **Step 4: Run** the same command. Expected: PASS. Then `uv run pytest tests/api -q` stays green.
+- [x] **Step 5: Commit** `feat(tui): serve /tui with vendored terminal brand tokens`.
 
 ### Task 2: Pure command engine
 
@@ -77,11 +77,11 @@ docs/TUI.md
   - `createRegistry(): {register(spec), get(name), names(): string[], complete(line): {matches: string[], ghost: string}}` where `spec = {name, summary, usage, man, run(ctx, args, flags): Promise<void>, complete?(ctx, args): string[]}`; `register` throws on duplicate names.
   - `createHistory(max = 200): {push(line), prev(): string|undefined, next(): string|undefined, reset(), all(): string[]}`; skips empty lines and consecutive duplicates; `push` is never called for masked commands (caller's job).
   - `dispatch(registry, ctx, line): Promise<'ok'|'unknown'|'error'>` — unknown prints `<cmd>: command not found — try help` via `ctx.out.line(text, 'error')`; a throwing `run` prints `<cmd>: <message>` as error and returns `'error'`.
-- [ ] **Step 1: Write failing node tests** (`node:test`): `parseLine('ls --status parked "a b"')` → cmd `ls`, flags `{status:'parked'}`, args `['a b']`; `parseLine('x "oops')` has `error`; `--k=v` form; history dedupe and `prev`/`next` walk; `complete('he')` → matches `['help']`, ghost `'lp'`; `complete('')` → no ghost; duplicate `register` throws; `dispatch` unknown message exact text; `dispatch` of a throwing command returns `'error'` and prints once.
-- [ ] **Step 2: Wire pytest.** `tests/tui/test_engine_js.py::test_engine_js_suite` runs `node --test tests/tui/js/*.test.mjs` via `subprocess.run`, asserts returncode 0; `pytest.skip` when `shutil.which("node")` is None. Run it. Expected: FAIL (module missing).
-- [ ] **Step 3: Implement `engine.js`** (no DOM, no imports).
-- [ ] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(tui): pure command engine with node tests`.
+- [x] **Step 1: Write failing node tests** (`node:test`): `parseLine('ls --status parked "a b"')` → cmd `ls`, flags `{status:'parked'}`, args `['a b']`; `parseLine('x "oops')` has `error`; `--k=v` form; history dedupe and `prev`/`next` walk; `complete('he')` → matches `['help']`, ghost `'lp'`; `complete('')` → no ghost; duplicate `register` throws; `dispatch` unknown message exact text; `dispatch` of a throwing command returns `'error'` and prints once.
+- [x] **Step 2: Wire pytest.** `tests/tui/test_engine_js.py::test_engine_js_suite` runs `node --test tests/tui/js/*.test.mjs` via `subprocess.run`, asserts returncode 0; `pytest.skip` when `shutil.which("node")` is None. Run it. Expected: FAIL (module missing).
+- [x] **Step 3: Implement `engine.js`** (no DOM, no imports).
+- [x] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
+- [x] **Step 5: Commit** `feat(tui): pure command engine with node tests`.
 
 ### Task 3: API client and token store
 
@@ -90,11 +90,11 @@ docs/TUI.md
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `class ApiError extends Error {status: number|null, kind: 'offline'|'unauthorized'|'http'}`; `createApi({fetchImpl = fetch, storage = sessionStorage, base = ''}): {get(path, query?), post(path, body?), upload(file), setToken(t), clearToken(), hasToken(): boolean, health(): Promise<{ok: boolean, status: number|null}>}`. Token lives only in `storage` key `mailroom.tui.token`; all requests send `Authorization: Bearer <t>` when set. Network failure → `ApiError(kind:'offline')`; 401 → `kind:'unauthorized'`; other non-2xx → `kind:'http'` with `detail` from the JSON body.
-- [ ] **Step 1: Write failing tests** with an injected fake `fetchImpl` and in-memory `storage`: bearer header present only after `setToken`; 401 → `unauthorized`; rejected fetch → `offline`; 404 detail surfaced; `clearToken` removes the key; the token never appears in the request URL; `upload` posts multipart to `/v1/documents`.
-- [ ] **Step 2: Run** `node --test tests/tui/js/api.test.mjs`. Expected: FAIL.
-- [ ] **Step 3: Implement `api.js`.**
-- [ ] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(tui): api client with session-scoped bearer token`.
+- [x] **Step 1: Write failing tests** with an injected fake `fetchImpl` and in-memory `storage`: bearer header present only after `setToken`; 401 → `unauthorized`; rejected fetch → `offline`; 404 detail surfaced; `clearToken` removes the key; the token never appears in the request URL; `upload` posts multipart to `/v1/documents`.
+- [x] **Step 2: Run** `node --test tests/tui/js/api.test.mjs`. Expected: FAIL.
+- [x] **Step 3: Implement `api.js`.**
+- [x] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
+- [x] **Step 5: Commit** `feat(tui): api client with session-scoped bearer token`.
 
 ### Task 4: Terminal renderer and prompt line
 
@@ -104,11 +104,11 @@ docs/TUI.md
 - Consumes: `createRegistry`, `createHistory`, `dispatch` (Task 2); `createApi` (Task 3).
 - Produces: `createTerminal({root, registry, history, api}): {ctx, run(line), focus()}` where `ctx.out = {line(text, cls?), pre(text), table(headers: string[], rows: string[][]), kv(pairs: [string, string][]), listing(items: {name, kind: 'dir'|'md'|'hidden'|'file'}[]), divider(), man(text, {instant?: boolean}), clear()}`, `ctx.api`, `ctx.registry`, `ctx.signal(): AbortSignal` (aborted by Ctrl+C), `ctx.setStatus(key, value)`. Every method builds nodes with `textContent`/`createElement` only; none accepts HTML.
 - Behaviour: hidden real `<input>` over `.input-display` with `.block-cursor` and `.ghost-text`; Enter runs, ↑/↓ history, Tab completes ghost, Ctrl+L clears, Ctrl+C aborts the running command and prints `^C`; echo is `<cwd> $ <line>` in `cmd-echo` (masked via `maskCommand`: `auth <token>` → `auth ••••`, and masked lines are not pushed to history); click anywhere in `#output` refocuses; `compositionstart/end` guard for IME; multi-line paste runs line 1 and prints `warn: pasted 3 lines — ran the first` once.
-- [ ] **Step 1: Write failing tests:** `capScrollback` keeps the last 1000; `maskCommand('auth s3cret')` is `'auth ••••'` and leaves `ls` untouched; `maskCommand('auth --clear')` is unchanged. Hostile-string test: `renderTable` helper given `<img src=x onerror=alert(1)>` yields a text node, not an element (assert on the stub's `children`/`textContent`).
-- [ ] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
-- [ ] **Step 3: Implement** `terminal.js`, `main.js` (wires engine, api, terminal; no commands yet beyond a temporary `echo`), and the CSS.
-- [ ] **Step 4: Run** `uv run pytest tests/tui tests/api -q`. Expected: PASS. Manually load `/tui` once (Task 8 harness not needed: `uv run mailroom serve --no-watch`) and confirm the prompt accepts typing.
-- [ ] **Step 5: Commit** `feat(tui): terminal renderer, prompt line and scrollback`.
+- [x] **Step 1: Write failing tests:** `capScrollback` keeps the last 1000; `maskCommand('auth s3cret')` is `'auth ••••'` and leaves `ls` untouched; `maskCommand('auth --clear')` is unchanged. Hostile-string test: `renderTable` helper given `<img src=x onerror=alert(1)>` yields a text node, not an element (assert on the stub's `children`/`textContent`).
+- [x] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
+- [x] **Step 3: Implement** `terminal.js`, `main.js` (wires engine, api, terminal; no commands yet beyond a temporary `echo`), and the CSS.
+- [x] **Step 4: Run** `uv run pytest tests/tui tests/api -q`. Expected: PASS. Manually load `/tui` once (Task 8 harness not needed: `uv run mailroom serve --no-watch`) and confirm the prompt accepts typing.
+- [x] **Step 5: Commit** `feat(tui): terminal renderer, prompt line and scrollback`.
 
 ### Task 5: Boot sequence and banner
 
@@ -117,11 +117,11 @@ docs/TUI.md
 **Interfaces:**
 - Consumes: `ctx.out`, `api.health()`, `api.get`.
 - Produces: `async function boot(ctx, {reducedMotion: boolean, signal: AbortSignal}): Promise<{state: 'live'|'locked'|'closed'}>`. Sequence: `.title-card pre.banner` (0.9s fade from brightness 3), neofetch line `mailroom@floor — mailroom-reloaded visual engine`, dim line `boot: tty · crt on · theme amber`, then real checks, one `[ ok ]`/`[ !! ]` line each: `api /health` (`/health`), `auth` (`GET /v1/documents?limit=1`), `catalog · N documents` (count from that response), `eval runs · N` (`/v1/runs`). Health fail → `[ !! ] api unreachable`, state `closed`, status bar `mailroom closed — no api connection`, remaining checks skipped. 401 → `[ !! ] api token required — type 'auth <token>'`, state `locked`. Any key or click skips the animation (lines print instantly) but the checks still run. Reduced motion prints instantly. Ends with motd lines and `type 'help' to begin.` in amber.
-- [ ] **Step 1: Write failing tests** with a fake `ctx`: health down → no line contains `[ ok ]`, state `closed`; 401 → locked line text exact; healthy with 3 docs → `catalog · 3 documents`; aborted signal prints remaining lines without delay.
-- [ ] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `banner.txt` (67 cols, 6-row ANSI-Shadow block wordmark `MAILROOM`) and `banner-compact.txt` (22 cols, 3-row box-drawing wordmark) already exist, authored for this repo because the kit's `TermBanner/preview.html` art is escape-damaged and spells no name. Load both; use the compact one when the viewport is under 640px. Both use only box-drawing/block glyphs (verified monospace-safe in JetBrains Mono).
-- [ ] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(tui): real-check boot sequence with banner and closed state`.
+- [x] **Step 1: Write failing tests** with a fake `ctx`: health down → no line contains `[ ok ]`, state `closed`; 401 → locked line text exact; healthy with 3 docs → `catalog · 3 documents`; aborted signal prints remaining lines without delay.
+- [x] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
+- [x] **Step 3: Implement.** `banner.txt` (67 cols, 6-row ANSI-Shadow block wordmark `MAILROOM`) and `banner-compact.txt` (22 cols, 3-row box-drawing wordmark) already exist, authored for this repo because the kit's `TermBanner/preview.html` art is escape-damaged and spells no name. Load both; use the compact one when the viewport is under 640px. Both use only box-drawing/block glyphs (verified monospace-safe in JetBrains Mono).
+- [x] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
+- [x] **Step 5: Commit** `feat(tui): real-check boot sequence with banner and closed state`.
 
 ### Task 6: Pipeline commands
 
@@ -141,11 +141,11 @@ docs/TUI.md
   - `watch [--interval 3]` → polls `GET /v1/documents?limit=20` and prints one line per status change or new doc until `ctx.signal()` aborts or `document.hidden`.
   - `auth <token> | --clear` → `api.setToken` / `clearToken`, then re-checks `GET /v1/documents?limit=1` and prints `auth: ok` or `auth: token rejected — 401`.
   Errors: `ApiError.kind` `offline` → `<cmd>: api unreachable — mailroom closed`; `unauthorized` → `<cmd>: 401 — type 'auth <token>'`; 404 → `<cmd>: no such document <id>`.
-- [ ] **Step 1: Write failing tests** with a fake `ctx.api` and recording `ctx.out`: `ls` renders rows; `ls` with a hostile filename keeps it text; `ls` empty message exact; `inspect` stage lines in order; `resolve correct` without `--type` makes no request; 404 and 401 and offline messages exact; `watch` stops after abort and prints only changes (second poll with no change prints nothing); `auth bad` prints `token rejected`.
-- [ ] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
-- [ ] **Step 3: Implement** each command as a registry spec with a `man` page in the NAME/SYNOPSIS/DESCRIPTION layout.
-- [ ] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(tui): pipeline commands over the v1 api`.
+- [x] **Step 1: Write failing tests** with a fake `ctx.api` and recording `ctx.out`: `ls` renders rows; `ls` with a hostile filename keeps it text; `ls` empty message exact; `inspect` stage lines in order; `resolve correct` without `--type` makes no request; 404 and 401 and offline messages exact; `watch` stops after abort and prints only changes (second poll with no change prints nothing); `auth bad` prints `token rejected`.
+- [x] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
+- [x] **Step 3: Implement** each command as a registry spec with a `man` page in the NAME/SYNOPSIS/DESCRIPTION layout.
+- [x] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
+- [x] **Step 5: Commit** `feat(tui): pipeline commands over the v1 api`.
 
 ### Task 7: Shell commands, ambient layer and themes
 
@@ -154,11 +154,11 @@ docs/TUI.md
 **Interfaces:**
 - Produces `registerShell(registry, {ambient})` adding `help` (lists name + summary from the registry; `help <cmd>` = `man <cmd>`), `man <cmd>` (typed out at ~1.4 ms/char, instant under reduced motion, unknown → `man: no manual entry for <cmd>`), `clear`, `history`, `neofetch` (banner + edition, api base, doc/run counts from live calls), `theme [dark|light|hc|amber|green|cyan]` (no arg lists current; invalid prints usage), `crt on|off`, `skyline on|off`.
 - `ambient.js` exports `createAmbient(root, {reducedMotion}): {setCrt(on), setSkyline(on), setTheme(name), state()}`; `buildSkylinePath(rnd: () => number): string` reproducing the kit's `buildSkyline` (1440×120, peaks 30–76px wide and 22–74px tall, overlap 0.55); nine 3px amber sparks (none under reduced motion); grain overlay; `crt off` fades the overlay over 0.4s, `skyline off` over 0.6s; `hc` forces both off. Theme choice persists in `localStorage` key `mailroom.tui.theme` inside try/catch (page works when storage throws).
-- [ ] **Step 1: Write failing tests:** `buildSkylinePath` with a seeded rnd returns a closed path starting `M0 120` and ending `Z`, deterministic; `theme bogus` prints `theme: usage theme [dark|light|hc|amber|green|cyan]`; `man nope` message exact; `help` lists every registered command once; `theme hc` calls `setCrt(false)` and `setSkyline(false)`; storage throwing does not break `theme`.
-- [ ] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** `uv run pytest tests/tui tests/api -q`. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(tui): shell commands, CRT/skyline ambience and themes`.
+- [x] **Step 1: Write failing tests:** `buildSkylinePath` with a seeded rnd returns a closed path starting `M0 120` and ending `Z`, deterministic; `theme bogus` prints `theme: usage theme [dark|light|hc|amber|green|cyan]`; `man nope` message exact; `help` lists every registered command once; `theme hc` calls `setCrt(false)` and `setSkyline(false)`; storage throwing does not break `theme`.
+- [x] **Step 2: Run** `uv run pytest tests/tui -v`. Expected: FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** `uv run pytest tests/tui tests/api -q`. Expected: PASS.
+- [x] **Step 5: Commit** `feat(tui): shell commands, CRT/skyline ambience and themes`.
 
 ### Task 8: Local browser test harness, cross-link, docs, live verification
 
@@ -166,9 +166,9 @@ docs/TUI.md
 
 **Interfaces:**
 - Produces: `scripts/tui_dev.sh up|down|status` — runs `uvicorn deploy.mock_openai:app` on 127.0.0.1:8899 (confirm the import path; `deploy/` is not a package, so use `--app-dir deploy mock_openai:app`), exports `MOCK_BASE_URL` per `llm/client.py:108-112` (match the dev compose value's path suffix), sets a temp base dir via the `base_dir` setting (`settings.py:121`) under `./data/tui-dev`, runs `uv run mailroom serve --port 8000` with the embedded watcher, copies `scripts/tui_seed/*` into the inbox, writes pids under `data/tui-dev/`. Loopback only, no token.
-- [ ] **Step 1: Failing test** that `/ui` links to `/tui`. Run, expect FAIL; add the link; expect PASS.
-- [ ] **Step 2: Write and shell-check the script** (`bash -n`, `shellcheck` if present). `scripts/tui_dev.sh up` then `curl -fsS localhost:8000/health` returns ok and `GET /v1/documents` lists the seeded files after the watcher drains.
-- [ ] **Step 3: Live browser verification** with the built-in browser (`preview_start` url `http://127.0.0.1:8000/tui`). For each check record a screenshot in the scratchpad (not committed) and fix defects before continuing:
+- [x] **Step 1: Failing test** that `/ui` links to `/tui`. Run, expect FAIL; add the link; expect PASS.
+- [x] **Step 2: Write and shell-check the script** (`bash -n`, `shellcheck` if present). `scripts/tui_dev.sh up` then `curl -fsS localhost:8000/health` returns ok and `GET /v1/documents` lists the seeded files after the watcher drains.
+- [ ] **Step 3: Live browser verification** with the built-in browser (`preview_start` url `http://127.0.0.1:8000/tui`). For each check record a screenshot in the scratchpad (not committed) and fix defects before continuing: **PARTIAL:** performed live in-session on 2026-10-08 (see HANDOFF-tui.md and fix commit `4cde721`), but screenshots were not committed and the checklist was not re-run in this audit; the pure-logic parts are covered by `node --test`.
   1. Boot plays: banner fade, four `[ ok ]` lines with real counts, `type 'help' to begin.`; keypress skips the animation.
   2. `help`, `man ls`, unknown command (`flor`) shakes and prints the exact message.
   3. `ls`, `inspect <id>`, `audit <id>` show live data; the hostile filename renders as literal text (check `document.querySelectorAll('#output img').length === 0`).
@@ -178,8 +178,8 @@ docs/TUI.md
   7. Set `MAILROOM_API_TOKEN`, restart: boot says `api token required`; `auth wrong` rejected; `auth <right>` accepted and the token is absent from scrollback.
   8. Mobile preset (375px): status bar shows only essential items, base 12px, no horizontal page scroll; reduced-motion via `emulate` is unavailable, so assert in `javascript_tool` that `matchMedia` branch code paths run by calling `createAmbient(..., {reducedMotion: true})` and that no spark nodes exist.
   9. Console clean: `read_console_messages` has no errors.
-- [ ] **Step 4: Write `docs/TUI.md`** (commands table, themes, auth, boot checks, how to run `tui_dev.sh`, the manual checklist above, non-goals) and the README/DEV_SERVER pointers.
-- [ ] **Step 5: Run** `uv run pytest -q` and `uv run ruff check .`. Expected: all pass, ruff clean. Commit `feat(tui): local browser test harness, cross-links and docs`.
+- [x] **Step 4: Write `docs/TUI.md`** (commands table, themes, auth, boot checks, how to run `tui_dev.sh`, the manual checklist above, non-goals) and the README/DEV_SERVER pointers.
+- [x] **Step 5: Run** `uv run pytest -q` and `uv run ruff check .`. Expected: all pass, ruff clean. Commit `feat(tui): local browser test harness, cross-links and docs`.
 
 ## Non-goals
 
@@ -190,3 +190,39 @@ docs/TUI.md
 - Spec coverage: banner, boot, prompt/cursor/ghost, scrollback, man pages, tables/listing/run-story, status bar, ambient (skyline, sparks, CRT, grain), three themes + phosphor swap, reduced-motion and `hc`, voice rules, z-order, breakpoint: each has a task. Unported by design: `mail`, `sound`, `corpus`, `TermPost` (no markdown-rendering command; reintroduce if `cat` of a report is wanted).
 - Types: `ctx.out` method names match across Tasks 4–7; `ApiError.kind` values match their use in Task 6.
 - Proportion: code appears only as signatures, message strings and test assertions.
+
+
+## Status (2026-10-08)
+
+Audited against the code on branch `feat/jev-tui-hardening`. Merged to the completion branch via PR #13, then hardened on this branch.
+
+| Task | Status | Note |
+| --- | --- | --- |
+| 1 Serve `/tui` with brand tokens | done | `tests/api/test_tui_serving.py` (6 tests) |
+| 2 Pure command engine | done | `engine.js`, `engine.test.mjs`, pytest wrapper |
+| 3 API client and token store | done | |
+| 4 Terminal renderer and prompt | done | |
+| 5 Boot sequence and banner | done | see deviations |
+| 6 Pipeline commands | done | plus a `jev` command added in hardening |
+| 7 Shell commands, ambient, themes | done | |
+| 8 Harness, cross-link, docs, live check | partial | all files and docs done; Step 3 live checklist done in-session but not re-run or committed as screenshots |
+
+### Evidence
+
+- `node --test tests/tui/js/*.test.mjs`: 117 tests, 117 pass.
+- `uv run pytest -q`: 673 passed, 1 skipped, 2 deselected; `uv run ruff check .` clean.
+- Files present: `api/tui/{index.html,tokens.css,tui.css,engine.js,api.js,terminal.js,boot.js,ambient.js,main.js,banner.txt,banner-compact.txt,commands/pipeline.js,commands/shell.js}`, `scripts/tui_dev.sh`, `scripts/tui_seed/`, `docs/TUI.md`, `/ui` links to `/tui`.
+
+### Deviations from the plan
+
+- Banner: the kit's art was damaged and spells no name, so `banner.txt` and `banner-compact.txt` are original `MAILROOM` wordmarks, not the kit art "verbatim".
+- The hostile seed fixture is `<b>hostile<b>.txt` (a `/` cannot appear in a filename).
+- The "do not edit Jev files" constraint applied only to the original parallel checkout. On this branch Jev work was added: `jev` command, gate audit display in `inspect`/`audit`, `scripts/tui_seed_jev/`, `GET /v1/jev`.
+- Light theme ships as a selectable theme (labelled proposed), not promoted to default.
+- Parked documents are now catalogued, so `review` and `ls --status parked` see them.
+- Live browser checks were manual and their screenshots were not committed.
+
+### Incomplete
+
+- Task 8 Step 3 has no committed evidence beyond the HANDOFF record and commit `4cde721`.
+- Execution method (subagent vs inline) was never formally decided; the work was done in sessions with Sonnet.

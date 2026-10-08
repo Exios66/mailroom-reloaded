@@ -165,3 +165,46 @@ test('base prefixes every request path', async () => {
   await api.get('/v1/documents');
   assert.equal(rec.calls[0].url, 'http://h:8000/v1/documents');
 });
+
+test('get/post/upload forward an abort signal and fetch is aborted', async () => {
+  let seen;
+  const fetchImpl = (url, init) =>
+    new Promise((_, reject) => {
+      seen = init.signal;
+      init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+  const api = createApi({ fetchImpl, storage: memStorage() });
+  const ctl = new AbortController();
+  const p = api.get('/v1/documents', undefined, { signal: ctl.signal });
+  ctl.abort();
+  await assert.rejects(p, (e) => e instanceof ApiError && e.kind === 'aborted');
+  assert.equal(seen.aborted, true);
+});
+
+test('requests time out instead of hanging', async () => {
+  const fetchImpl = (url, init) =>
+    new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error('x'))));
+  const api = createApi({ fetchImpl, storage: memStorage() });
+  const p = api.upload({}, { timeoutMs: 20 }).catch((e) => e);
+  const e = await p;
+  assert.equal(e.kind, 'offline');
+  assert.match(e.message, /timed out/);
+});
+
+test('setToken rejects non printable ASCII tokens', () => {
+  const api = createApi({ fetchImpl: async () => jsonResponse(200, {}), storage: memStorage() });
+  assert.throws(() => api.setToken('bad token'));
+  assert.throws(() => api.setToken('toké'));
+  assert.throws(() => api.setToken('a\nb'));
+  assert.equal(api.hasToken(), false);
+  api.setToken('good-token_1');
+  assert.equal(api.hasToken(), true);
+});
+
+test('422 detail prints only loc and msg, not submitted input', async () => {
+  const body = { detail: [{ loc: ['body', 'x'], msg: 'field required', input: 'SECRET', ctx: {} }] };
+  const api = createApi({ fetchImpl: async () => jsonResponse(422, body), storage: memStorage() });
+  const e = await api.get('/v1/x').catch((err) => err);
+  assert.equal(e.message, 'body.x: field required');
+  assert.ok(!e.message.includes('SECRET'));
+});

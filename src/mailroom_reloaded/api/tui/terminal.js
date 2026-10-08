@@ -2,7 +2,7 @@
 // Every node is built with createElement + textContent; no method accepts HTML.
 // The render* helpers take `doc` so they run under `node --test` with a tiny DOM stub.
 
-import { dispatch } from './engine.js';
+import { dispatch, parseLine } from './engine.js';
 
 export const MAX_SCROLLBACK = 1000;
 const MASK = '••••';
@@ -16,11 +16,19 @@ export function capScrollback(lines, max = MAX_SCROLLBACK) {
 
 /** `auth <token>` becomes `auth ••••`; `auth --clear` and every other line are untouched. */
 export function maskCommand(line) {
-  const m = /^(\s*)auth(\s+)(\S[\s\S]*)$/.exec(String(line));
-  if (!m) return line;
-  const rest = m[3].trim();
-  if (rest === '--clear') return line;
-  return `${m[1]}auth ${MASK}`;
+  const text = String(line);
+  const parsed = parseLine(text);
+  if (parsed.error) {
+    // An unterminated quote never runs, but the echo must not leak a token typed so far.
+    return /^\s*["']?auth/.test(text) && /\s/.test(text.trim()) ? `auth ${MASK}` : line;
+  }
+  if (parsed.cmd !== 'auth') return line;
+  const flagNames = Object.keys(parsed.flags);
+  if (parsed.args.length === 0 && flagNames.length === 0) return line; // bare `auth`
+  if (parsed.args.length === 0 && flagNames.length === 1 && parsed.flags.clear === true) {
+    return line; // `auth --clear`
+  }
+  return `auth ${MASK}`;
 }
 
 function el(doc, tag, className, text) {
@@ -79,16 +87,21 @@ export function renderListing(doc, items) {
 
 export function renderBanner(doc, text) {
   const card = el(doc, 'div', 'title-card');
+  card.setAttribute('aria-hidden', 'true');
   card.appendChild(el(doc, 'pre', 'banner', text));
   return card;
 }
 
 export function renderDivider(doc, width = 72) {
-  return el(doc, 'div', 'divider', '─'.repeat(width));
+  const rule = el(doc, 'div', 'divider', '─'.repeat(width));
+  rule.setAttribute('aria-hidden', 'true');
+  return rule;
 }
 
 export function renderMan(doc) {
   const box = el(doc, 'div', 'man-page');
+  // Typed out frame by frame: keep the live region from re-announcing every update.
+  box.setAttribute('aria-live', 'off');
   const pre = el(doc, 'pre', '', '');
   box.appendChild(pre);
   return { box, pre };
@@ -159,14 +172,15 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     setStatus('clock', `${p(d.getHours())}:${p(d.getMinutes())}`);
   }
   tickClock();
-  setInterval(tickClock, 30000);
+  const clockTimer = setInterval(tickClock, 30000);
+  if (clockTimer && typeof clockTimer.unref === 'function') clockTimer.unref();
 
   // ---- scrollback ----
   function append(node) {
     output.appendChild(node);
-    const lines = Array.from(output.children);
-    const kept = capScrollback(lines, MAX_SCROLLBACK);
-    for (let i = 0; i < lines.length - kept.length; i++) output.removeChild(lines[i]);
+    while (output.childElementCount > MAX_SCROLLBACK && output.firstChild) {
+      output.firstChild.remove();
+    }
     output.scrollTop = output.scrollHeight;
     return node;
   }
@@ -189,10 +203,17 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
       output.scrollTop = output.scrollHeight;
       return Promise.resolve();
     }
+    const sig = controller.signal;
     return new Promise((resolve) => {
       const start = performance.now();
       let shown = 0;
       function frame(now) {
+        if (sig.aborted) {
+          pre.textContent = full;
+          output.scrollTop = output.scrollHeight;
+          resolve();
+          return;
+        }
         const target = Math.min(full.length, Math.floor((now - start) / MAN_MS_PER_CHAR));
         if (target > shown) {
           shown = target;
@@ -231,6 +252,8 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     setStatus,
   };
 
+  const ABORTED = Symbol('aborted');
+
   async function run(line, { warn } = {}) {
     const text = String(line);
     const masked = maskCommand(text);
@@ -238,12 +261,20 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     if (warn) out.line(warn, 'warn');
     if (masked === text) history.push(text);
     history.reset();
-    controller = new AbortController();
+    const mine = new AbortController();
+    controller = mine;
     busy = true;
+    // Ctrl+C must free the prompt even if the command ignores its signal.
+    const aborted = new Promise((resolve) => {
+      mine.signal.addEventListener('abort', () => resolve(ABORTED), { once: true });
+    });
+    const running = dispatch(registry, ctx, text);
+    running.catch(() => {});
     try {
-      return await dispatch(registry, ctx, text);
+      const result = await Promise.race([running, aborted]);
+      return result === ABORTED ? 'aborted' : result;
     } finally {
-      busy = false;
+      if (controller === mine) busy = false;
     }
   }
 
@@ -269,6 +300,8 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
   input.setAttribute('autocorrect', 'off');
   input.setAttribute('spellcheck', 'false');
   input.setAttribute('aria-label', 'terminal input');
+  display.setAttribute('aria-hidden', 'true');
+  display.style.unicodeBidi = 'plaintext';
   wrap.appendChild(display);
   wrap.appendChild(input);
   promptLine.appendChild(prompt);
@@ -276,10 +309,19 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
 
   let composing = false;
   let draft = '';
+  let navigating = false;
 
   function refresh() {
     const v = input.value;
     const pos = input.selectionStart ?? v.length;
+    const masked = maskCommand(v);
+    if (masked !== v) {
+      // Never paint a token (even while it is being typed) into the visible display.
+      before.textContent = masked;
+      after.textContent = '';
+      ghost.textContent = '';
+      return;
+    }
     before.textContent = v.slice(0, pos);
     after.textContent = v.slice(pos);
     let g = '';
@@ -301,11 +343,23 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     input.focus({ preventScroll: true });
   }
 
+  // Lines entered while a command runs are queued, not dropped.
+  const queue = [];
+
   async function submit(extra) {
     const line = input.value;
     setValue('');
     draft = '';
+    navigating = false;
+    if (busy) {
+      queue.push([line, extra]);
+      return;
+    }
     await run(line, extra);
+    while (queue.length) {
+      const [next, nextExtra] = queue.shift();
+      await run(next, nextExtra);
+    }
   }
 
   input.addEventListener('input', refresh);
@@ -326,15 +380,24 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     e.preventDefault();
     const rows = data.split(/\r\n|\r|\n/);
     while (rows.length > 1 && rows[rows.length - 1] === '') rows.pop();
+    if (input.readOnly) return;
     const s = input.selectionStart ?? input.value.length;
     const t = input.selectionEnd ?? s;
-    input.value = input.value.slice(0, s) + rows[0] + input.value.slice(t);
-    if (busy) {
-      refresh();
-      return;
+    const next = input.value.slice(0, s) + rows[0] + input.value.slice(t);
+    input.value = next;
+    try {
+      input.setSelectionRange(s + rows[0].length, s + rows[0].length);
+    } catch {
+      /* selection unsupported */
     }
-    const warn = rows.length > 1 ? `warn: pasted ${rows.length} lines — ran the first` : undefined;
-    submit({ warn });
+    refresh();
+    // Never auto-run pasted text: the user reviews the line and presses Enter.
+    if (rows.length > 1) {
+      out.line(
+        `warn: pasted ${rows.length} lines — kept the first in the input, nothing was run`,
+        'warn',
+      );
+    }
   });
 
   input.addEventListener('keydown', (e) => {
@@ -350,6 +413,7 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
         if (input.selectionStart !== input.selectionEnd) return; // let the browser copy
         e.preventDefault();
         controller.abort();
+        queue.length = 0;
         out.line('^C', 'dim');
         if (!busy) {
           setValue('');
@@ -361,28 +425,39 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     switch (e.key) {
       case 'Enter':
         e.preventDefault();
-        if (!busy) submit();
+        submit();
         break;
       case 'ArrowUp': {
         e.preventDefault();
         const prev = history.prev();
         if (prev !== undefined) {
-          if (draft === '' && input.value !== '') draft = input.value;
+          if (!navigating) draft = input.value;
+          navigating = true;
           setValue(prev);
         }
         break;
       }
       case 'ArrowDown': {
         e.preventDefault();
+        if (!navigating) break; // nothing to navigate: leave typed text alone
         const next = history.next();
-        setValue(next === undefined ? draft : next);
+        if (next === undefined) {
+          navigating = false;
+          setValue(draft);
+        } else {
+          setValue(next);
+        }
         break;
       }
       case 'Tab': {
-        e.preventDefault();
         const { matches, ghost: g } = registry.complete(input.value);
-        if (g) setValue(input.value + g);
-        else if (matches.length > 1 && input.value !== '') out.line(matches.join('  '), 'dim');
+        if (g) {
+          e.preventDefault();
+          setValue(input.value + g);
+        } else if (matches.length > 1 && input.value !== '') {
+          e.preventDefault();
+          out.line(matches.join('  '), 'dim');
+        } // otherwise Tab moves focus as normal (no keyboard trap)
         break;
       }
       default:
@@ -401,5 +476,10 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
   refresh();
   focus();
 
-  return { ctx, run, focus };
+  function setInputEnabled(enabled) {
+    input.readOnly = !enabled;
+    input.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+  }
+
+  return { ctx, run, focus, setInputEnabled };
 }

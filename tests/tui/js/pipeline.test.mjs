@@ -56,7 +56,7 @@ const lines = (out) => out.filter((o) => o.k === 'line').map((o) => o.t);
 
 test('registers every pipeline command with a man page', () => {
   const r = setup();
-  for (const n of ['ls', 'inspect', 'audit', 'review', 'resolve', 'runs', 'cards', 'health', 'upload', 'watch', 'auth']) {
+  for (const n of ['ls', 'inspect', 'audit', 'review', 'resolve', 'runs', 'cards', 'health', 'upload', 'watch', 'auth', 'jev']) {
     const spec = r.get(n);
     assert.ok(spec, n);
     assert.match(spec.man, /^NAME\n[\s\S]*SYNOPSIS[\s\S]*DESCRIPTION/);
@@ -351,7 +351,7 @@ test('watch baselines, prints only changes, and stops on abort', async () => {
   };
   await dispatch(setup(), m.ctx, 'watch --interval 2');
   assert.deepEqual(sleeps, [2000, 2000, 2000]);
-  assert.deepEqual(m.calls[0].arg, { limit: 20 });
+  assert.deepEqual(m.calls[0].arg, { limit: 500 });
   assert.deepEqual(lines(m.out), [
     'watching 1 document · every 2s · ctrl+c to stop',
     'a · a.txt · processing → archived',
@@ -397,4 +397,163 @@ test('auth ok, rejected, clear, and never echoes the token', async () => {
   await dispatch(reg, m.ctx, 'auth --clear');
   assert.deepEqual(m.tokens, [['clear']]);
   assert.equal(m.calls.length, 0);
+});
+
+test('statusClass ignores prototype keys', async () => {
+  const { statusClass } = await import('../../../src/mailroom_reloaded/api/tui/commands/pipeline.js');
+  assert.equal(statusClass('archived'), 'success');
+  assert.equal(statusClass('constructor'), '');
+  assert.equal(statusClass('__proto__'), '');
+  assert.equal(statusClass('toString'), '');
+});
+
+test('audit with no entries warns and never prints chain: ok', async () => {
+  const m = makeCtx({ 'GET /v1/audit/abc': { entries: [], chain: { ok: true } } });
+  await dispatch(setup(), m.ctx, 'audit abc');
+  const l = lines(m.out);
+  assert.ok(l.includes('no audit entries (unknown document?)'));
+  assert.ok(!l.includes('chain: ok'));
+});
+
+test('empty, dot and dotdot ids are rejected before any request', async () => {
+  for (const cmd of ['inspect .', 'inspect ..', 'inspect a/b', 'audit ..', 'resolve . approve', 'cards .', 'cards ..', 'cards ""']) {
+    const m = makeCtx({});
+    await dispatch(setup(), m.ctx, cmd);
+    assert.equal(m.calls.length, 0, cmd);
+  }
+});
+
+test('pipeline commands pass ctx.signal() to the api', async () => {
+  const seen = [];
+  const m = makeCtx({});
+  m.ctx.api.get = async (p, q, o) => {
+    seen.push(o && o.signal);
+    return { documents: [], runs: [] };
+  };
+  await dispatch(setup(), m.ctx, 'ls');
+  await dispatch(setup(), m.ctx, 'runs');
+  assert.equal(seen.length, 2);
+  for (const s of seen) assert.equal(s, m.controller.signal);
+});
+
+test('auth rolls back the token on 401 and rejects bad tokens', async () => {
+  const m = makeCtx({ 'GET /v1/documents': new ApiError('x', { status: 401, kind: 'unauthorized' }) });
+  await dispatch(setup(), m.ctx, 'auth abc');
+  assert.deepEqual(m.tokens, [['set', 'abc'], ['clear']]);
+  const m2 = makeCtx({});
+  m2.ctx.api.setToken = () => {
+    throw new Error('bad');
+  };
+  await dispatch(setup(), m2.ctx, 'auth "a b"');
+  assert.equal(m2.calls.length, 0);
+});
+
+test('ls says showing first N when the page is full', async () => {
+  const docs = [1, 2].map((i) => ({ doc_id: `d${i}`, filename: 'f', status: 'new' }));
+  const m = makeCtx({ 'GET /v1/documents': { documents: docs } });
+  await dispatch(setup(), m.ctx, 'ls --limit 2');
+  assert.ok(lines(m.out).some((l) => l.startsWith('showing first 2')));
+});
+
+test('watch warns once when the page is full and does not print after abort', async () => {
+  const full = Array.from({ length: 500 }, (_, i) => ({ doc_id: `d${i}`, filename: 'f', status: 'new' }));
+  const m = makeCtx({ 'GET /v1/documents': () => ({ documents: full }) });
+  m.ctx.sleep = async () => m.controller.abort();
+  await dispatch(setup(), m.ctx, 'watch');
+  assert.ok(lines(m.out).some((l) => l.startsWith('watch: page full')));
+  // abort during the poll: nothing from that poll is printed
+  const m2 = makeCtx({});
+  m2.ctx.api.get = async () => {
+    m2.controller.abort();
+    return { documents: full };
+  };
+  await dispatch(setup(), m2.ctx, 'watch');
+  assert.deepEqual(lines(m2.out), ['watch: stopped']);
+});
+
+test('upload picker receives the signal and abort cancels the upload', async () => {
+  const m = makeCtx({});
+  let pickSignal;
+  m.ctx.pickFile = (accept, signal) => {
+    pickSignal = signal;
+    return new Promise((resolve) => signal.addEventListener('abort', () => resolve(null)));
+  };
+  const p = dispatch(setup(), m.ctx, 'upload');
+  m.controller.abort();
+  await p;
+  assert.equal(pickSignal, m.controller.signal);
+  assert.ok(!lines(m.out).includes('upload: no file chosen'));
+});
+
+// ---- jev ----
+const JEV_ON = {
+  enabled: true, provider: 'local', model: 'jevk5', base_url: 'http://x/v1', api_key: 'sk-SECRET',
+  calibrated: true,
+  calibration: { temperature: 0.82, accept_threshold: 0.844, verify_threshold: 0.7326, ece_before: 0.153, ece_after: 0.152, n: 60 },
+  gate: 'jev',
+};
+
+test('jev prints kv with calibration and never an api key', async () => {
+  const { ctx, out } = makeCtx({ 'GET /v1/jev': JEV_ON });
+  await dispatch(setup(), ctx, 'jev');
+  const kv = out.find((o) => o.k === 'kv');
+  const keys = kv.pairs.map((p) => p[0]);
+  for (const k of ['provider', 'model', 'gate', 'calibrated', 'accept', 'verify']) assert.ok(keys.includes(k), k);
+  assert.ok(!JSON.stringify(out).includes('SECRET'));
+});
+
+test('jev off prints the dim band-gate line', async () => {
+  const { ctx, out } = makeCtx({ 'GET /v1/jev': { enabled: false, gate: 'band' } });
+  await dispatch(setup(), ctx, 'jev');
+  assert.deepEqual(lines(out), ['jev off (band gate)']);
+  assert.equal(out[0].c, 'dim');
+});
+
+test('jev uncalibrated skips thresholds; 401 handled', async () => {
+  let m = makeCtx({ 'GET /v1/jev': { enabled: true, provider: 'p', model: 'm', calibrated: false, gate: 'band' } });
+  await dispatch(setup(), m.ctx, 'jev');
+  assert.ok(!m.out.find((o) => o.k === 'kv').pairs.some((p) => p[0] === 'accept'));
+  m = makeCtx({ 'GET /v1/jev': new ApiError('x', { status: 401, kind: 'unauthorized' }) });
+  await dispatch(setup(), m.ctx, 'jev');
+  assert.match(lines(m.out)[0], /401/);
+});
+
+test('audit renders gate_decision entries distinctly and survives odd actions', async () => {
+  const gd = (node, payload) => ({ node, event: 'gate_decision', payload });
+  const { ctx, out } = makeCtx({
+    'GET /v1/audit/abc': {
+      entries: [
+        { node: 'ingest', event: 'completed', payload: {} },
+        gd('gate_classify', { action: 'verify', source: 'jev', confidence: 0.88, reason: 'band' }),
+        gd('gate_extract', { action: 'weird', source: 'band' }),
+        gd('gate_extract', null),
+      ],
+      chain: { ok: true },
+    },
+  });
+  await dispatch(setup(), ctx, 'audit abc');
+  const l = out.filter((o) => o.k === 'line');
+  const g = l.find((o) => o.t.startsWith('gate classify -> verify [jev] conf 0.88'));
+  assert.ok(g && g.t.endsWith('— band'));
+  assert.equal(g.c, 'warn');
+  assert.ok(l.some((o) => o.t.startsWith('gate extract -> weird [band]')));
+  assert.ok(l.some((o) => o.t.startsWith('gate extract -> —')));
+});
+
+test('inspect shows a gate line from audit, non-fatal on failure', async () => {
+  const doc = { doc_id: 'abc', status: 'parked', report: {}, catalog: {}, manifest: {} };
+  let m = makeCtx({
+    'GET /v1/documents/abc': doc,
+    'GET /v1/audit/abc': { entries: [
+      { node: 'gate_classify', event: 'gate_decision', payload: { action: 'proceed', source: 'band', confidence: 0.9 } },
+      { node: 'gate_extract', event: 'gate_decision', payload: { action: 'verify', source: 'jev', confidence: 0.7 } },
+    ] },
+  });
+  await dispatch(setup(), m.ctx, 'inspect abc');
+  const pairs = m.out.find((o) => o.k === 'kv').pairs;
+  assert.ok(pairs.some((p) => p[0] === 'gate' && p[1].includes('verify') && p[1].includes('jev')));
+  m = makeCtx({ 'GET /v1/documents/abc': doc, 'GET /v1/audit/abc': new ApiError('x', { status: 500, kind: 'http' }) });
+  await dispatch(setup(), m.ctx, 'inspect abc');
+  assert.ok(m.out.find((o) => o.k === 'kv'));
+  assert.ok(!lines(m.out).some((t) => t.startsWith('inspect:')));
 });

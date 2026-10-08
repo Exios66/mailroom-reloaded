@@ -223,7 +223,7 @@ table.mr tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
 .prompt .path { color: var(--term-cyan); text-shadow: 0 0 6px rgba(103, 232, 249, 0.4); }
 .prompt.compose { color: var(--term-magenta); text-shadow: 0 0 8px rgba(244, 114, 182, 0.5); }
 .input-wrap { position: relative; flex: 1 1 auto; min-width: 0; min-height: 1.55em; }
-.input-display { color: var(--term-fg); white-space: pre-wrap; overflow-wrap: anywhere; }
+.input-display { color: var(--term-fg); white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; }
 .ghost-text { color: var(--term-fg-dim); opacity: 0.55; animation: term-ghost 1.06s steps(2, end) infinite; }
 @keyframes term-ghost { 0%, 49.999% { opacity: 0.55; } 50%, 100% { opacity: 0.32; } }
 .block-cursor {
@@ -404,6 +404,11 @@ noscript a { color: var(--term-cyan); }
     scroll-behavior: auto !important;
   }
   .conveyor-dot { display: none; }
+}
+
+/* CRT overlay is decorative flicker: off for reduced motion and high contrast */
+@media (prefers-reduced-motion: reduce), (prefers-contrast: more) {
+  .crt-overlay { display: none; }
 }
 
 /* status-coloured table cells (ls, review) */

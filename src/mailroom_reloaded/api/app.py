@@ -10,6 +10,7 @@ SQLite catalog and the hash-chained audit log:
 * ``GET /v1/documents`` / ``GET /v1/documents/{id}`` — catalog listing and one
   document's manifest + report.
 * ``GET /v1/audit/{id}`` — the document's audit entries and chain verification.
+* ``GET /v1/jev`` — Jev gate status (provider, calibration; never keys).
 * ``POST /v1/review/{id}/resolve`` — disposition a parked document.
 * ``GET /v1/runs`` / ``GET /v1/runs/{run_id}/cards`` — eval runs (SQLite) and
   card JSONs (empty until Task 21 lands).
@@ -52,6 +53,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from mailroom_reloaded import __version__
 from mailroom_reloaded.intake import gmail as gmail_intake
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.settings import get_settings
@@ -291,6 +293,39 @@ def audit_endpoint(doc_id: str) -> dict:
     }
 
 
+@api.get("/jev")
+def jev_status_endpoint() -> dict:
+    """Jev (TypeSafe System One) gate status. Never exposes API keys."""
+    from dataclasses import asdict
+
+    from mailroom_reloaded.eval.jev_calibration import load_jev_calibration
+    from mailroom_reloaded.settings import jev_config
+
+    cfg = jev_config()
+    path = get_settings().base_dir / "models" / "jev_calibration.json"
+    calibration = None
+    if cfg.enabled and path.is_file():
+        try:
+            calibration = asdict(load_jev_calibration(path))
+        except (OSError, ValueError, KeyError, TypeError):
+            calibration = None
+    if cfg.enabled and calibration is not None:
+        gate = "jev"
+    elif (get_settings().base_dir / "models" / "route_gate.json").exists():
+        gate = "learned"
+    else:
+        gate = "band"
+    return {
+        "enabled": cfg.enabled,
+        "provider": cfg.provider,
+        "model": cfg.model or None,
+        "base_url": cfg.base_url or None,
+        "calibrated": calibration is not None,
+        "calibration": calibration,
+        "gate": gate,
+    }
+
+
 @api.post("/review/{doc_id}/resolve")
 def resolve_review_endpoint(doc_id: str, payload: ReviewResolve) -> dict:
     """Disposition a parked document (approve / correct / reject)."""
@@ -486,7 +521,7 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title="mailroom-reloaded",
         description="Compressed Digital Mailroom API",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
     application.include_router(api)
