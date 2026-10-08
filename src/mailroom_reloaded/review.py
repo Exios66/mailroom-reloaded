@@ -17,6 +17,8 @@ manifest checkpointing and audit dedupe apply unchanged.
 
 from __future__ import annotations
 
+import glob
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -103,18 +105,38 @@ def resolve_review(
     return state
 
 
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
-    """Find an existing source via its saved path or review-bin filename."""
-    candidates: list[Path] = []
+    """Find the parked source: the saved path, else a content-verified match.
+
+    The saved ``state.path`` is trusted. When it is stale, review-bin files named
+    ``<uuid>_<filename>`` are candidates, but only one whose sha256 equals the
+    manifest's ``content_sha256`` is accepted, so another document with the same
+    or a similar name is never picked up.
+    """
     state_path = (manifest.state or {}).get("path")
     if state_path:
-        candidates.append(Path(state_path))
-    if manifest.filename:
-        candidates.append(bins.review / manifest.filename)
-        candidates.extend(bins.review.glob(f"*{manifest.filename}"))
+        try:
+            if Path(state_path).is_file():
+                return Path(state_path)
+        except OSError:
+            pass
+    if not manifest.filename:
+        return None
+    candidates = [bins.review / manifest.filename]
+    candidates.extend(
+        sorted(bins.review.glob(f"{'[0-9a-f]' * 32}_{glob.escape(manifest.filename)}"))
+    )
     for candidate in candidates:
         try:
-            if candidate.is_file():
+            if candidate.is_file() and _sha256(candidate) == manifest.content_sha256:
                 return candidate
         except OSError:
             continue

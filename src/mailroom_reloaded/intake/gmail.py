@@ -328,7 +328,7 @@ class GmailIntake:
             )
             creds = flow.run_local_server(port=0)
             token_path.parent.mkdir(parents=True, exist_ok=True)
-            token_path.write_text(creds.to_json(), encoding="utf-8")
+            _write_private(token_path, creds.to_json())
 
         self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         return self._service
@@ -523,6 +523,19 @@ class GmailIntake:
                 os.replace(tmp, path)
             finally:
                 tmp.unlink(missing_ok=True)
+
+
+def _write_private(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` readable only by the owner (mode 0600)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except (AttributeError, OSError):
+        pass
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 def poll_and_ingest(limit: int | None = None) -> list[str]:

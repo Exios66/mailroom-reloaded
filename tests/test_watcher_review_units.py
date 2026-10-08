@@ -1,5 +1,6 @@
 """Watcher lifecycle and review validation without running document agents."""
 
+import hashlib
 from unittest.mock import Mock
 
 import pytest
@@ -158,7 +159,7 @@ def parked(bins, monkeypatch):
     manifest = Manifest(
         doc_id="doc",
         filename=path.name,
-        content_sha256="hash",
+        content_sha256=hashlib.sha256(b"synthetic letter").hexdigest(),
         status="parked",
         state=state.model_dump(mode="json"),
     )
@@ -304,3 +305,30 @@ def test_reviewer_cannot_escape_processing_directory(bins, parked, monkeypatch, 
     assert "/" not in worker and "\\" not in worker and ".." not in worker
     assert bins.processing(worker).resolve().parent == (bins.base / "processing").resolve()
     assert Path(worker).name == worker
+
+
+def test_locate_parked_ignores_other_documents_with_similar_names(bins):
+    """A stale path must not resolve to another document's suffix-matching file."""
+    body = b"mine"
+    other = bins.review / f"{'d' * 32}_data.txt"
+    other.write_bytes(b"someone else")
+    manifest = Manifest(
+        doc_id="doc", filename="data.txt",
+        content_sha256=hashlib.sha256(body).hexdigest(), status="parked",
+        state={"path": "gone/data.txt"},
+    )
+    assert review._locate_parked(bins, manifest) is None
+    mine = bins.review / f"{'a' * 32}_data.txt"
+    mine.write_bytes(body)
+    assert review._locate_parked(bins, manifest) == mine
+
+
+def test_locate_parked_escapes_glob_metacharacters(bins):
+    body = b"x"
+    manifest = Manifest(
+        doc_id="doc", filename="a[1]*.txt",
+        content_sha256=hashlib.sha256(body).hexdigest(), status="parked", state={},
+    )
+    decoy = bins.review / f"{'b' * 32}_a1zz.txt"
+    decoy.write_bytes(body)
+    assert review._locate_parked(bins, manifest) is None
