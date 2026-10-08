@@ -1,0 +1,62 @@
+# OTLP in; traces -> Phoenix; metrics -> Prometheus exporter :8889.
+# Scrapes vLLM, DCGM, and (optionally) a remote vLLM /metrics endpoint.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: vllm
+          scrape_interval: 15s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["vllm:8001"]
+        - job_name: dcgm-exporter
+          scrape_interval: 15s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["dcgm-exporter:9400"]
+        # Each host:port in the comma-separated VLLM_METRICS_URLS is written to
+        # targets/vllm.json by the vllm-targets init service (compose).
+        - job_name: vllm-remote
+          scrape_interval: 15s
+          metrics_path: /metrics
+          scheme: ${env:VLLM_METRICS_SCHEME}
+          file_sd_configs:
+            - files: [/etc/otelcol/targets/vllm.json]
+
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 15s
+    # Docker API version; 1.44 is accepted by current engines (24+).
+    api_version: "1.44"
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/phoenix:
+    traces_endpoint: http://phoenix:6006/v1/traces
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    metric_expiration: 24h
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/phoenix]
+    metrics:
+      receivers: [otlp, prometheus, docker_stats]
+      processors: [batch]
+      exporters: [prometheus]
