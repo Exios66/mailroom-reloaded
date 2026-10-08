@@ -71,8 +71,7 @@ class MaskingSpanProcessor(SpanProcessor):
     """
 
     def on_start(self, span, parent_context=None) -> None:  # noqa: ANN001 - SDK signature
-        """Mask content attributes already present when the span starts."""
-        self._mask(span)
+        """No-op: masking happens once the span is complete (see ``on_end``)."""
 
     def on_end(self, span: ReadableSpan) -> None:
         """Mask content attributes before downstream processors export the span."""
