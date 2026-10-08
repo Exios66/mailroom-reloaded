@@ -119,6 +119,7 @@ def test_feature_target_parses_hub_string_labels(value, expected):
 
 
 def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
     module = _load_module()
 
     def responder(state):

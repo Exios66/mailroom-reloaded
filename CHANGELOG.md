@@ -15,6 +15,8 @@ PR #5 audit hardening (PRs #9, #11, #12, #13).
 
 ### Added
 
+- Jev features-mode harvest over production `GateFeatures` (`scripts/jev_harvest.py --mode features`, `scripts/jev_export_gate_features.py`); eval runner creates parent dirs for nested inbox filenames.
+
 - CrewAI `MailroomFlow` with deterministic route gate, guards, report writer and archivist, plus manifest-based crash resume (Tasks 15-16).
 - `/v1` FastAPI API, localhost runs UI (`/ui`) and the `mailroom` CLI (Task 19).
 - Blind/ground-truth dataset loader and eval runner, SAND-37 KPIs and cards, vLLM telemetry and cost (Tasks 20-21).
