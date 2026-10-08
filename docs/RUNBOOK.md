@@ -35,7 +35,7 @@ scripts/tui_dev.sh status         # all three should say "running", health: ok
 | API docs | http://127.0.0.1:8000/docs |
 | Jev gate state | http://127.0.0.1:8000/v1/jev |
 
-Try it in `/tui`: `help`, `ls`, `inspect <doc_id>`, `audit <doc_id>`, `jev`, `review`, `upload` (or drop a `.txt` into `data/tui-dev/base/inbox/`). Seeded Jev documents land in `review` (parked) so you can resolve them.
+Try it in `/tui`: `help`, `ls`, `inspect <doc_id>`, `audit <doc_id>`, `jev`, `review`, `upload` (or drop a `.txt` into `data/tui-dev/base/inbox/`). Quick pipeline check: `cp tests/ingest/fixtures/letter.txt data/tui-dev/base/inbox/` and the document reaches `archived` within ~15 s. Seeded Jev documents land in `review` (parked) so you can resolve them.
 
 ```bash
 scripts/tui_dev.sh down           # stop everything; state stays in data/tui-dev
