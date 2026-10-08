@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, ClassVar
 
+import structlog
 from crewai.flow.flow import Flow, listen, router, start
 from opentelemetry import trace
 from pydantic import ValidationError
@@ -62,7 +63,9 @@ from mailroom_reloaded.storage.bins import (
 )
 from mailroom_reloaded.tools import ToolContext
 
-__all__ = ["MailroomFlow", "NODE_ORDER", "run_document"]
+__all__ = ["NODE_ORDER", "MailroomFlow", "run_document"]
+
+logger = structlog.get_logger(__name__)
 
 # successor for the plain work nodes on the main path
 _NEXT: dict[str, str] = {
@@ -221,8 +224,8 @@ class MailroomFlow(Flow[MailroomState]):
                     file_sha256=result.file_sha256,
                 )
             )
-        except Exception:  # noqa: BLE001 - catalog is best-effort durability
-            pass
+        except Exception as exc:  # noqa: BLE001 - catalog is best-effort durability
+            logger.warning("catalog_upsert_failed", doc_id=state.doc_id, error=str(exc))
         state.status = "archived"
         self._manifest.status = "archived"
 
@@ -302,8 +305,10 @@ class MailroomFlow(Flow[MailroomState]):
         try:
             dest = self._bins.move(Path(state.path), "failed")
             state.path = str(dest)
-        except Exception:  # noqa: BLE001 - best effort relocation
-            pass
+        except Exception as exc:  # noqa: BLE001 - best effort relocation
+            logger.warning(
+                "failed_relocation_skipped", doc_id=state.doc_id, error=str(exc)
+            )
         manifest.state = state.model_dump(mode="json")
         save_manifest(self._bins, manifest)
         audit_log.append(
@@ -323,8 +328,10 @@ class MailroomFlow(Flow[MailroomState]):
         try:
             dest = self._bins.move(Path(state.path), "review")
             state.path = str(dest)
-        except Exception:  # noqa: BLE001 - best effort relocation
-            pass
+        except Exception as exc:  # noqa: BLE001 - best effort relocation
+            logger.warning(
+                "review_relocation_skipped", doc_id=state.doc_id, error=str(exc)
+            )
         manifest.state = state.model_dump(mode="json")
         save_manifest(self._bins, manifest)
         audit_log.append(state.doc_id, "human_review", "parked", {"reason": reason})
