@@ -55,7 +55,11 @@ def _is_processable(path: Path) -> bool:
 
 def _acquire_watcher_lock(path: Path):
     """Non-blocking exclusive ``flock`` on ``path``; ``None`` when held elsewhere."""
-    import fcntl
+    try:
+        import fcntl
+    except ImportError:  # non-Unix: no locking available, so do not claim to have lost
+        fcntl = None
+        logger.warning("watcher_lock_unavailable", path=str(path))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -64,12 +68,11 @@ def _acquire_watcher_lock(path: Path):
         logger.warning("watcher_lock_open_failed", path=str(path), exc_info=True)
         return None
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         fh.close()
         return None
-    except ImportError:  # pragma: no cover - non-Unix
-        pass
     except OSError:
         fh.close()
         return None
@@ -116,6 +119,16 @@ class Watcher:
         self._startup_done = False
         self._stop = threading.Event()
         self._lock = None
+        #: set once this watcher holds the lock and is running its loop
+        self.ready = threading.Event()
+        self._inflight = 0
+        self._inflight_lock = threading.Lock()
+
+    def _bump_inflight(self, delta: int) -> None:
+        """Adjust the in-flight count and publish it, atomically."""
+        with self._inflight_lock:
+            self._inflight += delta
+            M.inflight.set(self._inflight, {"worker": self.worker_id})
 
     # ------------------------------------------------------------- startup
     def resume_processing(self) -> int:
@@ -191,7 +204,7 @@ class Watcher:
         if claimed is None:
             logger.debug("claim_lost", file=str(path), worker_id=self.worker_id)
             return False
-        M.inflight.set(1, {"worker": self.worker_id})
+        self._bump_inflight(1)
         try:
             _flow.run_document(claimed, worker_id=self.worker_id)
             return True
@@ -199,7 +212,7 @@ class Watcher:
             logger.exception("watcher_document_crashed", file=str(claimed))
             return True
         finally:
-            M.inflight.set(0, {"worker": self.worker_id})
+            self._bump_inflight(-1)
 
     # ------------------------------------------------------------- loop
     def run_forever(self, poll_interval: float = DEFAULT_POLL_INTERVAL_SECONDS) -> None:
@@ -212,6 +225,7 @@ class Watcher:
             )
         self._lock = lock
         self._stop.clear()
+        self.ready.set()
         event = threading.Event()
         observer = None
         try:
@@ -225,6 +239,7 @@ class Watcher:
                 event.wait(poll_interval)
                 event.clear()
         finally:
+            self.ready.clear()
             if observer is not None:
                 try:
                     observer.stop()
