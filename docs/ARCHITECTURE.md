@@ -76,7 +76,7 @@ The gate slot is pluggable. `load_gate()` (`agents/gate.py:169-180`) chooses the
 deterministic `BandGate` by default, a `LearnedGate` when
 `models/route_gate.json` exists, or — when the opt-in `MAILROOM_JEV_PROVIDER` is
 set **and** `models/jev_calibration.json` is present — a `JevGate` backed by the
-TypeSafe System One decision model (`agents/jev.py:367-381`). Jev overrides only
+TypeSafe System One decision model (`load_jev_gate` in `agents/jev.py`). Jev overrides only
 the medium confidence band and never a hard `rule` decision, so the deterministic
 contract above is preserved whenever Jev is off (the default) or uncalibrated.
 See [JEV.md](JEV.md).

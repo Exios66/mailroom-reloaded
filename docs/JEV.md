@@ -9,28 +9,29 @@ a `JevGate` over the deterministic `BandGate` / `LearnedGate`.
 
 Source of record: tracking issue
 [Exios66/mailroom-reloaded#8](https://github.com/Exios66/mailroom-reloaded/issues/8).
-Implementation: `agents/jev.py` (381 lines), `eval/jev_calibration.py` (138
-lines), the `jev` command group in `cli.py:246-327`, the `jev:` block in
-`config/taxonomy.yaml:142-160`, and `settings.py:146-271`.
+Implementation: `src/mailroom_reloaded/agents/jev.py` (`JevClient`, `JevGate`,
+`load_jev_gate`), `src/mailroom_reloaded/eval/jev_calibration.py`
+(`fit_jev_calibration`), the `jev` command group in `cli.py:249-331`, the `jev:`
+block in `config/taxonomy.yaml:142-160`, and `settings.py` (`JevConfig`,
+`jev_config`, `_jev_api_key`).
 
 ## What Jev is
 
-`JevClient.ask` sends one envelope and parses an `answers` mapping
-(`agents/jev.py:213-228`; request `{"model", "state", "questions"}` at
-`agents/jev.py:217`; response parsed at `agents/jev.py:173-188`). Each question
-is built by one of three builders and each answer is a typed `JevAnswer`
-(`agents/jev.py:76-112`, `agents/jev.py:143-170`):
+`JevClient.ask` sends one envelope and parses an `answers` mapping (request
+`{"model", "state", "questions"}`; response parsed by `_parse_answers`). Each
+question is built by one of three builders and each answer is normalized into a
+typed `JevAnswer` by `_as_answer`:
 
 | Type | Shape | Meaning |
 | --- | --- | --- |
 | `choice` | `{type, choice, probabilities, confidence}` | One option plus the per-option probability distribution and a confidence. |
-| `noul` | `{type, noul}` | A single `P(yes)` probability (`agents/jev.py:20`, `agents/jev.py:97-105`). |
-| `score` | `{type, score, legend}` | A probability-weighted position with a label legend (`agents/jev.py:108-112`). |
+| `noul` | `{type, noul}` | A single `P(yes)` probability (built by `noul`). |
+| `score` | `{type, score, legend}` | A probability-weighted position with a label legend (built by `score`). |
 
 `confidence` is **derived from the distribution concentration, not from
 per-item correctness**: when the server omits it, the client falls back to the
-probability of the chosen option, else the maximum probability
-(`agents/jev.py:151-156`). It is not a separately calibrated decision head — the
+probability of the chosen option, else the maximum probability (in
+`_as_answer`). It is not a separately calibrated decision head — the
 issue flags that "confidence is the top option probability, not a separately
 calibrated decision head". Treat it as a raw signal that the calibration
 (§ Calibration) must re-scale before the gate trusts it.
@@ -38,21 +39,20 @@ calibrated decision head". Treat it as a raw signal that the calibration
 The question builders are:
 
 - `choice(name, instructions, criteria)` — `criteria` maps **each option → a
-  description** (`agents/jev.py:90-94`).
+  description**.
 - `noul(name, instructions, criteria=None)` — missing criteria normalizes to
-  `{}` (`agents/jev.py:97-105`).
+  `{}`.
 - `score(name, instructions, criteria)` — `criteria` is an ordered list of
-  score labels (`agents/jev.py:108-112`).
+  score labels.
 
 The gate asks exactly two questions: a `route` **choice** over
 `proceed | retry | verify | boss | human_review`, and an `escalate` **noul**
-"should this be escalated to a human reviewer?" (`_jev_questions`,
-`agents/jev.py:278-295`).
+"should this be escalated to a human reviewer?" (`_jev_questions`).
 
 ## Transports
 
-`MAILROOM_JEV_PROVIDER` selects one of three transports
-(`settings.py:148`, `settings.py:151-165`, `settings.py:254-263`). All three use
+`MAILROOM_JEV_PROVIDER` selects one of three transports (`_JEV_PROVIDERS`,
+`_JEV_PROVIDER_DEFAULTS`, `jev_config` in `settings.py`). All three use
 the same typed-decision HTTP shape; only the endpoint and default model differ.
 
 | Provider | Endpoint | Default model | API key | Context |
@@ -61,31 +61,35 @@ the same typed-decision HTTP shape; only the endpoint and default model differ.
 | `typesafe` | `POST https://api.typesafe.ai/v1/systemone` | `jev-latest` | `TYPESAFE_API_KEY` | 64K — **not confirmed in code (see below)** |
 | `local` | `POST http://127.0.0.1:8090/v1/systemone` | `jevk5` | optional | self-hosted JevK5 |
 
-- **OpenRouter Decisions API** (`settings.py:152-156`). Not OpenAI-compatible;
+- **OpenRouter Decisions API** (`_JEV_PROVIDER_DEFAULTS` in `settings.py`). Not OpenAI-compatible;
   the issue notes "input `$0.042/M`, output free; 32K ctx".
-- **TypeSafe native** (`settings.py:157-160`). The 64K context figure appears
+- **TypeSafe native** (`_JEV_PROVIDER_DEFAULTS` in `settings.py`). The 64K context figure appears
   only in this documentation's brief, not in the code or issue — flagged
   unconfirmed.
-- **Local / offline `jevk5`** (`settings.py:161-164`). A self-hosted JevK5
+- **Local / offline `jevk5`** (`_JEV_PROVIDER_DEFAULTS` in `settings.py`). A self-hosted JevK5
   server with the same typed-decision shape and one forward pass. The JevK5
   runtime internally reads letter logits as `softmax(logit / 1.22)` per the
   model card in issue #8; that 1.22 is the runtime's own softmax divisor, **not**
-  the request `temperature` mailroom sends (which defaults to `1.0`,
-  `settings.py:167-172`, set via `MAILROOM_JEV_TEMPERATURE`/`JEV_TEMPERATURE`).
-  `1.22` is not present anywhere in this repository — flagged as issue-sourced.
+  the request `temperature` mailroom sends. `temperature` is a local-usage/default
+  knob reserved for the offline JevK5 transport (`_JEV_DEFAULTS`, default `1.0`,
+  set via `MAILROOM_JEV_TEMPERATURE`/`JEV_TEMPERATURE`); it is **not** included
+  in hosted OpenRouter/TypeSafe requests. `1.22` is not present anywhere in this
+  repository — flagged as issue-sourced.
 
 Requests carry `Authorization: Bearer <api_key>` only when a key resolves; the
-local provider may run keyless (`agents/jev.py:218-221`,
-`settings.py:229-243`).
+local provider may run keyless (`JevClient.ask`; `_jev_api_key`).
 
-**Key resolution order** (`_jev_api_key`, `settings.py:229-243`; mirrored in
-`.env.example:32-35`):
+**Key resolution order** (`_jev_api_key`, `src/mailroom_reloaded/settings.py`;
+mirrored in `.env.example:32-39`):
 
-1. `MAILROOM_JEV_API_KEY` (via `_jev_env("API_KEY")`)
-2. `JEV_API_KEY`
-3. `TYPESAFE_API_KEY`
-4. `OPENROUTER_API_KEY`
-5. `settings.openrouter_api_key`
+1. `MAILROOM_JEV_API_KEY` / `JEV_API_KEY` — explicit override (via
+   `_jev_env("API_KEY")`), tried first for every provider.
+2. Provider-preferred hosted key: `OPENROUTER_API_KEY` when
+   `provider=openrouter`; `TYPESAFE_API_KEY` when `provider=typesafe`.
+3. The other hosted key (`TYPESAFE_API_KEY` for `openrouter`,
+   `OPENROUTER_API_KEY` for `typesafe`).
+4. `settings.openrouter_api_key` (`OPENROUTER_API_KEY` /
+   `MAILROOM_OPENROUTER_API_KEY` as loaded by pydantic-settings).
 
 ## How it plugs in
 
@@ -98,61 +102,59 @@ if jev is not None:
 # else: LearnedGate if models/route_gate.json exists, else BandGate
 ```
 
-`load_jev_gate` returns a `JevGate` **only when both** conditions hold
-(`agents/jev.py:367-381`):
+`load_jev_gate` returns a `JevGate` **only when both** conditions hold:
 
-1. `jev_config().enabled` — i.e. `provider != "off"` (`settings.py:194-197`);
+1. `jev_config().enabled` — i.e. `provider != "off"` (`JevConfig.enabled`);
 2. `<base_dir>/models/jev_calibration.json` exists and is readable.
 
 Otherwise it returns `None` and the deterministic `BandGate`/`LearnedGate`
 behaviour is unchanged.
 
-`JevGate` mirrors `LearnedGate`'s guard (`agents/jev.py:298-364`):
+`JevGate` mirrors `LearnedGate`'s guard (`JevGate.decide`):
 
 - It asks Jev **only inside the medium confidence band** — classify
   `low <= confidence < high`, extract `low <= confidence < judge_band_high`
-  (`agents/jev.py:334-337`).
+  (`JevGate.decide`).
 - It **never overrides a hard `rule` decision** (`re_sort`, length cap, invalid
   schema): `base.source == "rule"` returns the band decision untouched
-  (`agents/jev.py:331-332`).
+  (`JevGate.decide`).
 - The chosen action is accepted when the Jev confidence (temperature-scaled by
-  the calibration, `agents/jev.py:320-327`) is ≥ the accept threshold and the
-  `noul` answer does not call for escalation; otherwise it maps to
-  `human_review`. `noul >= 0.5` is the escalation cut (`_NOUL_ESCALATE`,
-  `agents/jev.py:69`, `agents/jev.py:357-360`), and an unknown `choice` also
-  maps to `human_review` (`agents/jev.py:361-362`). Decisions carry
-  `source="jev"` (`agents/jev.py:343-364`; `source` literal at
-  `agents/gate.py:53`).
+  the calibration, `JevGate._confidence`) is at/above the accept threshold and
+  the `noul` answer does not call for escalation. Between the verify and accept
+  thresholds the gate returns `verify` (or `human_review` for a non-`proceed`/
+  `verify` choice); below the verify threshold it returns `human_review`
+  (`JevGate.decide`). `noul >= 0.5` is the escalation cut (`_NOUL_ESCALATE`),
+  and an unknown `choice` also maps to `human_review`. Decisions carry
+  `source="jev"` (`JevGate.decide`; `source` literal at `agents/gate.py:53`).
 
 ## Configuration
 
 The taxonomy block (`config/taxonomy.yaml:142-160`) and the environment
 variables are two views of the same fields. Per-field resolution is
 `MAILROOM_JEV_<FIELD>` → `JEV_<FIELD>` → taxonomy `jev:` → default
-(`_jev_env`/`_jev_field`/`_jev_scalar`, `settings.py:200-226`;
-`JevConfig` docstring `settings.py:175-197`).
+(`_jev_env`/`_jev_field`/`_jev_scalar`; `JevConfig` docstring).
 
 | Taxonomy key | Env (`MAILROOM_JEV_*` / `JEV_*`) | Default | Source |
 | --- | --- | --- | --- |
-| `provider` | `PROVIDER` | `off` | `settings.py:254-258`, `taxonomy.yaml:144` |
-| `model` | `MODEL` | per provider (above) | `settings.py:262`, `taxonomy.yaml:147` |
-| `base_url` | `BASE_URL` | per provider (above) | `settings.py:263`, `taxonomy.yaml:151` |
-| `temperature` | `TEMPERATURE` | `1.0` | `settings.py:167-172`, `settings.py:265`, `taxonomy.yaml:153` |
-| `accept_threshold` | `ACCEPT_THRESHOLD` | `0.8` | `settings.py:167-172`, `settings.py:266-268`, `taxonomy.yaml:156` |
-| `timeout_s` | `TIMEOUT_S` | `10.0` | `settings.py:167-172`, `settings.py:269`, `taxonomy.yaml:158` |
-| `max_retries` | `MAX_RETRIES` | `2` | `settings.py:167-172`, `settings.py:270`, `taxonomy.yaml:160` |
+| `provider` | `PROVIDER` | `off` | `jev_config`, `taxonomy.yaml:144` |
+| `model` | `MODEL` | per provider (above) | `jev_config`, `taxonomy.yaml:147` |
+| `base_url` | `BASE_URL` | per provider (above) | `jev_config`, `taxonomy.yaml:151` |
+| `temperature` | `TEMPERATURE` | `1.0` | `jev_config`, `taxonomy.yaml:153` |
+| `accept_threshold` | `ACCEPT_THRESHOLD` | `0.8` | `jev_config`, `taxonomy.yaml:156` |
+| `timeout_s` | `TIMEOUT_S` | `10.0` | `jev_config`, `taxonomy.yaml:158` |
+| `max_retries` | `MAX_RETRIES` | `2` | `jev_config`, `taxonomy.yaml:160` |
 
-Unknown providers collapse to `off` (`settings.py:257-258`). `jev_config()` is
-deliberately **not cached** so env/CLI overrides take effect immediately
-(`settings.py:246-252`); `load_taxonomy`/`get_settings` are still `lru_cache`d,
-so a taxonomy edit needs a process restart.
+Unknown providers collapse to `off` (`jev_config`). `jev_config()` is
+deliberately **not cached** so env/CLI overrides take effect immediately;
+`load_taxonomy`/`get_settings` are still `lru_cache`d, so a taxonomy edit needs
+a process restart.
 
-`.env.example:22-35` documents the same surface, including `MAILROOM_JEV_*`
-blanks and `JEV_API_KEY` / `TYPESAFE_API_KEY`.
+`.env.example:22-39` documents the same surface, including `MAILROOM_JEV_*`
+blanks and `MAILROOM_JEV_API_KEY` / `JEV_API_KEY` / `TYPESAFE_API_KEY`.
 
 ## CLI
 
-The `jev` command group is `cli.py:246-327`.
+The `jev` command group is `cli.py:249-331`.
 
 ```bash
 # Ask one question; prints {"answers": {...}}.
@@ -172,15 +174,15 @@ uv run mailroom jev decide \
 uv run mailroom jev calibrate --rows rows.jsonl --out models/jev_calibration.json
 ```
 
-- `decide` flags (`cli.py:264-303`): `--state` (required), `--type`
+- `decide` flags (`cli.py:268-306`): `--state` (required), `--type`
   (`choice|noul|score`, required), `--instructions` (required), `--criteria`
   (repeatable `KEY=DESCRIPTION`, for `choice`/`noul`), `--criteria-list`
   (comma-separated labels, for `score`). It echoes a JSON
   `{"answers": {...}}` envelope. **When Jev is off it prints
   `Jev is off (MAILROOM_JEV_PROVIDER=off)...` to stderr and exits non-zero**
-  (`_jev_off`, `cli.py:254-261`; called at `cli.py:280-282`). An unknown
-  `--type` also exits non-zero (`cli.py:296-298`).
-- `calibrate` flags (`cli.py:306-327`): `--rows` (required; must exist, be a
+  (`_jev_off`, `cli.py:257-264`; called at `cli.py:283-285`). An unknown
+  `--type` also exits non-zero (`cli.py:299-301`).
+- `calibrate` flags (`cli.py:309-330`): `--rows` (required; must exist, be a
   readable file), `--out` (default `models/jev_calibration.json`). It loads the
   JSONL rows and calls `fit_jev_calibration`, echoing the fitted dict.
 
@@ -221,11 +223,18 @@ writes a neutral calibration (`temperature 1.0`, `accept 0.8`, `verify 0.5`,
   (act) and `verify_threshold` (the lower edge of the caution band)
   (`eval/jev_calibration.py:11-13`, `90-103`). Re-fit both thresholds on your
   own data.
-- The gate currently consumes **only `accept_threshold`** (from the calibration
-  when present, else `cfg.accept_threshold`) (`agents/jev.py:345-349`).
-  `verify_threshold` is fit and persisted but **not read by `JevGate` yet** —
-  the medium/caution band is still the deterministic one. Flagged so nobody
-  assumes a two-threshold policy is live.
+- The gate consumes **both thresholds**. Inside the medium band Jev's
+  temperature-scaled confidence is tiered (`JevGate.decide` in
+  `src/mailroom_reloaded/agents/jev.py`): `confidence < verify_threshold` →
+  `human_review`; `verify_threshold <= confidence < accept_threshold` →
+  `verify` (a Jev escalation choice such as `boss`/`human_review` is never
+  downgraded to `verify` — it stays `human_review`); `confidence >=
+  accept_threshold` → the chosen action. **Without a calibration there is no
+  verify band**, because `verify_threshold` collapses to `accept_threshold`.
+  Covered by `test_jev_gate_uses_calibration_accept_threshold`,
+  `test_jev_gate_below_verify_threshold_is_human_review` and
+  `test_jev_gate_medium_band_keeps_escalation_choice` in
+  `tests/agents/test_jev.py`.
 - Third-party evals measured ECE ~0.093 versus the shipped 0.03–0.06; re-fit
   ECE is reported in the artifact as `ece_before`/`ece_after` (issue #8).
 
@@ -240,8 +249,8 @@ writes a neutral calibration (`temperature 1.0`, `accept 0.8`, `verify 0.5`,
   (issue #8).
 - **No idempotency.** A request is not deduplicated; only HTTP `429` and `5xx`
   are retried (with exponential backoff honouring `Retry-After`), and any other
-  non-2xx raises `JevError` immediately (`agents/jev.py:230-248`,
-  `agents/jev.py:191-199`). Retrying a successful-but-unseen call can double a
+  non-2xx raises `JevError` immediately (`JevClient._post_with_retry`,
+  `_retry_after`). Retrying a successful-but-unseen call can double a
   side effect, so keep callers idempotent.
 - **Pin the model id.** Once thresholds are tuned against a dated model id,
   pin that exact id (`model:`) rather than a floating alias, so the calibration
