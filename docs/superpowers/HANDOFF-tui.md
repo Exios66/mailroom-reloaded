@@ -1,6 +1,6 @@
 # Handoff: browser TUI (`/tui`)
 
-Status as of 2026-10-08: **plan written, no code yet.** Pick up at Task 1.
+Status as of 2026-10-08: **all 8 tasks implemented and live-verified** in a real browser (boot, ls/inspect/audit, themes, persistence, auth, offline, mobile). Remaining: PR review/merge. See docs/TUI.md for the checklist and commands.
 
 - Branch: `feat/tui-brand-theme` (from `feat/mailroom-reloaded-completion` @ `3865485`). Not merged; PR #5 is a separate, still-open effort.
 - Plan: [plans/2026-10-08-mailroom-tui.md](plans/2026-10-08-mailroom-tui.md) (8 tasks, each ends in a commit).
