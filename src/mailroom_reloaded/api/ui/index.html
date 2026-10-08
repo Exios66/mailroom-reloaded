@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mailroom · runs UI</title>
+  <style>
+    :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e6e9ef; --muted:#9aa4b2; --accent:#5b9dff; --ok:#3fb950; --bad:#f85149; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--bg); color:var(--fg); }
+    header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+    header h1 { font-size:16px; margin:0 16px 0 0; }
+    header a { color:var(--accent); text-decoration:none; }
+    header a:hover { text-decoration:underline; }
+    .grow { flex:1; }
+    input { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; }
+    button { background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 10px; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    main { padding:20px; display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+    section { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+    section h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; word-break:break-word; }
+    th { color:var(--muted); font-weight:500; }
+    tr.clickable:hover { background:#1d222c; cursor:pointer; }
+    .pill { display:inline-block; padding:1px 7px; border-radius:999px; border:1px solid var(--line); font-size:11px; }
+    .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); }
+    pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; font-size:11px; max-height:280px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+    .warn { color:#d29922; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>mailroom · runs UI</h1>
+    <a href="http://localhost:6006" target="_blank" rel="noopener">Phoenix :6006</a>
+    <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana :3000</a>
+    <span class="grow"></span>
+    <input id="token" type="password" placeholder="API token (if set)" autocomplete="off" />
+    <button id="refresh">refresh</button>
+  </header>
+
+  <main>
+    <section>
+      <h2>Documents</h2>
+      <div class="row">
+        <select id="statusFilter">
+          <option value="">all statuses</option>
+          <option>processing</option>
+          <option>parked</option>
+          <option>archived</option>
+          <option>failed</option>
+        </select>
+      </div>
+      <table id="documents"><thead><tr><th>doc_id</th><th>filename</th><th>type</th><th>status</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <section>
+      <h2>Review queue</h2>
+      <table id="review"><thead><tr><th>doc_id</th><th>filename</th><th>type</th></tr></thead><tbody></tbody></table>
+    </section>
+
+    <section>
+      <h2>Audit verify</h2>
+      <p class="muted" id="auditHint">Click a document row, or enter a doc_id.</p>
+      <div class="row"><input id="auditDocId" placeholder="doc_id" /><button id="auditGo">verify</button></div>
+      <div id="auditResult" class="muted">—</div>
+    </section>
+
+    <section>
+      <h2>Eval runs</h2>
+      <table id="runs"><thead><tr><th>run_id</th><th>documents</th></tr></thead><tbody></tbody></table>
+      <h2 style="margin-top:14px">Cards</h2>
+      <pre id="cards" class="muted">run not selected</pre>
+    </section>
+
+    <section>
+      <h2>Document detail</h2>
+      <pre id="detail" class="muted">no document selected</pre>
+    </section>
+  </main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  function headers() {
+    const t = $("token").value.trim();
+    const h = {};
+    if (t) h["Authorization"] = "Bearer " + t;
+    return h;
+  }
+
+  async function api(path) {
+    const res = await fetch(path, { headers: headers() });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(res.status + " " + path + " — " + text.slice(0, 200));
+    }
+    return res.json();
+  }
+
+  function setError(target, err) {
+    $(target).innerHTML = '<span class="bad">' + String(err.message || err) + "</span>";
+  }
+
+  function statusPill(s) {
+    const cls = s === "archived" ? "ok" : (s === "failed" ? "bad" : "muted");
+    return '<span class="pill ' + cls + '">' + (s || "?") + "</span>";
+  }
+
+  async function loadDocuments() {
+    const status = $("statusFilter").value;
+    const q = status ? ("?status=" + encodeURIComponent(status)) : "";
+    const body = await api("/v1/documents" + q);
+    const tb = $("documents").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const d of body.documents || []) {
+      const tr = document.createElement("tr");
+      tr.className = "clickable";
+      tr.innerHTML = "<td>" + (d.doc_id || "") + "</td><td>" + (d.filename || "") +
+        "</td><td>" + (d.doc_type || "—") + "</td><td>" + statusPill(d.status) + "</td>";
+      tr.onclick = () => selectDocument(d.doc_id);
+      tb.appendChild(tr);
+    }
+    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="4" class="muted">none</td></tr>';
+  }
+
+  async function loadReview() {
+    const body = await api("/v1/documents?status=parked");
+    const tb = $("review").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const d of body.documents || []) {
+      const tr = document.createElement("tr");
+      tr.className = "clickable";
+      tr.innerHTML = "<td>" + (d.doc_id || "") + "</td><td>" + (d.filename || "") +
+        "</td><td>" + (d.doc_type || "—") + "</td>";
+      tr.onclick = () => selectDocument(d.doc_id);
+      tb.appendChild(tr);
+    }
+    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">empty</td></tr>';
+  }
+
+  async function loadRuns() {
+    const body = await api("/v1/runs");
+    const tb = $("runs").querySelector("tbody");
+    tb.innerHTML = "";
+    for (const r of body.runs || []) {
+      const tr = document.createElement("tr");
+      tr.className = "clickable";
+      tr.innerHTML = "<td>" + r.run_id + "</td><td>" + (r.documents ?? "—") + "</td>";
+      tr.onclick = () => loadCards(r.run_id);
+      tb.appendChild(tr);
+    }
+    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="2" class="muted">no eval runs yet</td></tr>';
+  }
+
+  async function loadCards(runId) {
+    try {
+      const body = await api("/v1/runs/" + encodeURIComponent(runId) + "/cards");
+      $("cards").classList.remove("muted");
+      $("cards").textContent = JSON.stringify(body.cards, null, 2) || "[]";
+      if (!body.cards || !body.cards.length) {
+        $("cards").textContent = "no cards yet for " + runId + " (Task 21)";
+        $("cards").classList.add("muted");
+      }
+    } catch (err) { setError("cards", err); }
+  }
+
+  async function selectDocument(docId) {
+    $("auditDocId").value = docId;
+    try {
+      const body = await api("/v1/documents/" + encodeURIComponent(docId));
+      $("detail").classList.remove("muted");
+      $("detail").textContent = JSON.stringify(body, null, 2);
+    } catch (err) { setError("detail", err); }
+  }
+
+  async function verifyAudit() {
+    const docId = $("auditDocId").value.trim();
+    if (!docId) return;
+    try {
+      const body = await api("/v1/audit/" + encodeURIComponent(docId));
+      const ok = body.chain && body.chain.ok;
+      $("auditResult").innerHTML =
+        (ok ? '<span class="ok">chain OK</span>' : '<span class="bad">chain BROKEN at ' +
+          (body.chain && body.chain.broken_at) + "</span>") +
+        " · " + (body.entries || []).length + " entries";
+    } catch (err) { setError("auditResult", err); }
+  }
+
+  async function refresh() {
+    try { await loadDocuments(); } catch (err) { setError("documents", err); }
+    try { await loadReview(); } catch (err) { setError("review", err); }
+    try { await loadRuns(); } catch (err) { setError("runs", err); }
+  }
+
+  $("refresh").onclick = refresh;
+  $("statusFilter").onchange = () => loadDocuments().catch((e) => setError("documents", e));
+  $("auditGo").onclick = verifyAudit;
+  $("token").oninput = refresh;
+  refresh();
+})();
+</script>
+</body>
+</html>
