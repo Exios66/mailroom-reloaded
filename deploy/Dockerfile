@@ -8,6 +8,7 @@
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 ARG UV_EXTRAS="--extra bert"
 ARG ML_MODEL_REPO=Lucius-Morningstar/mailroom-modernbert-classifier
+# Branch/tag/commit of the model repo; pin a commit SHA for reproducible images.
 ARG ML_MODEL_REVISION=main
 ARG ML_BUILD_NONE=0
 
@@ -29,13 +30,13 @@ COPY src ./src
 RUN uv sync --frozen --no-dev ${UV_EXTRAS}
 
 
-# --- Model stage: pinned ModernBERT bundle; ML_BUILD_NONE=1 stages an empty dir.
+# --- Model stage: ModernBERT bundle at ML_MODEL_REVISION; ML_BUILD_NONE=1 stages an empty dir.
 FROM ${PYTHON_IMAGE} AS model
 WORKDIR /ml
 ARG ML_MODEL_REPO
 ARG ML_MODEL_REVISION
 ARG ML_BUILD_NONE
-RUN pip install --no-cache-dir "huggingface_hub>=0.30" \
+RUN pip install --no-cache-dir "huggingface_hub>=0.34" \
     && if [ "$ML_BUILD_NONE" != "1" ]; then \
          hf download "$ML_MODEL_REPO" --revision "$ML_MODEL_REVISION" --local-dir /ml/bundle; \
        else \

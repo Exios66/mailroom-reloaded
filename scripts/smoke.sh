@@ -5,6 +5,13 @@
 # then checks Phoenix and Grafana. Prints "SMOKE OK" on success.
 set -euo pipefail
 
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+
 API="${MAILROOM_API_URL:-http://localhost:8000}"
 PHOENIX="${PHOENIX_URL:-http://localhost:6006}"
 GRAFANA="${GRAFANA_URL:-http://localhost:3000}"
@@ -27,7 +34,7 @@ name="smoke-$(date +%s)-$(basename "$FIXTURE")"
 deadline=$((SECONDS + TIMEOUT))
 status=""
 while (( SECONDS < deadline )); do
-  body="$(curl -fsS "${AUTH[@]}" "$API/v1/documents" || true)"
+  body="$(curl -fsS ${AUTH[@]+"${AUTH[@]}"} "$API/v1/documents" || true)"
   status="$(printf '%s' "$body" | python3 -c '
 import json, sys
 name = sys.argv[1]

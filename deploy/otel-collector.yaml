@@ -21,20 +21,20 @@ receivers:
           metrics_path: /metrics
           static_configs:
             - targets: ["dcgm-exporter:9400"]
-        # VLLM_METRICS_URLS / VLLM_METRICS_SCHEME: ONE extra host[:port] (e.g. a
-        # Modal vLLM deployment, scheme https). The Collector cannot expand an
-        # env var into a target list; for several remote endpoints add jobs here.
-        # The default points at the Collector's own metrics so the job is inert.
+        # Each host:port in the comma-separated VLLM_METRICS_URLS is written to
+        # targets/vllm.json by the vllm-targets init service (compose).
         - job_name: vllm-remote
           scrape_interval: 15s
           metrics_path: /metrics
           scheme: ${env:VLLM_METRICS_SCHEME}
-          static_configs:
-            - targets: ["${env:VLLM_METRICS_URLS}"]
+          file_sd_configs:
+            - files: [/etc/otelcol/targets/vllm.json]
 
   docker_stats:
     endpoint: unix:///var/run/docker.sock
     collection_interval: 15s
+    # Docker API version; 1.44 is accepted by current engines (24+).
+    api_version: "1.44"
 
 processors:
   batch: {}
@@ -46,6 +46,7 @@ exporters:
       insecure: true
   prometheus:
     endpoint: 0.0.0.0:8889
+    metric_expiration: 24h
     resource_to_telemetry_conversion:
       enabled: true
 

@@ -63,22 +63,48 @@ services:
     # docker_stats needs the Docker socket (read-only) and a matching group.
     user: "0:0"
     environment:
-      # Extra vLLM /metrics host:port (e.g. a Modal deployment). One target; see otel-collector.yaml.
-      VLLM_METRICS_URLS: ${VLLM_METRICS_URLS:-otel-collector:8888}
       VLLM_METRICS_SCHEME: ${VLLM_METRICS_SCHEME:-http}
     ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "8889:8889"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:8889:8889"
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on: [phoenix]
+      - otel_targets:/etc/otelcol/targets:ro
+    depends_on:
+      phoenix:
+        condition: service_started
+      vllm-targets:
+        condition: service_completed_successfully
+
+  # Splits comma-separated VLLM_METRICS_URLS (host:port each) into a Prometheus
+  # file_sd targets file that the Collector's prometheus receiver reads.
+  vllm-targets:
+    image: busybox:1.37.0
+    restart: "no"
+    environment:
+      VLLM_METRICS_URLS: ${VLLM_METRICS_URLS:-}
+    command:
+      - sh
+      - -c
+      - |
+        out="["; first=1; IFS=,
+        for u in $$VLLM_METRICS_URLS; do
+          u=$$(echo "$$u" | tr -d ' ')
+          [ -n "$$u" ] || continue
+          [ "$$first" = 1 ] || out="$$out,"
+          first=0
+          out="$$out\"$$u\""
+        done
+        echo "[{\"targets\":$$out]}]" > /targets/vllm.json
+    volumes:
+      - otel_targets:/targets
 
   phoenix:
     image: arizephoenix/phoenix:version-11.6.2
     restart: unless-stopped
-    ports: ["6006:6006"]
+    ports: ["127.0.0.1:6006:6006"]
     environment:
       PHOENIX_WORKING_DIR: /mnt/data
     volumes:
@@ -87,7 +113,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.1.0
     restart: unless-stopped
-    ports: ["9090:9090"]
+    ports: ["127.0.0.1:9090:9090"]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -99,15 +125,15 @@ services:
   grafana:
     image: grafana/grafana:11.4.0
     restart: unless-stopped
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
     depends_on: [prometheus]
 
   llamafile:
@@ -118,7 +144,7 @@ services:
         LLAMAFILE_VERSION: ${LLAMAFILE_VERSION:-0.10.4}
     image: mailroom-llamafile:latest
     restart: unless-stopped
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]
     environment:
       LLAMAFILE_MODEL: ${LLAMAFILE_MODEL:-/models/model.gguf}
       LLAMAFILE_ALIAS: ${LLAMAFILE_ALIAS:-qwen3:7b}
@@ -131,7 +157,7 @@ services:
     profiles: ["gpu"]
     image: vllm/vllm-openai:v0.29.0
     restart: unless-stopped
-    ports: ["8001:8001"]
+    ports: ["127.0.0.1:8001:8001"]
     ipc: host
     command: >-
       --model ${VLLM_MODEL:-Qwen/Qwen3-8B-AWQ}
@@ -158,7 +184,7 @@ services:
     profiles: ["gpu"]
     image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
     restart: unless-stopped
-    ports: ["9400:9400"]
+    ports: ["127.0.0.1:9400:9400"]
     cap_add: [SYS_ADMIN]
     deploy:
       resources:
@@ -175,3 +201,4 @@ volumes:
   phoenix_data:
   prometheus_data:
   grafana_data:
+  otel_targets:

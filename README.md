@@ -18,7 +18,7 @@ Extras: `bert`, `eval`, `embeddings`, `deploy`, `dev`, `parity`.
 ## Quick start (Docker)
 
 ```bash
-cp .env.example .env            # set MAILROOM_API_TOKEN (the container binds 0.0.0.0)
+cp .env.example .env            # set MAILROOM_API_TOKEN and GRAFANA_ADMIN_PASSWORD (the container binds 0.0.0.0)
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 docker compose -f deploy/docker-compose.yml --env-file .env --profile local-llm up -d --build  # + llamafile
 docker compose -f deploy/docker-compose.yml --env-file .env --profile gpu up -d                # + vLLM and DCGM
@@ -33,4 +33,4 @@ scripts/smoke.sh                # drops a fixture in the inbox and waits for "ar
 | Grafana (Pipeline, Serving & GPU, Quality) | http://localhost:3000 |
 
 Use the `split-watcher` profile with `MAILROOM_EMBED_WATCHER=0` to run the watcher as its own container.
-Set `VLLM_METRICS_URLS` (one `host:port`, plus `VLLM_METRICS_SCHEME=https` if needed) to scrape a remote vLLM such as Modal.
+Set `GRAFANA_ADMIN_PASSWORD` (required). Set `VLLM_METRICS_URLS` (comma-separated `host:port` list, plus `VLLM_METRICS_SCHEME=https` if needed) to scrape remote vLLM endpoints such as Modal. Observability and engine ports bind to 127.0.0.1 only.

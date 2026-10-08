@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -27,7 +28,14 @@ def test_compose_config_valid(profiles):
     for p in profiles:
         cmd += ["--profile", p]
     cmd += ["config", "-q"]
-    res = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT, check=False)
+    res = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+        env={**os.environ, "GRAFANA_ADMIN_PASSWORD": "test"},
+    )
     if res.returncode != 0 and "unknown shorthand flag" in res.stderr + res.stdout:
         pytest.skip("docker compose plugin not available")
     assert res.returncode == 0, res.stderr
@@ -42,6 +50,7 @@ def test_compose_services_profiles_and_volumes():
         "phoenix": None,
         "prometheus": None,
         "grafana": None,
+        "vllm-targets": None,
         "watcher": ["split-watcher"],
         "llamafile": ["local-llm"],
         "vllm": ["gpu"],
@@ -57,6 +66,7 @@ def test_compose_services_profiles_and_volumes():
         "phoenix_data",
         "prometheus_data",
         "grafana_data",
+        "otel_targets",
     }
     cmd = svc["vllm"]["command"]
     vllm_cmd = cmd if isinstance(cmd, str) else " ".join(str(c) for c in cmd)
@@ -88,8 +98,55 @@ def test_collector_config_parses():
     assert pipelines["metrics"]["exporters"] == ["prometheus"]
     assert cfg["exporters"]["prometheus"]["endpoint"].endswith(":8889")
     scrape = json.dumps(cfg["receivers"]["prometheus"])
-    for target in ("vllm:8001", "dcgm-exporter:9400", "VLLM_METRICS_URLS"):
+    for target in ("vllm:8001", "dcgm-exporter:9400", "file_sd_configs", "vllm.json"):
         assert target in scrape
+
+
+def test_vllm_targets_script_splits_comma_list(tmp_path):
+    cfg = yaml.safe_load(COMPOSE.read_text())
+    svc = cfg["services"]["vllm-targets"]
+    script = svc["command"][2].replace("$$", "$").replace("/targets/", f"{tmp_path}/")
+    urls = " a:8001, b.example.com:443 ,,c:9 "
+    res = subprocess.run(
+        ["sh", "-c", script],
+        env={"VLLM_METRICS_URLS": urls, "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    data = json.loads((tmp_path / "vllm.json").read_text())
+    assert data == [{"targets": ["a:8001", "b.example.com:443", "c:9"]}]
+    collector = cfg["services"]["otel-collector"]
+    assert (
+        collector["depends_on"]["vllm-targets"]["condition"]
+        == "service_completed_successfully"
+    )
+    # empty list yields valid JSON with no targets
+    subprocess.run(
+        ["sh", "-c", script],
+        env={"VLLM_METRICS_URLS": "", "PATH": os.environ["PATH"]},
+        check=True,
+    )
+    assert json.loads((tmp_path / "vllm.json").read_text()) == [{"targets": []}]
+
+
+def test_observability_ports_loopback_and_exporter_expiry():
+    cfg = yaml.safe_load(COMPOSE.read_text())
+    for name in (
+        "phoenix",
+        "grafana",
+        "prometheus",
+        "otel-collector",
+        "vllm",
+        "dcgm-exporter",
+    ):
+        assert all(
+            str(p).startswith("127.0.0.1:") for p in cfg["services"][name]["ports"]
+        ), name
+    col = yaml.safe_load((DEPLOY / "otel-collector.yaml").read_text())
+    assert col["exporters"]["prometheus"]["metric_expiration"] == "24h"
+    assert col["receivers"]["docker_stats"]["api_version"] == "1.44"
 
 
 def test_prometheus_scrapes_collector():

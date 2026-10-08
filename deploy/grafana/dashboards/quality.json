@@ -6,7 +6,7 @@
   "editable": true,
   "refresh": "30s",
   "time": {
-    "from": "now-1h",
+    "from": "now-7d",
     "to": "now"
   },
   "tags": [
@@ -90,8 +90,10 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "{__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}",
-          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}"
+          "expr": "last_over_time({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}[7d])",
+          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}",
+          "instant": true,
+          "format": "table"
         }
       ]
     },
