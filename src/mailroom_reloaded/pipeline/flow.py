@@ -400,6 +400,7 @@ class MailroomFlow(Flow[MailroomState]):
             resorted=state.resorted,
         )
         action = self._gate.decide(features).action
+        M.gate_decisions.add(1, {"stage": "classify", "decision": action})
         return {
             "proceed": "do_extract",
             "retry": "retry_sort",
@@ -428,6 +429,7 @@ class MailroomFlow(Flow[MailroomState]):
             resorted=state.resorted,
         )
         action = self._gate.decide(features).action
+        M.gate_decisions.add(1, {"stage": "extract", "decision": action})
         return {
             "proceed": "report",
             "retry": "retry_extract",

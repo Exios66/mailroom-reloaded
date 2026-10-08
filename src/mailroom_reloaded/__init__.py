@@ -4,7 +4,7 @@ import os
 
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
-from mailroom_reloaded.obs.tracing import setup_tracing  # noqa: E402 - after the env guard
+from mailroom_reloaded.obs.tracing import setup_tracing
 
 setup_tracing()
 

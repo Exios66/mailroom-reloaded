@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import socket
+import sys
 from pathlib import Path
 
 from opentelemetry import trace
@@ -70,7 +71,7 @@ class MaskingSpanProcessor(SpanProcessor):
     processors see it. Installed before the exporter so exports are masked.
     """
 
-    def on_start(self, span, parent_context=None) -> None:  # noqa: ANN001 - SDK signature
+    def on_start(self, span, parent_context=None) -> None:
         """No-op: masking happens once the span is complete (see ``on_end``)."""
 
     def on_end(self, span: ReadableSpan) -> None:
@@ -85,14 +86,14 @@ class MaskingSpanProcessor(SpanProcessor):
         return True
 
     @staticmethod
-    def _mask(span) -> None:  # noqa: ANN001 - SDK/ReadableSpan both expose _attributes
+    def _mask(span) -> None:
         attrs = getattr(span, "_attributes", None)
         if not attrs:
             return
         masked = {
             key: (MASKED if _is_content_key(key) else value) for key, value in dict(attrs).items()
         }
-        span._attributes = BoundedAttributes(  # noqa: SLF001 - SDK has no public mutator
+        span._attributes = BoundedAttributes(
             maxlen=getattr(attrs, "maxlen", None), attributes=masked
         )
 
@@ -139,12 +140,22 @@ def build_resource(service_name: str = "mailroom") -> Resource:
 
 
 def _default_otlp_exporter() -> SpanExporter | None:
-    """An OTLP HTTP span exporter at ``OTEL_EXPORTER_OTLP_ENDPOINT`` or ``None``."""
+    """An OTLP HTTP span exporter at ``OTEL_EXPORTER_OTLP_ENDPOINT`` or ``None``.
+
+    Under pytest with no endpoint configured there is no collector to reach, so
+    the default localhost exporter is skipped to keep test output clean; tests
+    install an in-memory exporter through ``setup_tracing``. Production (or an
+    explicit ``OTEL_EXPORTER_OTLP_ENDPOINT``) always gets the exporter.
+    """
+    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None and "pytest" in sys.modules:
+        return None
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT).rstrip("/")
     if not endpoint.endswith("/v1/traces"):
         endpoint = endpoint + "/v1/traces"
     try:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
 
         return OTLPSpanExporter(endpoint=endpoint)
     except Exception:  # pragma: no cover - exporter package always installed

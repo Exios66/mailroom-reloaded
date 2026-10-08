@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Any
 
 from opentelemetry import metrics
@@ -86,11 +87,15 @@ M = _Metrics()
 
 def _default_otlp_reader() -> Any:
     """A periodic OTLP HTTP metric reader, or ``None`` when unavailable."""
+    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None and "pytest" in sys.modules:
+        return None
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318").rstrip("/")
     if not endpoint.endswith("/v1/metrics"):
         endpoint = endpoint + "/v1/metrics"
     try:
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+            OTLPMetricExporter,
+        )
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
         return PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
@@ -131,7 +136,7 @@ def _reset_for_tests() -> None:
     try:
         from opentelemetry import metrics as _metrics
 
-        _metrics._internal._METER_PROVIDER = None  # noqa: SLF001
-        _metrics._internal._METER_PROVIDER_SET_ONCE._done = False  # noqa: SLF001
+        _metrics._internal._METER_PROVIDER = None
+        _metrics._internal._METER_PROVIDER_SET_ONCE._done = False
     except Exception:  # pragma: no cover - defensive
         logger.debug("metrics_reset_failed", exc_info=True)

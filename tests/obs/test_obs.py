@@ -215,7 +215,7 @@ def test_metric_names_emitted(env, mock_provider, monkeypatch):
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
-    bins, path = _write_inbox(env)
+    bins, _path = _write_inbox(env)
 
     watcher = Watcher(bins, worker_id="w1", concurrency=1)
     assert watcher.drain_once() == 1
