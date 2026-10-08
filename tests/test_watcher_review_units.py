@@ -387,3 +387,35 @@ def test_failed_resume_returns_file_to_review_and_stays_parked(bins, parked, mon
         review._flow, "run_document", Mock(return_value=MailroomState(status="archived"))
     )
     assert review.resolve_review("doc", "approve", bins=bins) is not None
+
+
+def test_inflight_gauge_is_true_count_under_concurrency(bins, monkeypatch):
+    """With concurrent workers the gauge reports the number in flight, not 1/0."""
+    import threading
+
+    values = []
+    gauge = Mock()
+    gauge.set = lambda v, attrs=None: values.append(v)
+    monkeypatch.setattr(watcher, "M", Mock(inflight=gauge, queue_depth=Mock()))
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (bins.inbox / name).write_text(name)
+    barrier = threading.Barrier(3)
+
+    def run(path, **kw):
+        barrier.wait(timeout=5)  # all three are in flight simultaneously
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(watcher._flow, "run_document", run)
+    watcher.Watcher(bins, "w", 3).drain_once()
+    assert max(values) == 3
+    assert values[-1] == 0
+
+
+def test_lock_degrades_without_fcntl(bins, monkeypatch):
+    """No fcntl (non-Unix): lock is 'unavailable', not 'held elsewhere'."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "fcntl", None)
+    lock = watcher._acquire_watcher_lock(bins.base / watcher.WATCHER_LOCK_NAME)
+    assert lock is not None
+    watcher._release_lock(lock)
