@@ -47,9 +47,11 @@ class _Metrics:
     """Lazy attribute namespace of the spec section 8 instruments."""
 
     def __init__(self) -> None:
+        """Initialize the cache of lazily created metric instruments."""
         object.__setattr__(self, "_instruments", {})
 
     def __getattr__(self, name: str) -> Any:
+        """Return a cached instrument, rejecting names outside the metric specs."""
         if name.startswith("_"):
             raise AttributeError(name)
         spec = _SPECS.get(name)
@@ -62,6 +64,7 @@ class _Metrics:
 
     @staticmethod
     def _create(spec: tuple[str, str, str]) -> Any:
+        """Create a counter, histogram or gauge on the current meter provider."""
         otel_name, kind, unit = spec
         meter = metrics.get_meter(METER_NAME)
         if kind == "counter":
@@ -79,6 +82,7 @@ class _Metrics:
         object.__getattribute__(self, "_instruments").clear()
 
     def __dir__(self) -> list[str]:
+        """Expose the supported metric attribute names for introspection."""
         return sorted(_SPECS)
 
 

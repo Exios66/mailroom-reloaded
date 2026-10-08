@@ -84,6 +84,7 @@ def _acquire_watcher_lock(path: Path):
 
 
 def _release_lock(fh: Any) -> None:
+    """Attempt to unlock and close the handle, logging cleanup failures."""
     if fh is None:
         return
     try:
@@ -107,6 +108,7 @@ class Watcher:
     """
 
     def __init__(self, bins: Bins, worker_id: str, concurrency: int = 1) -> None:
+        """Configure bins and worker limits and initialize lifecycle state."""
         self.bins = bins if isinstance(bins, Bins) else Bins(bins)
         self.worker_id = worker_id
         self.concurrency = max(1, min(int(concurrency), _MAX_DRAIN_WORKERS))
@@ -148,6 +150,7 @@ class Watcher:
 
     @staticmethod
     def _manifest_file(manifest: Manifest) -> Path | None:
+        """Return the checkpoint's source path when it still names a file."""
         state = manifest.state or {}
         candidate = state.get("path")
         if candidate:
@@ -172,6 +175,7 @@ class Watcher:
         return sum(1 for r in results if r)
 
     def _process(self, path: Path) -> bool:
+        """Claim and process a file; return whether claimed, even if processing fails."""
         claimed = self.bins.claim(path, self.worker_id)
         if claimed is None:
             logger.debug("claim_lost", file=str(path), worker_id=self.worker_id)
@@ -230,14 +234,17 @@ class Watcher:
 
         class _Handler(FileSystemEventHandler):
             def on_created(self, e):
+                """Wake the drain loop when a file is created."""
                 if not e.is_directory:
                     event.set()
 
             def on_modified(self, e):
+                """Wake the drain loop when a file is modified."""
                 if not e.is_directory:
                     event.set()
 
             def on_moved(self, e):
+                """Wake the drain loop when a file is moved."""
                 if not e.is_directory:
                     event.set()
 

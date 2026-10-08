@@ -26,6 +26,7 @@ from mailroom_reloaded.eval.runner import select_graded
     ],
 )
 def test_local_loader_rejects_missing_identity(tmp_path, row, reason):
+    """Verify blind rows require both a filename and a declared content hash."""
     (tmp_path / "default.jsonl").write_text(json.dumps(row) + "\n")
     (tmp_path / "ground_truth.jsonl").write_text("")
     with pytest.raises(DatasetIntegrityError, match=reason):
@@ -33,6 +34,7 @@ def test_local_loader_rejects_missing_identity(tmp_path, row, reason):
 
 
 def test_loader_aliases_unicode_hashes_and_ground_truth_json(tmp_path):
+    """Verify alias normalization and Unicode hashing keep labels out of blind data."""
     body = "caf\u00e9 \u6587\u66f8"
     blind = {
         "name": " letter.txt ",
@@ -68,6 +70,7 @@ def test_loader_aliases_unicode_hashes_and_ground_truth_json(tmp_path):
 
 @pytest.fixture
 def documents():
+    """Build known, custom and unlabelled documents for sampling boundary tests."""
     docs = [BlindDoc(f"{i}.txt", str(i), sha256_text(str(i))) for i in range(8)]
     gts = {
         doc.filename: GroundTruth(doc.filename, expected=label)
@@ -80,11 +83,13 @@ def documents():
 
 @pytest.mark.parametrize("limit", [0, -1, -100])
 def test_nonpositive_sample_size_selects_nothing(documents, limit):
+    """Verify zero and negative per-class limits yield no documents."""
     docs, gts = documents
     assert sample(docs, gts, per_class=limit) == []
 
 
 def test_sampling_filters_classes_and_is_independent_of_input_order(documents):
+    """Verify class filters and seeded ordering without mutating the input list."""
     docs, gts = documents
     original = list(docs)
     selected = sample(docs, gts, per_class=2, classes=["contract"], seed=17)
@@ -99,6 +104,7 @@ def test_sampling_filters_classes_and_is_independent_of_input_order(documents):
 
 
 def test_sampling_keeps_unknown_and_unlabelled_documents_without_duplicates(documents):
+    """Verify unrestricted sampling retains every document exactly once."""
     docs, gts = documents
     selected = sample(docs, gts, per_class=100)
     assert len(selected) == len(docs)
@@ -110,6 +116,7 @@ def test_sampling_keeps_unknown_and_unlabelled_documents_without_duplicates(docu
     "rate,count", [(-1, 0), (0, 0), (0.125, 1), (0.5, 4), (1, 8), (2, 8)]
 )
 def test_grading_selection_bounds_and_order_independence(documents, rate, count):
+    """Verify grading rates clamp at the bounds and selection ignores input order."""
     docs, _ = documents
     selected = select_graded(docs, rate, 7)
     assert len(selected) == count

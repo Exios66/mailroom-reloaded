@@ -153,20 +153,24 @@ def select_graded(
 
 
 def _engine() -> Engine:
+    """Return the configured database engine for evaluation records."""
     return db.get_engine()
 
 
 def _ensure_table(engine: Engine) -> None:
+    """Create the evaluation results table if it does not already exist."""
     with engine.begin() as conn:
         conn.execute(text(_EVAL_DDL))
 
 
 def _insert(engine: Engine, row: dict[str, Any]) -> None:
+    """Insert or replace one document result using the declared column set."""
     with engine.begin() as conn:
         conn.execute(text(_INSERT), {k: row.get(k) for k in _COLUMNS})
 
 
 def _json(value: Any) -> str:
+    """Serialize values as Unicode JSON, stringifying unsupported objects."""
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
@@ -174,12 +178,14 @@ def _json(value: Any) -> str:
 
 
 def _write_doc(doc: BlindDoc) -> Path:
+    """Write blind document text to the configured inbox and return its path."""
     path = Bins(get_settings().base_dir).inbox / doc.filename
     path.write_text(doc.doc_text, encoding="utf-8")
     return path
 
 
 def _state_doc_type(state: Any, gt: GroundTruth | None) -> str | None:
+    """Prefer sorter then extractor labels, falling back to ground truth."""
     sort = getattr(state, "sort", None)
     extract = getattr(state, "extract", None)
     for candidate in (
@@ -193,6 +199,7 @@ def _state_doc_type(state: Any, gt: GroundTruth | None) -> str | None:
 
 
 def _state_subclass(state: Any, gt: GroundTruth | None) -> str | None:
+    """Return the sorted subclass, falling back to the ground-truth label."""
     sort = getattr(state, "sort", None)
     candidate = getattr(sort, "doc_subclass", None) or (
         gt.expected_subclass if gt is not None else None
@@ -201,11 +208,13 @@ def _state_subclass(state: Any, gt: GroundTruth | None) -> str | None:
 
 
 def _usage(state: Any) -> Usage:
+    """Return the state's Usage value, or empty counters when unavailable."""
     usage = getattr(state, "usage_total", None)
     return usage if isinstance(usage, Usage) else Usage()
 
 
 def _grade_parts(grade: Any) -> tuple[float | None, str | None, str | None]:
+    """Convert a judge grade into its score and JSON fields for persistence."""
     if grade is None:
         return None, None, None
     overall = getattr(grade, "overall", None)
@@ -219,6 +228,7 @@ def _grade_parts(grade: Any) -> tuple[float | None, str | None, str | None]:
 
 
 def _gate_features(state: Any, doc_type: str | None, extract: ExtractResult | None) -> dict[str, Any]:
+    """Collect classification and extraction signals for gate training."""
     sort = getattr(state, "sort", None)
     return {
         "classify": {
@@ -248,6 +258,7 @@ def _base_row(
     latency_s: float,
     graded: bool,
 ) -> dict[str, Any]:
+    """Build an evaluation row with identity, timing and error defaults."""
     return {
         "run_id": run_id,
         "filename": doc.filename,
@@ -285,6 +296,7 @@ def _pipeline_row(
     graded: bool,
     latency_s: float,
 ) -> dict[str, Any]:
+    """Merge pipeline outputs, usage, routes and grading into a result row."""
     sort = getattr(state, "sort", None)
     extract = getattr(state, "extract", None)
     usage = _usage(state)
@@ -324,6 +336,7 @@ def _cell_row(
     *,
     latency_s: float,
 ) -> dict[str, Any]:
+    """Build an ungraded specialist result row, retaining failure diagnostics."""
     row = _base_row(run_id, doc, gt, mode="specialist_cell", latency_s=latency_s, graded=False)
     if result is None:
         return row
@@ -346,6 +359,7 @@ def _cell_row(
 
 
 def _cell_conditions(cfg: EvalConfig, doc_type: str):
+    """Override merger conditions only when the configured mode differs."""
     if doc_type != "merger_agreement":
         return None
     cond = load_taxonomy().specialist_conditions(doc_type)
@@ -363,6 +377,7 @@ async def _run_pipeline(
     sem: asyncio.Semaphore,
     engine: Engine,
 ) -> None:
+    """Run one document under the semaphore and persist its result or error."""
     async with sem:
         gt = gts.get(doc.filename)
         path = _write_doc(doc)
@@ -415,6 +430,7 @@ async def _run_cell(
     sem: asyncio.Semaphore,
     engine: Engine,
 ) -> None:
+    """Extract using ground-truth labels and persist an ungraded result or error."""
     async with sem:
         gt = gts.get(doc.filename)
         doc_type = (gt.expected if gt is not None else None) or "unknown"
@@ -450,6 +466,7 @@ async def _run_all(
     graded: set[str],
     engine: Engine,
 ) -> None:
+    """Dispatch selected documents in the configured mode with bounded concurrency."""
     sem = asyncio.Semaphore(max(1, int(cfg.concurrency)))
     if cfg.mode == "specialist_cell":
         await asyncio.gather(

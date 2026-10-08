@@ -87,6 +87,7 @@ class MaskingSpanProcessor(SpanProcessor):
 
     @staticmethod
     def _mask(span) -> None:
+        """Replace content attributes with the mask while preserving other values."""
         attrs = getattr(span, "_attributes", None)
         if not attrs:
             return

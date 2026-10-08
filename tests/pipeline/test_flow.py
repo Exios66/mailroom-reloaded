@@ -72,6 +72,7 @@ FAST_TRAIL = [
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -82,6 +83,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -89,6 +91,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -107,6 +110,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -119,6 +123,7 @@ def _fast_llm(monkeypatch):
 
 
 def _patch_handoff(monkeypatch, mode=SortMode.SUBCLASS_ONLY, doc_type="correspondence", route="fast_path"):
+    """Stub BERT classification and handoff for a deterministic routing scenario."""
     locked = doc_type if mode is SortMode.SUBCLASS_ONLY else None
     verdict = BertVerdict(
         available=True,
@@ -138,6 +143,7 @@ def _patch_handoff(monkeypatch, mode=SortMode.SUBCLASS_ONLY, doc_type="correspon
 
 
 def _patch_bert_unavailable(monkeypatch):
+    """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
     monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
@@ -150,6 +156,7 @@ def _reply(provider, payload):
 
 
 def _write_inbox(base, text="A short business letter about the deal."):
+    """Write a test document to the inbox and return its bins and path."""
     bins = Bins(base)
     path = bins.inbox / "letter.txt"
     path.write_text(text)
@@ -157,6 +164,7 @@ def _write_inbox(base, text="A short business letter about the deal."):
 
 
 def _fake_extract(confidence=1.0, data=None):
+    """Build an extractor stub with fixed confidence, data and token usage."""
     def run(text, doc_type, doc_subclass, **kwargs):
         return ExtractResult(
             doc_type,
@@ -176,6 +184,7 @@ def _fake_extract(confidence=1.0, data=None):
 
 
 def test_fast_path_two_llm_calls(env, mock_provider, monkeypatch):
+    """Verify the BERT fast path archives with two agent calls and the expected route."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
@@ -193,6 +202,7 @@ def test_fast_path_two_llm_calls(env, mock_provider, monkeypatch):
 
 
 def test_contract_deferred_full_sort(env, mock_provider, monkeypatch):
+    """Verify deferred contracts receive full sorting and archive under their class."""
     _patch_handoff(monkeypatch, mode=SortMode.FULL, doc_type="contract", route="defer_class")
     _reply(
         mock_provider,
@@ -221,6 +231,7 @@ def test_contract_deferred_full_sort(env, mock_provider, monkeypatch):
 
 
 def test_subclass_disagree_resorts_once(env, mock_provider, monkeypatch):
+    """Verify subclass disagreement triggers one full re-sort before archival."""
     _patch_handoff(monkeypatch)
     _reply(
         mock_provider,
@@ -246,6 +257,7 @@ def test_subclass_disagree_resorts_once(env, mock_provider, monkeypatch):
 
 
 def test_classify_low_conf_retries_then_parks(env, mock_provider, monkeypatch):
+    """Verify persistent low classification confidence exhausts retries and parks."""
     _patch_bert_unavailable(monkeypatch)
     low = {
         "doc_type": "correspondence",
@@ -267,6 +279,7 @@ def test_classify_low_conf_retries_then_parks(env, mock_provider, monkeypatch):
 
 
 def test_extract_medium_band_verifies(env, mock_provider, monkeypatch):
+    """Verify medium extraction confidence invokes verification and retains caveats."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     # correspondence low=0.85, judge_band_high=0.94: 0.90 lands in the verify band
@@ -296,6 +309,7 @@ def test_extract_medium_band_verifies(env, mock_provider, monkeypatch):
 
 
 def test_extract_low_conf_boss_reassign(env, mock_provider, monkeypatch):
+    """Verify boss reassignment retries extraction under the corrected class."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     seen: list[str] = []
@@ -337,6 +351,7 @@ def test_extract_low_conf_boss_reassign(env, mock_provider, monkeypatch):
 
 
 def test_resume_skips_completed_nodes(env, mock_provider, monkeypatch):
+    """Verify crash recovery skips completed sorting and preserves the audit chain."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
 
@@ -373,6 +388,7 @@ def test_resume_skips_completed_nodes(env, mock_provider, monkeypatch):
 
 
 def test_deadline_guard_fails_doc(env, monkeypatch):
+    """Verify a sorter exceeding its deadline moves the document to failed."""
     _patch_handoff(monkeypatch)
 
     def slow_sort(text, handoff, attempt=0, **kwargs):
@@ -404,6 +420,7 @@ def test_deadline_guard_fails_doc(env, monkeypatch):
 
 
 async def test_kickoff_async_runs_document(env, mock_provider, monkeypatch):
+    """Verify asynchronous kickoff follows the fast path through archival."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)

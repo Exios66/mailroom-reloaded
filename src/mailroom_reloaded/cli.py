@@ -35,10 +35,12 @@ app = typer.Typer(
 
 
 def listen_host() -> str:
+    """Read MAILROOM_API_HOST, defaulting to the loopback address."""
     return (os.environ.get("MAILROOM_API_HOST") or "127.0.0.1").strip() or "127.0.0.1"
 
 
 def listen_port() -> int:
+    """Read PORT before MAILROOM_API_PORT, defaulting to port 8000."""
     platform = (os.environ.get("PORT") or "").strip()
     if platform:
         return int(platform)

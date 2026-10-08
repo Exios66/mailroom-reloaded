@@ -15,6 +15,7 @@ from mailroom_reloaded.pipeline.state import MailroomState
 
 @pytest.fixture
 def engine():
+    """Yield an in-memory evaluation database and dispose it after the test."""
     engine = create_engine("sqlite:///:memory:")
     runner._ensure_table(engine)
     try:
@@ -25,10 +26,12 @@ def engine():
 
 @pytest.fixture
 def document():
+    """Return a blind document with a hash matching its synthetic text."""
     return BlindDoc("letter.txt", "blind source", sha256_text("blind source"))
 
 
 def rows(engine):
+    """Read all evaluation rows as mappings ordered by filename."""
     with engine.connect() as conn:
         return list(
             conn.execute(text("SELECT * FROM eval_docs ORDER BY filename")).mappings()
@@ -41,6 +44,7 @@ def rows(engine):
 async def test_pipeline_exposes_truth_only_when_selected(
     engine, document, monkeypatch, tmp_path, selected, has_truth
 ):
+    """Verify evaluation context requires both grading selection and available truth."""
     truth = GroundTruth(
         document.filename, expected="correspondence", fields={"sender": "GT canary"}
     )
@@ -70,6 +74,7 @@ async def test_pipeline_exposes_truth_only_when_selected(
 async def test_document_error_is_recorded_and_next_document_runs(
     engine, document, monkeypatch, tmp_path, mode
 ):
+    """Verify each mode records a bounded error and continues with the next document."""
     other = BlindDoc("other.txt", "other source", sha256_text("other source"))
     failure = RuntimeError("x" * 600)
     if mode == "pipeline":
@@ -99,6 +104,7 @@ async def test_document_error_is_recorded_and_next_document_runs(
 async def test_specialist_cell_receives_labels_but_never_ground_truth_fields(
     engine, document, monkeypatch
 ):
+    """Verify cell inputs exclude truth fields while failure details are persisted."""
     truth = GroundTruth(
         document.filename,
         expected="merger_agreement",
@@ -144,6 +150,7 @@ async def test_specialist_cell_receives_labels_but_never_ground_truth_fields(
 
 
 def test_empty_eval_returns_run_id_without_calling_pipeline(engine, monkeypatch):
+    """Verify an empty evaluation creates a run ID without invoking the flow."""
     monkeypatch.setattr(runner, "load_split", lambda *a, **k: ([], {}))
     monkeypatch.setattr(runner, "_engine", lambda: engine)
     kickoff = AsyncMock(side_effect=AssertionError("empty run must not call model"))

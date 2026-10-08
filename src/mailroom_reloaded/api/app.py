@@ -72,10 +72,12 @@ _UI_INDEX = Path(__file__).parent / "ui" / "index.html"
 
 
 def _bins() -> Bins:
+    """Return filesystem bins rooted at the configured base directory."""
     return Bins(get_settings().base_dir)
 
 
 def _configured_token() -> str:
+    """Return the stripped API token, or an empty string when unset."""
     return (get_settings().api_token or "").strip()
 
 
@@ -277,6 +279,7 @@ def _eval_runs() -> list[dict]:
 
 
 def _embed_watcher_enabled() -> bool:
+    """Return whether the environment opts into the embedded watcher."""
     return (os.environ.get("MAILROOM_EMBED_WATCHER") or "").strip().lower() in {
         "1",
         "true",
@@ -315,6 +318,7 @@ async def lifespan(application: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Build the API application with its lifespan, routes and UI endpoints."""
     application = FastAPI(
         title="mailroom-reloaded",
         description="Compressed Digital Mailroom API",
@@ -325,15 +329,18 @@ def create_app() -> FastAPI:
 
     @application.get("/health")
     def health() -> dict:
+        """Return the public liveness response."""
         return {"status": "ok", "service": "mailroom"}
 
     @application.get("/")
     def root() -> RedirectResponse:
+        """Redirect the application root to the runs UI."""
         return RedirectResponse(url="/ui")
 
     @application.get("/ui")
     @application.get("/ui/")
     def ui() -> FileResponse:
+        """Serve the packaged UI, raising HTTP 404 when it is absent."""
         if not _UI_INDEX.is_file():
             raise HTTPException(status_code=404, detail="UI is not packaged")
         return FileResponse(_UI_INDEX, media_type="text/html")

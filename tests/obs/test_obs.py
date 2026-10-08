@@ -52,6 +52,7 @@ CORR_EXTRACT = {
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -62,6 +63,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -69,6 +71,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -87,6 +90,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -99,12 +103,14 @@ def _fast_llm(monkeypatch):
 
 
 def _attach_exporter(*, mask: bool = False) -> InMemorySpanExporter:
+    """Attach an in-memory span exporter with optional content masking."""
     exporter = InMemorySpanExporter()
     setup_tracing(exporter=exporter, trace_mask=mask)
     return exporter
 
 
 def _patch_handoff(monkeypatch):
+    """Stub BERT classification and handoff for a deterministic routing scenario."""
     verdict = BertVerdict(
         available=True,
         reason="ok",
@@ -124,10 +130,12 @@ def _patch_handoff(monkeypatch):
 
 
 def _reply(provider, payload):
+    """Queue a discarded tool-round draft followed by the structured response."""
     provider.reply("thinking").reply(json.dumps(payload))
 
 
 def _write_inbox(base, text="A short business letter about the deal."):
+    """Write a test document to the inbox and return its bins and path."""
     bins = Bins(base)
     path = bins.inbox / "letter.txt"
     path.write_text(text)
@@ -135,6 +143,7 @@ def _write_inbox(base, text="A short business letter about the deal."):
 
 
 def _metric_names(reader: InMemoryMetricReader) -> set[str]:
+    """Collect all instrument names emitted to the in-memory metric reader."""
     data = reader.get_metrics_data()
     return {
         metric.name
@@ -148,6 +157,7 @@ def _metric_names(reader: InMemoryMetricReader) -> set[str]:
 
 
 def test_flow_emits_node_spans(env, mock_provider, monkeypatch):
+    """Verify completed pipeline nodes emit spans sharing one trace ID."""
     exporter = _attach_exporter()
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
@@ -174,6 +184,7 @@ def test_flow_emits_node_spans(env, mock_provider, monkeypatch):
 
 
 def test_llm_span_has_genai_attrs(env, mock_provider):
+    """Verify the LLM span records prompt, completion and total token counts."""
     exporter = _attach_exporter()
     mock_provider.reply(json.dumps({"ok": True}))
 
@@ -192,6 +203,7 @@ def test_llm_span_has_genai_attrs(env, mock_provider):
 
 
 def test_masking_redacts_content(env, mock_provider):
+    """Verify exported LLM input and output content are replaced by the mask."""
     exporter = _attach_exporter(mask=True)
     mock_provider.reply("a sensitive completion")
 
@@ -209,6 +221,7 @@ def test_masking_redacts_content(env, mock_provider):
 
 
 def test_metric_names_emitted(env, mock_provider, monkeypatch):
+    """Verify processing one document emits every declared metric instrument."""
     metrics_mod._reset_for_tests()
     reader = InMemoryMetricReader()
     setup_metrics(reader=reader)

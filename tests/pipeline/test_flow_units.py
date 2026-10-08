@@ -23,6 +23,7 @@ from mailroom_reloaded.schemas.manifest import Manifest
 
 @pytest.fixture
 def flow(monkeypatch):
+    """Build a flow with synthetic state and mocked persistence, bins and tracing."""
     monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
     monkeypatch.setenv("CREWAI_TELEMETRY_DISABLED", "true")
     instance = flow_mod.MailroomFlow()
@@ -47,6 +48,7 @@ def flow(monkeypatch):
 
 
 def extraction(**kwargs):
+    """Build a valid extraction result with caller-supplied field overrides."""
     values = {
         "doc_type": "correspondence",
         "data": {"sender": "Alice"},
@@ -72,6 +74,7 @@ def extraction(**kwargs):
     ],
 )
 def test_classification_route_without_results_fails_closed(flow, action, route):
+    """Verify missing classification signals default safely and unknown actions park."""
     flow._gate.decide.return_value = SimpleNamespace(action=action)
     flow.state.classify_attempts = 2
     assert flow._classify_route() == route
@@ -100,6 +103,7 @@ def test_classification_route_without_results_fails_closed(flow, action, route):
     ],
 )
 def test_extraction_route_preserves_failure_signals(flow, action, route):
+    """Verify extraction routing passes schema and truncation failures to the gate."""
     flow.state.extract = extraction(
         schema_valid=False, confidence=None, error_kind="LengthFinishReasonError"
     )
@@ -117,6 +121,7 @@ def test_extraction_route_preserves_failure_signals(flow, action, route):
 
 
 def test_missing_extraction_is_not_treated_as_valid(flow):
+    """Verify an absent extraction produces invalid-schema and zero-confidence features."""
     flow._gate.decide.return_value = SimpleNamespace(action="human_review")
     assert flow._extract_route() == "human_review"
     features = flow._gate.decide.call_args.args[0]
@@ -136,11 +141,13 @@ def test_missing_extraction_is_not_treated_as_valid(flow):
     ],
 )
 def test_arbiter_routes(flow, action, expected):
+    """Verify each arbiter action selects the expected next route."""
     flow.state.arbiter = ArbiterDecision(action=action) if action else None
     assert flow._arbiter_route() == expected
 
 
 def test_explicit_type_and_subclass_override_boss_and_handoff(flow):
+    """Verify explicit corrections take priority over boss reassignment and BERT locks."""
     flow.state.handoff = Handoff(SortMode.SUBCLASS_ONLY, "correspondence", "", "fast")
     flow.state.boss = BossDecision(
         action="reassign_class", doc_type="contract", doc_subclass="license"
@@ -159,6 +166,7 @@ def test_explicit_type_and_subclass_override_boss_and_handoff(flow):
 
 
 def test_resort_unlocks_type_but_keeps_bert_prior(flow):
+    """Verify re-sorting removes the class lock while retaining the BERT hint."""
     flow.state.handoff = Handoff(
         SortMode.SUBCLASS_ONLY, "contract", "BERT prior", "fast"
     )
@@ -171,6 +179,7 @@ def test_resort_unlocks_type_but_keeps_bert_prior(flow):
     [(10, 10, False), (10, 11, True), (0, 11, False), (-1, 11, False)],
 )
 def test_guard_token_budget_is_per_node_and_inclusive(flow, budget, used, failed):
+    """Verify token guards measure each node's usage and permit the exact budget."""
     flow.state.usage_total = Usage(prompt_tokens=100, calls=4)
     flow._overrides = {"token_budgets": {"extract": budget}}
 
@@ -202,6 +211,7 @@ def test_guard_token_budget_is_per_node_and_inclusive(flow, budget, used, failed
 def test_guard_deadline_boundary_without_sleep(
     flow, monkeypatch, deadline, elapsed, failed
 ):
+    """Verify elapsed time must exceed a positive deadline to fail a node."""
     monkeypatch.setattr(
         flow_mod.time, "monotonic", Mock(side_effect=[20.0, 20.0 + elapsed])
     )
@@ -218,6 +228,7 @@ def test_guard_deadline_boundary_without_sleep(
 
 
 def test_guard_skips_resumed_node_before_calling_work(flow):
+    """Verify completed nodes skip execution, checkpointing and audit writes."""
     flow._resume_done = {"sort"}
     work = Mock(side_effect=AssertionError("completed work must not repeat"))
     assert flow._guard_node("sort", 1, 1, work, (), {}) is None
@@ -227,6 +238,7 @@ def test_guard_skips_resumed_node_before_calling_work(flow):
 
 
 def test_guard_checkpoints_partial_state_on_unexpected_exception(flow):
+    """Verify unexpected errors checkpoint partial progress and propagate unchanged."""
     flow._manifest.completed_nodes = ["ingest"]
     error = RuntimeError("provider unavailable")
 
@@ -245,6 +257,7 @@ def test_guard_checkpoints_partial_state_on_unexpected_exception(flow):
 
 
 def test_retry_records_work_once_in_manifest_but_audits_each_attempt(flow):
+    """Verify retries deduplicate completed nodes while recording each audit attempt."""
     work = Mock()
     for _ in range(2):
         flow._guard_node("sort", 0, 0, work, (), {})
@@ -254,6 +267,7 @@ def test_retry_records_work_once_in_manifest_but_audits_each_attempt(flow):
 
 
 def test_failed_relocation_still_checkpoints_failure(flow):
+    """Verify a failed file move still persists and audits the node failure."""
     flow._bins.move.side_effect = OSError("destination unavailable")
     with pytest.raises(NodeFailed, match="ingest_failed"):
         flow._fail_node("ingest", "ingest_failed")
@@ -264,6 +278,7 @@ def test_failed_relocation_still_checkpoints_failure(flow):
 
 
 def test_guarded_decorator_forwards_arguments_and_preserves_metadata():
+    """Verify the node decorator forwards calls and preserves function metadata."""
     class Example:
         _guard_node = Mock(return_value="guard result")
 
@@ -283,6 +298,7 @@ def test_guarded_decorator_forwards_arguments_and_preserves_metadata():
 
 
 def test_verification_never_receives_eval_ground_truth(flow, monkeypatch):
+    """Verify live verification excludes evaluation labels from judge and arbiter context."""
     flow._eval_ctx = SimpleNamespace(ground_truth={"doc-1": {"secret_label": "target"}})
     flow.state.eval_mode = True
     flow.state.extract = extraction()
@@ -327,6 +343,7 @@ class ModelTruth(BaseModel):
     ],
 )
 def test_eval_ground_truth_supported_formats(flow, row, expected):
+    """Verify grading normalizes supported truth records and ignores unsupported values."""
     flow._eval_ctx = SimpleNamespace(ground_truth={"doc-1": row})
     fetch = flow._ground_truth_fn()
     assert fetch("doc-1") == expected
@@ -334,6 +351,7 @@ def test_eval_ground_truth_supported_formats(flow, row, expected):
 
 
 def test_grade_failure_does_not_fail_archived_document(flow, monkeypatch):
+    """Verify grading failure preserves archived status and checkpoints the grade node."""
     flow.state.status = "archived"
     flow.state.extract = extraction()
     flow._eval_ctx = SimpleNamespace(ground_truth={"doc-1": {"sender": "Alice"}})
@@ -349,6 +367,7 @@ def test_grade_failure_does_not_fail_archived_document(flow, monkeypatch):
 
 
 def test_live_document_does_not_invoke_grader(flow, monkeypatch):
+    """Verify documents outside evaluation never call the grading judge."""
     judge = Mock(side_effect=AssertionError("live grading is forbidden"))
     monkeypatch.setattr(flow_mod, "judge_grade", judge)
     flow._node_grade()
@@ -356,6 +375,7 @@ def test_live_document_does_not_invoke_grader(flow, monkeypatch):
 
 
 def test_extraction_passes_overrides_and_accumulates_usage(flow, monkeypatch):
+    """Verify extraction receives configured overrides and adds its token usage."""
     flow._overrides = {
         "doc_type": "merger_agreement",
         "doc_subclass": "public",
@@ -386,6 +406,7 @@ def test_extraction_passes_overrides_and_accumulates_usage(flow, monkeypatch):
     "action,expected", [("accept", "archived"), ("human_review", "parked")]
 )
 def test_driver_handles_boss_terminal_decisions(flow, monkeypatch, action, expected):
+    """Verify boss acceptance archives and human-review decisions park the document."""
     flow._resume_from = "boss"
 
     def boss():
@@ -411,6 +432,7 @@ def test_driver_handles_boss_terminal_decisions(flow, monkeypatch, action, expec
 
 
 def test_driver_reextracts_after_arbiter_request(flow, monkeypatch):
+    """Verify an arbiter retry increments attempts and re-extracts before archival."""
     flow._resume_from = "gate_extract"
     routes = Mock(side_effect=["do_verify", "report"])
     monkeypatch.setattr(flow, "_extract_route", routes)
@@ -438,6 +460,7 @@ def test_driver_reextracts_after_arbiter_request(flow, monkeypatch):
 
 
 def test_explicit_resume_reexecutes_requested_completed_node(flow, monkeypatch):
+    """Verify an explicit resume reruns extraction even when previously completed."""
     flow._manifest.completed_nodes = ["extract", "report_catalog_archive"]
     flow._resume_from = "extract"
     flow.state.extract = extraction()
@@ -453,6 +476,7 @@ def test_explicit_resume_reexecutes_requested_completed_node(flow, monkeypatch):
 
 
 def test_catalog_failure_does_not_undo_successful_archive(flow, monkeypatch):
+    """Verify catalog errors preserve the successful archive and its checkpoint."""
     result = ArchiveResult(
         Path("archive/letter.txt"), "sha256", Path("archive/letter.report.json")
     )

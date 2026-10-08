@@ -56,6 +56,7 @@ LETTER = b"A short business letter about the deal."
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -66,6 +67,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -73,6 +75,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -91,6 +94,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(env):
+    """Yield an API test client with the application lifespan active."""
     from mailroom_reloaded.api.app import app
 
     with TestClient(app) as c:
@@ -99,6 +103,7 @@ def client(env):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -116,6 +121,7 @@ def _patch_handoff(
     doc_type="correspondence",
     route="fast_path",
 ):
+    """Stub BERT classification and handoff for a deterministic routing scenario."""
     locked = doc_type if mode is SortMode.SUBCLASS_ONLY else None
     verdict = BertVerdict(
         available=True,
@@ -135,6 +141,7 @@ def _patch_handoff(
 
 
 def _patch_bert_unavailable(monkeypatch):
+    """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
     monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
@@ -147,6 +154,7 @@ def _reply(provider, payload):
 
 
 def _upload(client, name="letter.txt", content=LETTER):
+    """Upload a text file, require acceptance and return its document ID."""
     resp = client.post(
         "/v1/documents",
         files={"file": (name, content, "text/plain")},
@@ -181,6 +189,7 @@ def _parked_doc(env, mock_provider, monkeypatch, client):
 
 
 def test_upload_then_process(env, mock_provider, monkeypatch, client):
+    """Verify an accepted upload becomes queryable after watcher archival."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
@@ -209,6 +218,7 @@ def test_upload_then_process(env, mock_provider, monkeypatch, client):
 
 
 def test_audit_verify_ok(env, mock_provider, monkeypatch, client):
+    """Verify an archived document exposes a valid audit chain through the API."""
     doc_id, _bins = _fast_path_doc(env, mock_provider, monkeypatch, client)
 
     resp = client.get(f"/v1/audit/{doc_id}")
@@ -221,6 +231,7 @@ def test_audit_verify_ok(env, mock_provider, monkeypatch, client):
 
 
 def test_review_resolve_endpoint(env, mock_provider, monkeypatch, client):
+    """Verify rejection moves a parked document to failed and unknown IDs return 404."""
     doc_id, bins = _parked_doc(env, mock_provider, monkeypatch, client)
 
     parked = client.get(f"/v1/documents/{doc_id}").json()
@@ -246,6 +257,7 @@ def test_review_resolve_endpoint(env, mock_provider, monkeypatch, client):
 
 
 def test_ui_served(client):
+    """Verify the UI serves HTML containing the observability links."""
     resp = client.get("/ui")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
@@ -256,6 +268,7 @@ def test_ui_served(client):
 
 
 def test_runs_shape(client):
+    """Verify absent evaluation runs and cards produce empty response lists."""
     resp = client.get("/v1/runs")
     assert resp.status_code == 200
     assert resp.json() == {"runs": []}
@@ -266,6 +279,7 @@ def test_runs_shape(client):
 
 
 def test_offbind_without_token_refuses(env, monkeypatch):
+    """Verify public binding requires a token while loopback binding does not."""
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     from mailroom_reloaded import settings as settings_mod
 
@@ -281,6 +295,7 @@ def test_offbind_without_token_refuses(env, monkeypatch):
 
 
 def test_bearer_required_when_token_set(env, monkeypatch, client):
+    """Verify protected routes require the token while health stays public."""
     monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
     from mailroom_reloaded import settings as settings_mod
 

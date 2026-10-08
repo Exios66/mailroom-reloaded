@@ -110,6 +110,7 @@ def doc_id_for_sha(content_sha256: str) -> str:
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
+    """Accept a dict or decode a JSON object string; otherwise return {}."""
     if isinstance(value, dict):
         return value
     if isinstance(value, str) and value.strip():
@@ -231,6 +232,7 @@ def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
 
 
 def _ground_truth_from_row(row: Any) -> GroundTruth:
+    """Normalize label aliases and fields, requiring a nonempty filename."""
     filename = str(_row_get(row, ("filename", "file", "name"), "")).strip()
     if not filename:
         raise DatasetIntegrityError("ground-truth row is missing a filename")
@@ -238,6 +240,7 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
     fields = parsed or _as_dict(_row_get(row, _FIELD_KEYS))
 
     def clause(key: str, fallback: tuple[str, ...]) -> list[str]:
+        """Read parsed clause labels, falling back to row aliases when empty."""
         value = parsed.get(key)
         if value is None or value == [] or value == {}:
             value = _row_get(row, fallback)
@@ -257,6 +260,7 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Decode nonblank UTF-8 JSONL lines, propagating read and parse errors."""
     rows: list[dict[str, Any]] = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -311,6 +315,7 @@ def bert_manifest_overlap(docs: list[BlindDoc], manifest: Any) -> dict[str, bool
 
 
 def _load_local(local_dir: Path) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
+    """Load and join the local blind and ground-truth JSONL exports."""
     base = Path(local_dir)
     blind_rows = _read_jsonl(base / "default.jsonl")
     gt_rows = _read_jsonl(base / "ground_truth.jsonl")
@@ -320,6 +325,7 @@ def _load_local(local_dir: Path) -> tuple[list[BlindDoc], dict[str, GroundTruth]
 def _load_live(
     revision: str, split: str
 ) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
+    """Load and join Hub configs, requiring the optional datasets package."""
     try:
         import datasets
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -334,6 +340,7 @@ def _load_live(
 
 
 def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> list[Any]:
+    """Load a Hub split, falling back to filtering rows by their split field."""
     try:
         dataset = datasets.load_dataset(REPO, config, revision=revision, split=split)
     except Exception:  # noqa: BLE001 - fall back to a split-column filter
@@ -345,6 +352,7 @@ def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> li
 def _join(
     blind_rows: list[Any], gt_rows: list[Any]
 ) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
+    """Index labels by filename and verify blind text against available hashes."""
     pairs = [(_ground_truth_from_row(row), _row_get(row, _SHA_KEYS)) for row in gt_rows]
     gts = {gt.filename: gt for gt, _ in pairs}
     sha_by_name = {gt.filename: sha for gt, sha in pairs if sha is not None}

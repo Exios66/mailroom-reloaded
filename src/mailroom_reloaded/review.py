@@ -102,6 +102,7 @@ def resolve_review(
 
 
 def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
+    """Find an existing source via its saved path or review-bin filename."""
     candidates: list[Path] = []
     state_path = (manifest.state or {}).get("path")
     if state_path:
@@ -119,6 +120,7 @@ def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
 
 
 def _restore_state(manifest: Manifest) -> MailroomState:
+    """Restore checkpointed state, falling back to the manifest identity."""
     if manifest.state:
         try:
             return MailroomState.model_validate(manifest.state)

@@ -12,6 +12,7 @@ from mailroom_reloaded.pipeline.state import MailroomState
 
 
 def test_checkpoint_restores_typed_results_and_retry_counters():
+    """Verify JSON checkpoints restore typed results without sharing mutable lists."""
     state = MailroomState(
         doc_id="doc-1",
         path="letter.txt",
@@ -64,6 +65,7 @@ def test_checkpoint_restores_typed_results_and_retry_counters():
 
 
 def test_documents_do_not_share_mutable_defaults():
+    """Verify route and usage mutations remain isolated to one document state."""
     first, second = MailroomState(), MailroomState()
     first.route_trail.append("ingest")
     first.usage_total += Usage(prompt_tokens=5, calls=1)
