@@ -28,6 +28,9 @@ x-dev-app-env: &dev-app-env
   MAILROOM_API_TOKEN: ${MAILROOM_API_TOKEN:-}
   MAILROOM_TRACE_MASK: ${MAILROOM_TRACE_MASK:-0}
   MAILROOM_EMBED_WATCHER: "0"
+  # The container binds 0.0.0.0 but compose publishes the port on 127.0.0.1 only.
+  MAILROOM_API_HOST: "0.0.0.0"
+  MAILROOM_ALLOW_UNAUTHENTICATED_BIND: "1"
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_SERVICE_NAME: mailroom-dev

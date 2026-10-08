@@ -7,6 +7,7 @@ deterministic scenarios, following ``tests/pipeline/test_flow.py``.
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -350,11 +351,13 @@ def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
 
     class FakeWatcher:
         def __init__(self, *args):
-            pass
+            self.ready = threading.Event()
 
         def run_forever(self):
             started.set()
             try:
+                if failure != "lock":
+                    self.ready.set()
                 if failure:
                     raise error
                 assert stopped.wait(5)
@@ -374,7 +377,104 @@ def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
     assert stopped.is_set()
     assert finished.is_set()
     assert not application.state.watcher_thread.is_alive()
-    if failure:
+    events = [c.args[0] for c in log.info.call_args_list]
+    if failure == "lock":
+        log.exception.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.args[0] == "embedded_watcher_not_started"
+        assert "embedded_watcher_started" not in events
+    elif failure:
         log.exception.assert_called_once_with("embedded_watcher_failed")
     else:
         log.exception.assert_not_called()
+        assert "embedded_watcher_started" in events
+
+
+# ---------------------------------------------------------------- review fixes
+
+PUSH_ENVELOPE = {
+    "message": {
+        "data": base64.urlsafe_b64encode(
+            json.dumps({"emailAddress": "a@example.com", "historyId": 1}).encode()
+        ).decode()
+    }
+}
+
+
+def test_bind_policy_enforced_at_startup_without_cli(env, monkeypatch):
+    """Direct uvicorn start must apply the same bind guard as ``mailroom serve``."""
+    import importlib
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    from mailroom_reloaded import settings
+
+    monkeypatch.setenv("MAILROOM_API_HOST", "0.0.0.0")
+    monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    settings.get_settings.cache_clear()
+    with pytest.raises(SystemExit):
+        app_mod._enforce_bind_policy()
+    monkeypatch.setenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", "1")
+    app_mod._enforce_bind_policy()
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND")
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "secret")
+    settings.get_settings.cache_clear()
+    app_mod._enforce_bind_policy()
+    calls = []
+    monkeypatch.setattr(app_mod, "_enforce_bind_policy", lambda: calls.append(1))
+    with TestClient(app_mod.app):
+        pass
+    assert calls == [1]
+
+
+def _push_client(env, monkeypatch, **envvars):
+    import importlib
+
+    from mailroom_reloaded import settings
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+
+    for k, v in envvars.items():
+        monkeypatch.setenv(k, v)
+    settings.get_settings.cache_clear()
+    monkeypatch.setattr(app_mod, "_gmail_poll_task", lambda: None)
+    return app_mod, TestClient(app_mod.app)
+
+
+def test_push_route_accepts_google_oidc_for_configured_service_account(env, monkeypatch):
+    app_mod, c = _push_client(
+        env, monkeypatch,
+        MAILROOM_API_TOKEN="secret",
+        MAILROOM_GMAIL_PUSH_AUDIENCE="https://host/v1/intake/gmail",
+        MAILROOM_GMAIL_PUSH_SERVICE_ACCOUNT="push@proj.iam.gserviceaccount.com",
+    )
+    good = {"email": "push@proj.iam.gserviceaccount.com", "email_verified": True}
+    seen = {}
+
+    def fake(token, audience):
+        seen["audience"] = audience
+        if token == "jwt-good":
+            return good
+        if token == "jwt-other":
+            return {**good, "email": "evil@x.com"}
+        if token == "jwt-unverified":
+            return {**good, "email_verified": False}
+        raise ValueError("bad signature")
+
+    monkeypatch.setattr(app_mod, "_verify_google_oidc", fake)
+    url = "/v1/intake/gmail"
+    hdr = lambda t: {"Authorization": f"Bearer {t}"}
+    assert c.post(url, json=PUSH_ENVELOPE, headers=hdr("jwt-good")).status_code == 204
+    assert seen["audience"] == "https://host/v1/intake/gmail"
+    assert c.post(url, json=PUSH_ENVELOPE, headers=hdr("secret")).status_code == 204
+    for bad in ("jwt-other", "jwt-unverified", "jwt-forged"):
+        assert c.post(url, json=PUSH_ENVELOPE, headers=hdr(bad)).status_code == 401
+    assert c.post(url, json=PUSH_ENVELOPE).status_code == 401
+    # other /v1 routes still reject a Google JWT
+    assert c.get("/v1/documents", headers=hdr("jwt-good")).status_code == 401
+
+
+def test_push_route_unconfigured_oidc_rejects_non_static_token(env, monkeypatch):
+    app_mod, c = _push_client(env, monkeypatch, MAILROOM_API_TOKEN="secret")
+    monkeypatch.setattr(app_mod, "_verify_google_oidc", lambda *_: pytest.fail("no OIDC"))
+    h = {"Authorization": "Bearer jwt"}
+    assert c.post("/v1/intake/gmail", json=PUSH_ENVELOPE, headers=h).status_code == 401

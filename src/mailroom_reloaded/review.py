@@ -17,6 +17,9 @@ manifest checkpointing and audit dedupe apply unchanged.
 
 from __future__ import annotations
 
+import glob
+import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any, Literal
@@ -66,6 +69,42 @@ def resolve_review(
         if doc_subclass:
             payload["doc_subclass"] = doc_subclass
 
+    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
+    worker_id = f"review-{worker_reviewer}"
+    # Claim the parked file by atomic rename so only one concurrent resolver wins.
+    claimed = bins.claim(path, worker_id)
+    if claimed is None:
+        logger.info("review_claim_lost", doc_id=doc_id)
+        return None
+
+    try:
+        return _resolve_claimed(
+            bins, manifest, claimed, action, payload, doc_type, doc_subclass,
+            reviewer, worker_id,
+        )
+    except BaseException:
+        # Keep the doc parked: put the file back and restore the parked manifest.
+        try:
+            if claimed.is_file():
+                os.replace(claimed, path)
+            save_manifest(bins, manifest)
+        except OSError:
+            logger.exception("review_restore_failed", doc_id=doc_id)
+        raise
+
+
+def _resolve_claimed(
+    bins: Bins,
+    manifest: Manifest,
+    path: Path,
+    action: ReviewAction,
+    payload: dict[str, Any],
+    doc_type: str | None,
+    doc_subclass: str | None,
+    reviewer: str,
+    worker_id: str,
+) -> MailroomState:
+    doc_id = manifest.doc_id
     if action == "reject":
         dest = bins.move(path, "failed")
         state = _restore_state(manifest)
@@ -85,10 +124,9 @@ def resolve_review(
         if doc_subclass:
             overrides["doc_subclass"] = doc_subclass
 
-    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
     state = _flow.run_document(
         path,
-        worker_id=f"review-{worker_reviewer}",
+        worker_id=worker_id,
         resume_from="extract",
         overrides=overrides,
     )
@@ -103,18 +141,38 @@ def resolve_review(
     return state
 
 
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
-    """Find an existing source via its saved path or review-bin filename."""
-    candidates: list[Path] = []
+    """Find the parked source: the saved path, else a content-verified match.
+
+    The saved ``state.path`` is trusted. When it is stale, review-bin files named
+    ``<uuid>_<filename>`` are candidates, but only one whose sha256 equals the
+    manifest's ``content_sha256`` is accepted, so another document with the same
+    or a similar name is never picked up.
+    """
     state_path = (manifest.state or {}).get("path")
     if state_path:
-        candidates.append(Path(state_path))
-    if manifest.filename:
-        candidates.append(bins.review / manifest.filename)
-        candidates.extend(bins.review.glob(f"*{manifest.filename}"))
+        try:
+            if Path(state_path).is_file():
+                return Path(state_path)
+        except OSError:
+            pass
+    if not manifest.filename:
+        return None
+    candidates = [bins.review / manifest.filename]
+    candidates.extend(
+        sorted(bins.review.glob(f"{'[0-9a-f]' * 32}_{glob.escape(manifest.filename)}"))
+    )
     for candidate in candidates:
         try:
-            if candidate.is_file():
+            if candidate.is_file() and _sha256(candidate) == manifest.content_sha256:
                 return candidate
         except OSError:
             continue

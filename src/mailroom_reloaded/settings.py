@@ -183,6 +183,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MAILROOM_JEV_MAX_RETRIES", "JEV_MAX_RETRIES"),
     )
     api_token: str | None = None
+    gmail_push_audience: str | None = None
+    gmail_push_service_account: str | None = None
     trace_mask: bool = False
     gpu_usd_per_hour: float = 0.80
 
