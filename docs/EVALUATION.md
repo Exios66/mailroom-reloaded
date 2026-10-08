@@ -207,10 +207,31 @@ and `{stage: {features, coef, intercept, threshold}}` for
 `models/route_gate.json` (`eval/train_gate.py:17-22`). Training requires the
 `dev` extra (scikit-learn, `pyproject.toml:48`).
 
+### Jev calibration
+
+The opt-in Jev gate is calibrated separately. `fit_jev_calibration`
+(`eval/jev_calibration.py:106-138`) fits temperature by binary NLL and then
+searches `accept_threshold` / `verify_threshold` on the **calibrated**
+confidence by balanced accuracy, reporting ECE before/after, and writes
+`models/jev_calibration.json` (`agents/jev.py:367-381`). It reuses
+`train_gate._check_train`, so only `split="train"` rows are accepted and a
+non-`train` split raises `ValueError` (`eval/jev_calibration.py:115`).
+
+```bash
+# Rows are {split, confidence, correct} (correct is 0/1):
+uv run mailroom jev calibrate --rows rows.jsonl --out models/jev_calibration.json
+```
+
+Jev's shipped calibration is fit on the author's teacher/MASSIVE data and **does
+not transfer**; re-fit on your own rows (issue #8). `JevGate` currently reads
+only `accept_threshold` — `verify_threshold` is fit and stored but not yet
+consumed (`agents/jev.py:345-349`). See [JEV.md](JEV.md).
+
 ## Cross-links
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the pipeline the eval drives.
 - [CONFIGURATION.md](CONFIGURATION.md) — `cost_models`, `confidence`, model maps.
+- [JEV.md](JEV.md) — the Jev decision model and its calibration.
 - [OPERATIONS.md](OPERATIONS.md) — where runs, traces and cards are observed.
 - [TESTING.md](TESTING.md) — `tests/eval` and the parity suite.
 - `deploy/README.md` — a SAND-37-style posture run against Modal.

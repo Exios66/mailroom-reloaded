@@ -72,6 +72,15 @@ calls." (`agents/gate.py:1`). `BandGate.decide` applies per-class thresholds
 band (`agents/gate.py:114-175`). Tool rounds and vision/merger-window retries are
 counted separately from the logical two calls (`pipeline/flow.py:240-241`).
 
+The gate slot is pluggable. `load_gate()` (`agents/gate.py:169-180`) chooses the
+deterministic `BandGate` by default, a `LearnedGate` when
+`models/route_gate.json` exists, or — when the opt-in `MAILROOM_JEV_PROVIDER` is
+set **and** `models/jev_calibration.json` is present — a `JevGate` backed by the
+TypeSafe System One decision model (`agents/jev.py:367-381`). Jev overrides only
+the medium confidence band and never a hard `rule` decision, so the deterministic
+contract above is preserved whenever Jev is off (the default) or uncalibrated.
+See [JEV.md](JEV.md).
+
 The gate maps to driver targets: classify → `do_extract | retry_sort | re_sort |
 human_review`; extract → `report | retry_extract | do_verify | do_boss |
 human_review` (`pipeline/flow.py:404-439`). The arbiter route maps `accept` /
@@ -154,6 +163,7 @@ Events written by the pipeline include `completed` per node
   mailroom.db                               # SQLite: audit_log, catalog, eval_docs
   models/route_gate.json                    # optional learned gate
   models/calibration.json                   # optional sorter temperature scaling
+  models/jev_calibration.json               # optional Jev gate calibration (opt-in)
   runs/<run_id>/cards/*.json                # card JSON (served by GET /v1/runs/{id}/cards)
   gmail_state.json, gmail_credentials.json, gmail_token.json   # if Gmail intake is used
 ```
@@ -197,6 +207,7 @@ deploy/                 Dockerfile, docker-compose.yml (+ dev), otel-collector.y
 ## Cross-links
 
 - Configuration surface: [CONFIGURATION.md](CONFIGURATION.md)
+- Opt-in Jev route gate: [JEV.md](JEV.md)
 - Evaluation harness, cards and train/test discipline: [EVALUATION.md](EVALUATION.md)
 - Watching, review, audit ops, observability and failure modes: [OPERATIONS.md](OPERATIONS.md)
 - Tests and the dependency fence: [TESTING.md](TESTING.md)

@@ -47,6 +47,15 @@ over the per-agent `provider` in `taxonomy.yaml` (`llm/client.py:80-113`).
 | `vllm` | `VLLM_BASE_URL`, optional `VLLM_API_KEY` | Local or Modal vLLM; model ids remapped through `vllm_model_map`. |
 | `llamafile` | `LLAMAFILE_BASE_URL` | Single-GGUF sidecar; ids remapped through `llamafile_model_map`. |
 
+### Jev route gate (opt-in)
+
+The deterministic gate can be swapped for the **Jev (TypeSafe System One)**
+probabilistic decision model. It is opt-in via `MAILROOM_JEV_PROVIDER=off|openrouter|typesafe|local`
+(default `off`) and only takes effect once a calibration exists at
+`models/jev_calibration.json`; a `JevGate` then overrides **only the medium
+confidence band** and never a hard rule. Transports, calibration and caveats are
+documented in [docs/JEV.md](docs/JEV.md).
+
 ## Quickstart
 
 ```bash
@@ -100,6 +109,7 @@ Console script `mailroom` (`pyproject.toml:51-52`), defined in
 | `mailroom run <file>` | `--worker-id cli` | Runs one document through the pipeline, prints `doc_id`/`status`/`doc_type`/`route_trail` (`cli.py` `run`). |
 | `mailroom eval` | see below | Runs an evaluation posture, prints its `run_id` (`cli.py` `eval`). |
 | `mailroom train-gate` | `--rows` (required), `--out models/route_gate.json`, `--calibration` | Fits the route gate or temperature calibration from JSONL rows (`cli.py` `train_gate_command`). |
+| `mailroom jev` | `decide --state --type choice/noul/score --instructions [--criteria K=D] [--criteria-list A,B]`; `calibrate --rows --out models/jev_calibration.json` | Asks the opt-in Jev decision model one typed question, or fits its calibration. See [docs/JEV.md](docs/JEV.md). |
 | `mailroom card` | `--run-id` (repeatable), `--doc-type`, `--master`, `--out runs` | Writes a `mailroom.card/v1` JSON+MD per run (or the aggregated SAND-37 master card) and echoes the Markdown path (`cli.py` `card`). |
 | `mailroom conformance` | `--provider`, `--per-class 2`, `--revision ed7576b6`, `--split train`, `--local-dir`, `--out runs/conformance` | Runs the spec §11 behavioural conformance suite and writes a JSON+MD card (`cli.py` `conformance`). |
 | `mailroom gmail auth\|poll\|watch` | `--limit`, `--process/--no-process`, `--worker-id` | Gmail attachment intake; needs the `gmail` extra. See [docs/gmail-intake.md](docs/gmail-intake.md). |
@@ -151,6 +161,8 @@ and click through to Phoenix (`:6006`) and Grafana (`:3000`).
   `taxonomy.yaml` block, with defaults and effect.
 - [docs/EVALUATION.md](docs/EVALUATION.md) — dataset, blind/ground-truth split,
   train/test discipline, `mailroom eval`, cards.
+- [docs/JEV.md](docs/JEV.md) — the opt-in Jev (TypeSafe System One) decision
+  model: transports, typed answers, the `jev:` config block, CLI and calibration.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — watcher, review, audit
   verification, observability, cost, failure modes.
 - [docs/TESTING.md](docs/TESTING.md) — test tiers, the `live` marker, the
