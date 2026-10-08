@@ -8,12 +8,9 @@ Commands:
 * ``mailroom run <file>`` — run one document through the pipeline.
 * ``mailroom eval ...`` — run an evaluation posture (Task 20).
 * ``mailroom train-gate ...`` — fit the route-gate model / calibration (Task 13).
-* ``mailroom card ...`` — SAND-37 cards (Task 21, not yet implemented).
-* ``mailroom conformance ...`` — behavioural conformance suite (Task 24, not yet
-  implemented).
-
-The two not-yet-built commands exit non-zero with an explicit message; they do
-not fabricate output.
+* ``mailroom card ...`` — SAND-37 scorecards, one ``mailroom.card/v1`` per run
+  or the aggregated master card (Task 21).
+* ``mailroom conformance ...`` — behavioural conformance suite (Task 24).
 """
 
 # ruff: noqa: B008 - Typer/FastAPI options are function calls in defaults by design.
@@ -165,27 +162,89 @@ def train_gate_command(
     typer.echo(json.dumps(result, default=str))
 
 
-@app.command(
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True}
-)
-def card(ctx: typer.Context) -> None:
-    """SAND-37 scorecards (plan Task 21) — not yet implemented."""
-    typer.echo(
-        "mailroom card: not yet implemented (plan Task 21)", err=True
+@app.command()
+def card(
+    run_id: list[str] = typer.Option(
+        ..., "--run-id", help="Eval run id to scorecard (repeat for several)."
+    ),
+    doc_type: str = typer.Option(
+        None, "--doc-type", help="Specialist cell (default: every cell in the run)."
+    ),
+    master: bool = typer.Option(
+        False, "--master", help="Write the aggregated SAND-37 master card instead."
+    ),
+    out: Path = typer.Option(Path("runs"), "--out", help="Output root."),
+) -> None:
+    """Write SAND-37 scorecards for one or more eval runs (plan Task 21).
+
+    A single ``--run-id`` writes ``<out>/<run_id>/cards/card-<doc_type|all>.{json,md}``;
+    ``--master`` (or two or more run ids) writes ``<out>/master.{json,md}``. Echoes
+    the path of the Markdown card written.
+    """
+    from mailroom_reloaded.eval.cards import build_card, build_master, render_card_md
+
+    if master or len(run_id) > 1:
+        data, markdown = build_master(list(run_id))
+        target = (out / "master").with_suffix(".md")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.with_suffix(".json").write_text(
+            json.dumps(data, indent=2, default=str), encoding="utf-8"
+        )
+        target.write_text(markdown, encoding="utf-8")
+        typer.echo(str(target))
+        return
+
+    rid = run_id[0]
+    card_data = build_card(rid, doc_type)
+    markdown = render_card_md(card_data)
+    target = (out / rid / "cards" / f"card-{doc_type or 'all'}").with_suffix(".md")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.with_suffix(".json").write_text(
+        json.dumps(card_data, indent=2, default=str), encoding="utf-8"
     )
-    raise typer.Exit(code=1)
+    target.write_text(markdown, encoding="utf-8")
+    typer.echo(str(target))
 
 
-@app.command(
-    name="conformance",
-    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
-)
-def conformance(ctx: typer.Context) -> None:
-    """Behavioural conformance suite (plan Task 24) — not yet implemented."""
-    typer.echo(
-        "mailroom conformance: not yet implemented (plan Task 24)", err=True
+@app.command(name="conformance")
+def conformance(
+    provider: str = typer.Option(
+        "", "--provider", help="Provider to conformance-test (default: configured provider)."
+    ),
+    per_class: int = typer.Option(2, "--per-class", min=1),
+    revision: str = typer.Option("ed7576b6", "--revision"),
+    split: str = typer.Option("train", "--split"),
+    local_dir: Path = typer.Option(None, "--local-dir", exists=True, file_okay=False),
+    out: Path = typer.Option(Path("runs/conformance"), "--out"),
+) -> None:
+    """Run the behavioural conformance suite (plan Task 24) and write a card."""
+    from mailroom_reloaded.eval.conformance import run_conformance
+
+    card = run_conformance(
+        provider or None,
+        per_class=per_class,
+        revision=revision,
+        split=split,
+        local_dir=local_dir,
+        out_dir=out,
     )
-    raise typer.Exit(code=1)
+    typer.echo(
+        json.dumps(
+            {
+                "provider": card.provider,
+                "model": card.model,
+                "roles": {
+                    role: {
+                        "tool_call_success_rate": stats.tool_call_success_rate,
+                        "invariant_pass_rate": stats.invariant_pass_rate,
+                        "failures": stats.failures,
+                    }
+                    for role, stats in card.roles.items()
+                },
+                "out": str(out),
+            }
+        )
+    )
 
 
 gmail_app = typer.Typer(
