@@ -42,15 +42,18 @@ def test_resolve_vllm_uses_base_url(monkeypatch):
 
 
 def test_resolve_openrouter_needs_key(monkeypatch):
+    # Isolate from the developer's local .env (Settings reads it directly):
+    # point ``resolve``'s ``get_settings`` at a Settings that ignores env files.
+    from mailroom_reloaded.llm import client as client_mod
+    from mailroom_reloaded.settings import Settings
+
     monkeypatch.setenv("DEFAULT_PROVIDER", "openrouter")
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("MAILROOM_OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(client_mod, "get_settings", lambda: Settings(_env_file=None))
     with pytest.raises(ValueError):
         resolve("sorter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-real")
-    from mailroom_reloaded import settings
-
-    settings.get_settings.cache_clear()
     r = resolve("sorter")
     assert r.model == "qwen/qwen3.7-flash" and r.api_key == "sk-real"
     assert r.supports_logprobs is False
