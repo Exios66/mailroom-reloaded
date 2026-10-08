@@ -32,7 +32,7 @@ this is a ledger, not a governance board.
 - **Files:** `agents/jev.py`, `eval/jev_calibration.py`, `agents/gate.py`, `cli.py` (`jev`),
   `settings.py`, `config/taxonomy.yaml`, `.env.example`, `docs/JEV.md`,
   README/ARCHITECTURE/CONFIGURATION/EVALUATION.
-- **Evidence:** `uv run pytest -q` → 584 passed, 1 skipped, 2 deselected;
+- **Evidence:** `uv run pytest -q` → 610 passed, 1 skipped, 2 deselected;
   `uv run ruff check .` clean; Jev tests proven no-network (fake transport).
 - **Commits:** `6691524` Jev scorer + gate; `007a0de` docs; `6d20939` consume
   `verify_threshold`; rebased over CodeRabbit `2bdebcf` / `9f34df0`.

@@ -8,11 +8,24 @@ from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _empty_to_none(value: Any) -> Any:
+    """Coerce a blank env value to ``None`` (``.env`` files ship empty lines)."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+# Optional Jev knobs: a blank ``.env`` line must mean "unset", not a parse error.
+_JevStr = Annotated[str | None, BeforeValidator(_empty_to_none)]
+_JevFloat = Annotated[float | None, BeforeValidator(_empty_to_none)]
+_JevInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
 
 
 class DocClass(BaseModel):
@@ -133,7 +146,45 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("LLAMAFILE_BASE_URL", "MAILROOM_LLAMAFILE_BASE_URL"),
     )
+    # Jev (issue #8) knobs: resolved from the environment / ``.env`` here so a
+    # ``MAILROOM_JEV_PROVIDER=openrouter`` line in ``.env`` is honoured. Each
+    # field accepts both the ``MAILROOM_JEV_<X>`` and bare ``JEV_<X>`` names.
+    # Defaults are ``None`` on purpose: an unset field must fall through to the
+    # taxonomy ``jev:`` block and then the code default, preserving the
+    # documented env -> taxonomy -> default resolution order.
+    jev_provider: _JevStr = Field(
+        default=None, validation_alias=AliasChoices("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER")
+    )
+    jev_model: _JevStr = Field(
+        default=None, validation_alias=AliasChoices("MAILROOM_JEV_MODEL", "JEV_MODEL")
+    )
+    jev_base_url: _JevStr = Field(
+        default=None, validation_alias=AliasChoices("MAILROOM_JEV_BASE_URL", "JEV_BASE_URL")
+    )
+    jev_api_key: _JevStr = Field(
+        default=None, validation_alias=AliasChoices("MAILROOM_JEV_API_KEY", "JEV_API_KEY")
+    )
+    jev_temperature: _JevFloat = Field(
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_TEMPERATURE", "JEV_TEMPERATURE"),
+    )
+    jev_accept_threshold: _JevFloat = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "MAILROOM_JEV_ACCEPT_THRESHOLD", "JEV_ACCEPT_THRESHOLD"
+        ),
+    )
+    jev_timeout_s: _JevFloat = Field(
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_TIMEOUT_S", "JEV_TIMEOUT_S"),
+    )
+    jev_max_retries: _JevInt = Field(
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_MAX_RETRIES", "JEV_MAX_RETRIES"),
+    )
     api_token: str | None = None
+    gmail_push_audience: str | None = None
+    gmail_push_service_account: str | None = None
     trace_mask: bool = False
     gpu_usd_per_hour: float = 0.80
 
@@ -180,12 +231,17 @@ class JevConfig:
     Resolution order per field is ``MAILROOM_JEV_<FIELD>`` -> ``JEV_<FIELD>`` ->
     the taxonomy ``jev:`` block -> a default. ``model``/``base_url`` default per
     provider; the numeric fields use the module defaults.
+
+    ``temperature`` is reserved for the **local** transport (the local JevK5
+    runtime uses 1.22): it is NOT included in hosted OpenRouter/TypeSafe
+    requests, whose APIs expose no such field.
     """
 
     provider: Literal["off", "openrouter", "typesafe", "local"]
     model: str
     base_url: str
     api_key: str | None
+    # Reserved for the local JevK5 transport; NOT sent in hosted requests.
     temperature: float
     accept_threshold: float
     timeout_s: float
@@ -197,13 +253,24 @@ class JevConfig:
         return self.provider != "off"
 
 
-def _jev_env(name: str) -> str | None:
-    """Return ``MAILROOM_JEV_<NAME>`` then ``JEV_<NAME>`` when set and non-empty."""
+def _jev_env(name: str, settings: Settings | None = None) -> str | None:
+    """Resolve one Jev field.
+
+    ``os.environ`` wins: ``MAILROOM_JEV_<NAME>`` then ``JEV_<NAME>`` when set
+    and non-empty. Otherwise fall back to the ``Settings`` value (which reads
+    ``.env``) so a ``.env``-style ``MAILROOM_JEV_<NAME>`` is honoured. A blank
+    env value is treated as unset, so the taxonomy block can still apply.
+    """
     for key in (f"MAILROOM_JEV_{name}", f"JEV_{name}"):
         value = os.environ.get(key)
         if value:
             return value
-    return None
+    resolved = settings if settings is not None else get_settings()
+    value = getattr(resolved, f"jev_{name.lower()}", None)
+    if value is None:
+        return None
+    text = str(value)
+    return text or None
 
 
 def _jev_field(name: str, taxonomy: dict[str, Any]) -> str | None:
@@ -226,17 +293,23 @@ def _jev_scalar(
     return cast(value)
 
 
-def _jev_api_key(settings: Settings) -> str | None:
-    """Resolve the API key.
+def _jev_api_key(settings: Settings, provider: str) -> str | None:
+    """Resolve the API key with provider-specific precedence.
 
-    Order: ``MAILROOM_JEV_API_KEY`` -> ``JEV_API_KEY`` -> ``TYPESAFE_API_KEY`` ->
-    ``OPENROUTER_API_KEY`` -> ``settings.openrouter_api_key``. It may be ``None``
-    for the ``local`` provider (no auth header is then sent).
+    ``MAILROOM_JEV_API_KEY`` -> ``JEV_API_KEY`` always win. Otherwise the
+    provider's own variable is preferred (``openrouter`` -> ``OPENROUTER_API_KEY``;
+    ``typesafe`` -> ``TYPESAFE_API_KEY``), then the other provider's variable,
+    then ``settings.openrouter_api_key``. It may be ``None`` for the ``local``
+    provider (no auth header is then sent).
     """
-    value = _jev_env("API_KEY")
+    value = _jev_env("API_KEY", settings)
     if value:
         return value
-    for key in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"):
+    order = {
+        "openrouter": ("OPENROUTER_API_KEY", "TYPESAFE_API_KEY"),
+        "typesafe": ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"),
+    }.get(provider, ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"))
+    for key in order:
         value = os.environ.get(key)
         if value:
             return value
@@ -248,7 +321,8 @@ def jev_config() -> JevConfig:
 
     Not cached on purpose: env changes (tests, CLI overrides) take effect
     immediately. Unknown providers collapse to ``off`` so the default pipeline
-    behaviour is unchanged.
+    behaviour is unchanged. ``temperature`` is reserved for the local transport
+    and is not sent to hosted endpoints.
     """
     taxonomy = dict(load_taxonomy().raw.get("jev") or {})
     provider = (
@@ -261,7 +335,7 @@ def jev_config() -> JevConfig:
         provider=provider,  # type: ignore[arg-type]
         model=_jev_field("MODEL", taxonomy) or defaults["model"],
         base_url=_jev_field("BASE_URL", taxonomy) or defaults["base_url"],
-        api_key=_jev_api_key(get_settings()),
+        api_key=_jev_api_key(get_settings(), provider),
         temperature=_jev_scalar("TEMPERATURE", taxonomy, _JEV_DEFAULTS["temperature"], float),
         accept_threshold=_jev_scalar(
             "ACCEPT_THRESHOLD", taxonomy, _JEV_DEFAULTS["accept_threshold"], float

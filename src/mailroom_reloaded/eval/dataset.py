@@ -368,6 +368,14 @@ def _join(
     for row in blind_rows:
         name = str(_row_get(row, ("filename", "file", "name"), "")).strip()
         docs.append(_blind_from_row(row, sha_by_name.get(name)))
+    blind_names = {doc.filename for doc in docs}
+    missing_truth = blind_names - gts.keys()
+    missing_docs = gts.keys() - blind_names
+    if missing_truth or missing_docs:
+        raise DatasetIntegrityError(
+            f"Filename mismatch: missing ground truth for {sorted(missing_truth)}; "
+            f"missing blind documents for {sorted(missing_docs)}"
+        )
     return docs, gts
 
 

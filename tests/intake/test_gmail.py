@@ -188,7 +188,7 @@ def _patch_handoff(monkeypatch, doc_type="correspondence"):
         route="fast_path",
     )
     handoff = Handoff(SortMode.SUBCLASS_ONLY, doc_type, f"BERT predicts {doc_type}", "fast_path")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 

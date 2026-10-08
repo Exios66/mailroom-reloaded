@@ -40,22 +40,21 @@ taxonomy or a model map you must restart the process: `load_taxonomy` and
 
 ### Jev (TypeSafe System One)
 
-Opt-in route-gate model (`settings.py:146-271`, `docs/JEV.md`). Each field
-resolves `MAILROOM_JEV_<FIELD>` → `JEV_<FIELD>` → the taxonomy `jev:` block → a
-default (`_jev_env`/`_jev_field`/`_jev_scalar`, `settings.py:200-226`).
-`jev_config()` is **not** cached, so env changes apply immediately
-(`settings.py:246-252`).
+Opt-in route-gate model (`settings.py`; `JevConfig`, `jev_config`, `docs/JEV.md`).
+Each field resolves `MAILROOM_JEV_<FIELD>` → `JEV_<FIELD>` → the taxonomy `jev:`
+block → a default (`_jev_env`/`_jev_field`/`_jev_scalar`). `jev_config()` is
+**not** cached, so env changes apply immediately.
 
 | Variable (or `JEV_` alias) | Read | Default | Effect |
 | --- | --- | --- | --- |
-| `MAILROOM_JEV_PROVIDER` | `settings.py:254-258` | `off` | `off` \| `openrouter` \| `typesafe` \| `local`; unknown values collapse to `off`. `off` leaves the band/learned gate unchanged. |
-| `MAILROOM_JEV_MODEL` | `settings.py:262` | per provider | Blank picks the provider default: `typesafe/jev-1.13` / `jev-latest` / `jevk5` (`settings.py:151-165`). |
-| `MAILROOM_JEV_BASE_URL` | `settings.py:263` | per provider | Blank picks the provider endpoint (`settings.py:151-165`). |
-| `MAILROOM_JEV_TEMPERATURE` | `settings.py:265` | `1.0` | Sampling temperature sent with each decision request (`settings.py:167-172`). |
-| `MAILROOM_JEV_ACCEPT_THRESHOLD` | `settings.py:266-268` | `0.8` | Minimum Jev confidence for the chosen action to be trusted; below it (or a `noul` escalation) the gate maps to `human_review` (`agents/jev.py:345-360`). |
-| `MAILROOM_JEV_TIMEOUT_S` | `settings.py:269` | `10.0` | Per-request HTTP timeout. |
-| `MAILROOM_JEV_MAX_RETRIES` | `settings.py:270` | `2` | Retries on `429`/`5xx` with backoff; other non-2xx raise immediately (`agents/jev.py:230-248`). |
-| `MAILROOM_JEV_API_KEY` / `JEV_API_KEY` | `settings.py:229-243` | unset | API key; resolution falls through to `TYPESAFE_API_KEY`, then `OPENROUTER_API_KEY`, then `settings.openrouter_api_key`. The `local` provider may run keyless. |
+| `MAILROOM_JEV_PROVIDER` | `jev_config` | `off` | `off` \| `openrouter` \| `typesafe` \| `local`; unknown values collapse to `off`. `off` leaves the band/learned gate unchanged. |
+| `MAILROOM_JEV_MODEL` | `jev_config` | per provider | Blank picks the provider default: `typesafe/jev-1.13` / `jev-latest` / `jevk5` (`_JEV_PROVIDER_DEFAULTS`). |
+| `MAILROOM_JEV_BASE_URL` | `jev_config` | per provider | Blank picks the provider endpoint (`_JEV_PROVIDER_DEFAULTS`). |
+| `MAILROOM_JEV_TEMPERATURE` | `jev_config` | `1.0` | Local-usage/default knob reserved for the offline JevK5 transport (which reads letter logits at ~1.22). It is **not** included in hosted OpenRouter/TypeSafe requests (the request body is `{"model", "state", "questions"}`; `JevClient.ask`). |
+| `MAILROOM_JEV_ACCEPT_THRESHOLD` | `jev_config` | `0.8` | Minimum Jev confidence for the chosen action to be trusted; below it the gate maps to `verify` (down to the verify threshold) or `human_review`, and a `noul` escalation also maps to `human_review` (`JevGate.decide`). |
+| `MAILROOM_JEV_TIMEOUT_S` | `jev_config` | `10.0` | Per-request HTTP timeout. |
+| `MAILROOM_JEV_MAX_RETRIES` | `jev_config` | `2` | Retries on `429`/`5xx` with backoff; other non-2xx raise immediately (`JevClient._post_with_retry`). |
+| `MAILROOM_JEV_API_KEY` / `JEV_API_KEY` | `_jev_api_key` | unset | API key; explicit override tried first. Then the provider-preferred hosted key (`OPENROUTER_API_KEY` for `openrouter`, `TYPESAFE_API_KEY` for `typesafe`), then the other, then `settings.openrouter_api_key`. The `local` provider may run keyless. |
 
 ### Observability
 
@@ -133,14 +132,14 @@ Defaults: global `high 0.95`, `low 0.70`, `retry_max 2`,
 
 `provider`, `model`, `base_url`, `temperature`, `accept_threshold`, `timeout_s`,
 `max_retries` (`taxonomy.yaml:142-160`), read by `settings.jev_config`
-(`settings.py:246-271`). Every key is only a fallback for the matching
+(`jev_config`). Every key is only a fallback for the matching
 `MAILROOM_JEV_*` / `JEV_*` env var (see above). Defaults: `provider: off`,
-`model`/`base_url` blank (provider defaults, `settings.py:151-165`),
+`model`/`base_url` blank (provider defaults, `_JEV_PROVIDER_DEFAULTS`),
 `temperature 1.0`, `accept_threshold 0.8`, `timeout_s 10.0`, `max_retries 2`
-(`settings.py:167-172`). Effect: a non-`off` provider makes `load_gate()`
+(`_JEV_DEFAULTS`). Effect: a non-`off` provider makes `load_gate()`
 prefer a `JevGate` once `<base_dir>/models/jev_calibration.json` exists;
 otherwise the deterministic band/learned gate is unchanged
-(`agents/gate.py:169-180`, `agents/jev.py:367-381`). Full detail:
+(`agents/gate.py:169-180`, `load_jev_gate` in `agents/jev.py`). Full detail:
 [JEV.md](JEV.md).
 
 ### `specialist_conditions` — per-class run caps {#specialist-conditions}
@@ -215,7 +214,7 @@ Optional JSON files under `<base_dir>/models/` change routing:
   used by `LearnedGate` only inside the medium band (`agents/gate.py:114-175`).
   Fit with `mailroom train-gate`.
 - `models/jev_calibration.json` — Jev calibration
-  (`agents/jev.py:367-381`). Fit with `mailroom jev calibrate`; only read when
+  (`load_jev_gate` in `agents/jev.py`). Fit with `mailroom jev calibrate`; only read when
   `MAILROOM_JEV_PROVIDER` is not `off` ([JEV.md](JEV.md)).
 
 All are optional; without them the deterministic bands decide

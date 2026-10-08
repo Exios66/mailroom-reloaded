@@ -161,7 +161,7 @@ class MailroomFlow(Flow[MailroomState]):
     def _node_bert_primary(self) -> None:
         """Classify with ModernBERT and derive the sorter handoff."""
         state = self.state
-        verdict = classify_primary(state.text)
+        verdict = classify_primary(state.text, filename=Path(state.path).name)
         state.bert = verdict
         state.handoff = decide_handoff(verdict, load_taxonomy().bert)
         route = (
@@ -289,6 +289,7 @@ class MailroomFlow(Flow[MailroomState]):
     ) -> Any:
         """Run a node under resume-skip, manifest/audit, span and budget guards."""
         if node_name in self._resume_done:
+            self._resume_done.remove(node_name)
             return None
         deadlines = self._overrides.get("deadlines", {})
         budgets = self._overrides.get("token_budgets", {})

@@ -125,7 +125,7 @@ def _patch_handoff(monkeypatch):
     handoff = Handoff(
         SortMode.SUBCLASS_ONLY, "correspondence", "BERT predicts class correspondence", "fast_path"
     )
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 

@@ -177,3 +177,26 @@ def test_missing_predictions_never_use_ground_truth(engine, document):
     runner._insert(engine, row)
     assert rows(engine)[0]["doc_type"] is None
     assert sorter_kpis([{**row, "expected_doc_type": truth.expected}])["primary_accuracy"] == 0
+
+
+async def test_specialist_cells_extract_concurrently_off_event_loop(engine, document, monkeypatch):
+    import threading
+
+    loop_thread = threading.get_ident()
+    barrier = threading.Barrier(2, timeout=5)
+    worker_threads = []
+
+    def extract(*args, **kwargs):
+        worker_threads.append(threading.get_ident())
+        barrier.wait()
+        return ExtractResult("unknown", {}, True, None, 1.0, None, 1, Usage(calls=1))
+
+    monkeypatch.setattr(runner, "_extract", extract)
+    other = BlindDoc("other.txt", "other", sha256_text("other"))
+    await runner._run_all(
+        runner.EvalConfig(mode="specialist_cell", concurrency=2),
+        "run", [document, other], {}, set(), engine,
+    )
+    assert len(worker_threads) == 2
+    assert loop_thread not in worker_threads
+    assert all(row["status"] == "ok" for row in rows(engine))

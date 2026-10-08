@@ -35,18 +35,16 @@ extensions are accepted into `inbox/` but will fail ingest as unsupported.
 4. **Pub/Sub topic.** Create a topic, e.g. `projects/<project>/topics/gmail-push`.
    Grant the Gmail push service account `roles/pubsub.publisher` on it:
    `gmail-api-push@system.gserviceaccount.com`.
-5. **Subscription.** Deploy an authenticated relay and create a **push**
-   subscription targeting its HTTPS endpoint. Configure Pub/Sub authentication
-   with a service account and the relay's expected audience. The relay must
-   validate Google's OIDC token (signature, issuer, audience and service-account
-   identity), then forward the unchanged JSON envelope to
-   `POST https://your-host/v1/intake/gmail`, replacing the Authorization header
-   with `Bearer <MAILROOM_API_TOKEN>`. Set that shared secret on the API and relay,
-   and have the relay acknowledge Pub/Sub only after the API returns HTTP 204.
-   Pub/Sub cannot send an arbitrary fixed bearer header; the API's `require_token`
-   guard accepts a static secret and does not validate Google OIDC tokens.
-   This relay is deployment infrastructure you must provide; use local polling
-   below if it is unavailable.
+5. **Subscription.** Create a **push** subscription targeting
+   `https://your-host/v1/intake/gmail` with Pub/Sub authentication enabled: pick
+   a service account and an audience (the endpoint URL). On the API set
+   `MAILROOM_GMAIL_PUSH_AUDIENCE` to that audience and
+   `MAILROOM_GMAIL_PUSH_SERVICE_ACCOUNT` to the service account's email. The route
+   then verifies Google's OIDC JWT (signature, expiry, audience, verified email
+   equals the service account). A relay that forwards with
+   `Bearer <MAILROOM_API_TOKEN>` is still accepted. Only this route accepts the
+   JWT; every other `/v1` route requires the static token. Acknowledge only after
+   HTTP 204.
 6. **Register the mailbox watch.** Call `users.watch` once (and at least every
    7 days) with the topic:
 
@@ -130,3 +128,6 @@ the messages the query still matches.
   Cloud Pub/Sub setup; `mailroom gmail watch` (local polling) is the demo path.
 - Coordination requires all callers to share the same state file on a filesystem
   supporting `flock`. Replicas with separate state files can ingest duplicate mail.
+
+The OAuth token (`gmail_token.json`) holds a refresh token and is written with
+mode `0600`. If you created it with an earlier version, run `chmod 600` on it.

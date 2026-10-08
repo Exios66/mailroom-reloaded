@@ -524,3 +524,21 @@ def test_configure_terminal_manifest_fresh_or_explicit_resume(flow, tmp_path, mo
         assert flow._manifest is manifest
         assert flow.state.text == "old text"
         assert flow.state.classify_attempts == 2
+
+
+def test_bert_receives_document_filename(flow, monkeypatch):
+    from mailroom_reloaded.ingest.bert import BertVerdict
+
+    classify = Mock(return_value=BertVerdict(available=False, reason="flag_off"))
+    monkeypatch.setattr(flow_mod, "classify_primary", classify)
+    flow._node_bert_primary()
+    classify.assert_called_once_with("source text", filename="letter.txt")
+
+
+def test_resume_skip_is_consumed_before_retry(flow):
+    flow._resume_done = {"extract"}
+    work = Mock(return_value="extracted")
+    assert flow._guard_node("extract", 0, 0, work, (), {}) is None
+    work.assert_not_called()
+    assert flow._guard_node("extract", 0, 0, work, (), {}) == "extracted"
+    work.assert_called_once_with(flow)

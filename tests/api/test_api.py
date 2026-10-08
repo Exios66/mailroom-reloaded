@@ -7,6 +7,7 @@ deterministic scenarios, following ``tests/pipeline/test_flow.py``.
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -135,7 +136,7 @@ def _patch_handoff(
         route=route,
     )
     handoff = Handoff(mode, locked, f"BERT predicts class {doc_type}", route)
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
     return verdict, handoff
 
@@ -144,7 +145,7 @@ def _patch_bert_unavailable(monkeypatch):
     """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 
@@ -273,9 +274,9 @@ def test_runs_shape(client):
     assert resp.status_code == 200
     assert resp.json() == {"runs": []}
 
-    cards = client.get("/v1/runs/nope/cards")
+    cards = client.get("/v1/runs/000000000000/cards")
     assert cards.status_code == 200
-    assert cards.json() == {"run_id": "nope", "cards": []}
+    assert cards.json() == {"run_id": "000000000000", "cards": []}
 
 
 def test_offbind_without_token_refuses(env, monkeypatch):
@@ -309,3 +310,171 @@ def test_bearer_required_when_token_set(env, monkeypatch, client):
 
     # /health stays public.
     assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize("run_id", ["%2e%2e", "%5c..", "not-a-run", "a" * 11, "a" * 13, "A" * 12])
+def test_cards_reject_invalid_run_ids(client, run_id):
+    assert client.get(f"/v1/runs/{run_id}/cards").status_code == 400
+
+
+def test_cards_reads_valid_run(env, client):
+    cards_dir = env / "runs" / "012345abcdef" / "cards"
+    cards_dir.mkdir(parents=True)
+    (cards_dir / "card.json").write_text('{"score": 1}')
+    assert client.get("/v1/runs/012345abcdef/cards").json() == {
+        "run_id": "012345abcdef", "cards": [{"score": 1}]
+    }
+
+
+@pytest.mark.parametrize("authorization", [b"Basic s3cret", b"Bearer ", b"Bearer \xff", b"bearer s3cret"])
+def test_invalid_authorization_is_unauthorized(env, client, monkeypatch, authorization):
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    assert client.get("/v1/documents", headers={b"Authorization": authorization}).status_code == 401
+
+
+@pytest.mark.parametrize("failure", [None, "lock", "unexpected"])
+def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
+    import importlib
+    import threading
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.watcher import WatcherLockHeld
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    started = threading.Event()
+    stopped = threading.Event()
+    finished = threading.Event()
+    error = WatcherLockHeld("occupied") if failure == "lock" else RuntimeError("failed")
+
+    class FakeWatcher:
+        def __init__(self, *args):
+            self.ready = threading.Event()
+
+        def run_forever(self):
+            started.set()
+            try:
+                if failure != "lock":
+                    self.ready.set()
+                if failure:
+                    raise error
+                assert stopped.wait(5)
+            finally:
+                finished.set()
+
+        def stop(self):
+            stopped.set()
+
+    monkeypatch.setenv("MAILROOM_EMBED_WATCHER", "1")
+    monkeypatch.setattr("mailroom_reloaded.watcher.Watcher", FakeWatcher)
+    log = Mock()
+    monkeypatch.setattr(app_mod, "logger", log)
+    application = app_mod.create_app()
+    with TestClient(application):
+        assert started.wait(5)
+    assert stopped.is_set()
+    assert finished.is_set()
+    assert not application.state.watcher_thread.is_alive()
+    events = [c.args[0] for c in log.info.call_args_list]
+    if failure == "lock":
+        log.exception.assert_not_called()
+        log.warning.assert_called_once()
+        assert log.warning.call_args.args[0] == "embedded_watcher_not_started"
+        assert "embedded_watcher_started" not in events
+    elif failure:
+        log.exception.assert_called_once_with("embedded_watcher_failed")
+    else:
+        log.exception.assert_not_called()
+        assert "embedded_watcher_started" in events
+
+
+# ---------------------------------------------------------------- review fixes
+
+PUSH_ENVELOPE = {
+    "message": {
+        "data": base64.urlsafe_b64encode(
+            json.dumps({"emailAddress": "a@example.com", "historyId": 1}).encode()
+        ).decode()
+    }
+}
+
+
+def test_bind_policy_enforced_at_startup_without_cli(env, monkeypatch):
+    """Direct uvicorn start must apply the same bind guard as ``mailroom serve``."""
+    import importlib
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    from mailroom_reloaded import settings
+
+    monkeypatch.setenv("MAILROOM_API_HOST", "0.0.0.0")
+    monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    settings.get_settings.cache_clear()
+    with pytest.raises(SystemExit):
+        app_mod._enforce_bind_policy()
+    monkeypatch.setenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", "1")
+    app_mod._enforce_bind_policy()
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND")
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "secret")
+    settings.get_settings.cache_clear()
+    app_mod._enforce_bind_policy()
+    calls = []
+    monkeypatch.setattr(app_mod, "_enforce_bind_policy", lambda: calls.append(1))
+    with TestClient(app_mod.app):
+        pass
+    assert calls == [1]
+
+
+def _push_client(env, monkeypatch, **envvars):
+    import importlib
+
+    from mailroom_reloaded import settings
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+
+    for k, v in envvars.items():
+        monkeypatch.setenv(k, v)
+    settings.get_settings.cache_clear()
+    monkeypatch.setattr(app_mod, "_gmail_poll_task", lambda: None)
+    return app_mod, TestClient(app_mod.app)
+
+
+def test_push_route_accepts_google_oidc_for_configured_service_account(env, monkeypatch):
+    app_mod, c = _push_client(
+        env, monkeypatch,
+        MAILROOM_API_TOKEN="secret",
+        MAILROOM_GMAIL_PUSH_AUDIENCE="https://host/v1/intake/gmail",
+        MAILROOM_GMAIL_PUSH_SERVICE_ACCOUNT="push@proj.iam.gserviceaccount.com",
+    )
+    good = {"email": "push@proj.iam.gserviceaccount.com", "email_verified": True}
+    seen = {}
+
+    def fake(token, audience):
+        seen["audience"] = audience
+        if token == "jwt-good":
+            return good
+        if token == "jwt-other":
+            return {**good, "email": "evil@x.com"}
+        if token == "jwt-unverified":
+            return {**good, "email_verified": False}
+        raise ValueError("bad signature")
+
+    monkeypatch.setattr(app_mod, "_verify_google_oidc", fake)
+    url = "/v1/intake/gmail"
+    hdr = lambda t: {"Authorization": f"Bearer {t}"}
+    assert c.post(url, json=PUSH_ENVELOPE, headers=hdr("jwt-good")).status_code == 204
+    assert seen["audience"] == "https://host/v1/intake/gmail"
+    assert c.post(url, json=PUSH_ENVELOPE, headers=hdr("secret")).status_code == 204
+    for bad in ("jwt-other", "jwt-unverified", "jwt-forged"):
+        assert c.post(url, json=PUSH_ENVELOPE, headers=hdr(bad)).status_code == 401
+    assert c.post(url, json=PUSH_ENVELOPE).status_code == 401
+    # other /v1 routes still reject a Google JWT
+    assert c.get("/v1/documents", headers=hdr("jwt-good")).status_code == 401
+
+
+def test_push_route_unconfigured_oidc_rejects_non_static_token(env, monkeypatch):
+    app_mod, c = _push_client(env, monkeypatch, MAILROOM_API_TOKEN="secret")
+    monkeypatch.setattr(app_mod, "_verify_google_oidc", lambda *_: pytest.fail("no OIDC"))
+    h = {"Authorization": "Bearer jwt"}
+    assert c.post("/v1/intake/gmail", json=PUSH_ENVELOPE, headers=h).status_code == 401

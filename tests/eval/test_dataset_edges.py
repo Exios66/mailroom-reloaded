@@ -150,3 +150,20 @@ def test_hf_fallback_preserves_original_error_without_matches():
     with pytest.raises(ValueError) as exc:
         _load_hf_config(SimpleNamespace(load_dataset=loader), "default", "rev", "test")
     assert exc.value is original
+
+
+@pytest.mark.parametrize("blind_names,truth_names", [
+    (["a.txt"], []),
+    ([], ["a.txt"]),
+    (["a.txt"], ["b.txt"]),
+])
+def test_join_rejects_unmatched_filenames(blind_names, truth_names):
+    from mailroom_reloaded.eval.dataset import _join
+
+    blind = [
+        {"filename": name, "doc_text": "text", "content_sha256": sha256_text("text")}
+        for name in blind_names
+    ]
+    truth = [{"filename": name, "expected": "contract"} for name in truth_names]
+    with pytest.raises(DatasetIntegrityError, match="Filename mismatch"):
+        _join(blind, truth)

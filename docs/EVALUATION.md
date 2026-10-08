@@ -213,7 +213,7 @@ The opt-in Jev gate is calibrated separately. `fit_jev_calibration`
 (`eval/jev_calibration.py:106-138`) fits temperature by binary NLL and then
 searches `accept_threshold` / `verify_threshold` on the **calibrated**
 confidence by balanced accuracy, reporting ECE before/after, and writes
-`models/jev_calibration.json` (`agents/jev.py:367-381`). It reuses
+`models/jev_calibration.json` (`load_jev_gate` in `agents/jev.py`). It reuses
 `train_gate._check_train`, so only `split="train"` rows are accepted and a
 non-`train` split raises `ValueError` (`eval/jev_calibration.py:115`).
 
@@ -223,9 +223,13 @@ uv run mailroom jev calibrate --rows rows.jsonl --out models/jev_calibration.jso
 ```
 
 Jev's shipped calibration is fit on the author's teacher/MASSIVE data and **does
-not transfer**; re-fit on your own rows (issue #8). `JevGate` currently reads
-only `accept_threshold` — `verify_threshold` is fit and stored but not yet
-consumed (`agents/jev.py:345-349`). See [JEV.md](JEV.md).
+not transfer**; re-fit on your own rows (issue #8). `JevGate.decide` consumes
+both thresholds with the official three-tier policy: `confidence <
+verify_threshold` → `human_review`; `verify_threshold <= confidence <
+accept_threshold` → `verify` (a Jev escalation choice such as
+`boss`/`human_review` is never downgraded to `verify`); `confidence >=
+accept_threshold` → the chosen action. With no calibration there is no verify
+band. See [JEV.md](JEV.md).
 
 ## Cross-links
 

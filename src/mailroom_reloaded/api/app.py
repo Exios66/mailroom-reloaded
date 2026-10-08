@@ -23,8 +23,13 @@ public so a load balancer and a browser can reach them.
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import json
 import os
+import re
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -95,7 +100,9 @@ def require_token(request: Request) -> None:
         return
     auth = request.headers.get("authorization", "")
     prefix = "Bearer "
-    if not auth.startswith(prefix) or auth[len(prefix) :].strip() != token:
+    if not auth.startswith(prefix) or not hmac.compare_digest(
+        auth[len(prefix) :].strip().encode("utf-8"), token.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Missing or invalid API token")
 
 
@@ -117,6 +124,24 @@ def assert_bind_allowed(host: str, token: str | None = None) -> None:
     )
 
 
+def _enforce_bind_policy() -> None:
+    """Apply the bind guard when the app is started without ``mailroom serve``.
+
+    ``uvicorn mailroom_reloaded.api.app:app --host 0.0.0.0`` never runs the CLI
+    check, so the lifespan re-checks ``MAILROOM_API_HOST``. Deployments whose
+    published port is already loopback-only (the dev compose file) opt out with
+    ``MAILROOM_ALLOW_UNAUTHENTICATED_BIND=1``.
+    """
+    if (os.environ.get("MAILROOM_ALLOW_UNAUTHENTICATED_BIND") or "").strip() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return
+    host = (os.environ.get("MAILROOM_API_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    assert_bind_allowed(host)
+
+
 # --------------------------------------------------------------------------- schemas
 
 
@@ -130,7 +155,54 @@ class ReviewResolve(BaseModel):
 # --------------------------------------------------------------------------- routes
 
 
+def _verify_google_oidc(token: str, audience: str) -> dict:
+    """Verify a Google-signed OIDC JWT (signature, expiry, audience)."""
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+
+    return id_token.verify_oauth2_token(token, google_requests.Request(), audience)
+
+
+def require_push_auth(request: Request) -> None:
+    """Auth for the Pub/Sub push route: static bearer token or Google OIDC JWT.
+
+    Pub/Sub cannot send a fixed bearer secret, only a signed OIDC token. When
+    ``MAILROOM_GMAIL_PUSH_AUDIENCE`` and ``MAILROOM_GMAIL_PUSH_SERVICE_ACCOUNT``
+    are set, a JWT for that audience from that service account is accepted; the
+    static ``MAILROOM_API_TOKEN`` (a relay) is still accepted. With neither
+    configured the route behaves like the other ``/v1`` routes.
+    """
+    settings = get_settings()
+    audience = (settings.gmail_push_audience or "").strip()
+    account = (settings.gmail_push_service_account or "").strip()
+    if not _configured_token() and not audience:
+        return
+    auth = request.headers.get("authorization", "")
+    prefix = "Bearer "
+    if not auth.startswith(prefix):
+        raise HTTPException(status_code=401, detail="Missing or invalid API token")
+    bearer = auth[len(prefix) :].strip()
+    token = _configured_token()
+    if token and hmac.compare_digest(bearer.encode("utf-8"), token.encode("utf-8")):
+        return
+    if audience and account:
+        try:
+            claims = _verify_google_oidc(bearer, audience)
+        except Exception:  # noqa: BLE001 - any verification failure is a 401
+            claims = None
+        if (
+            claims
+            and claims.get("email_verified") is True
+            and hmac.compare_digest(
+                str(claims.get("email", "")).encode("utf-8"), account.encode("utf-8")
+            )
+        ):
+            return
+    raise HTTPException(status_code=401, detail="Missing or invalid API token")
+
+
 api = APIRouter(prefix="/v1", dependencies=[Depends(require_token)])
+push_api = APIRouter(prefix="/v1", dependencies=[Depends(require_push_auth)])
 
 
 @api.post("/documents", status_code=202)
@@ -249,6 +321,8 @@ def list_runs_endpoint() -> dict:
 @api.get("/runs/{run_id}/cards")
 def run_cards_endpoint(run_id: str) -> dict:
     """Card JSONs for a run; empty until Task 21 writes them."""
+    if re.fullmatch(r"[0-9a-f]{12}", run_id) is None:
+        raise HTTPException(status_code=400, detail="Invalid run ID")
     cards_dir = get_settings().base_dir / "runs" / run_id / "cards"
     cards: list[dict] = []
     if cards_dir.is_dir():
@@ -294,7 +368,7 @@ def _gmail_poll_task() -> None:
         logger.warning("gmail_push_ingest_failed", exc_info=True)
 
 
-@api.post("/intake/gmail", status_code=204)
+@push_api.post("/intake/gmail", status_code=204)
 async def gmail_push_endpoint(
     request: Request, background: BackgroundTasks
 ) -> Response:
@@ -302,7 +376,7 @@ async def gmail_push_endpoint(
 
     The envelope's ``message.data`` is Base64URL-encoded JSON; the route
     validates it, schedules the fetch, and returns 204/200 immediately so the
-    Pub/Sub push is acknowledged. Same bearer guard as every other ``/v1`` route.
+    Pub/Sub push is acknowledged. Guarded by :func:`require_push_auth`.
     """
     try:
         payload = await request.json()
@@ -354,25 +428,55 @@ async def lifespan(application: FastAPI):
     ``split-watcher`` profile runs it as its own service and tests must not race
     a background drainer.
     """
+    _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)
-    stop = None
+    watcher = None
+    watcher_thread = None
     if _embed_watcher_enabled():
-        from mailroom_reloaded.watcher import Watcher
+        from mailroom_reloaded.watcher import Watcher, WatcherLockHeld
 
         watcher = Watcher(_bins(), f"api-{os.getpid()}", 1)
-        stop = watcher.stop
-        import threading
+        settled = threading.Event()  # set once started, or once it gave up
 
-        threading.Thread(
-            target=watcher.run_forever, name="mailroom-embedded-watcher", daemon=True
-        ).start()
+        def run_watcher() -> None:
+            try:
+                watcher.run_forever()
+            except WatcherLockHeld:
+                logger.warning(
+                    "embedded_watcher_not_started",
+                    reason="another watcher holds watcher.lock",
+                )
+            except Exception:
+                logger.exception("embedded_watcher_failed")
+            finally:
+                settled.set()
+
+        watcher_thread = threading.Thread(
+            target=run_watcher, name="mailroom-embedded-watcher", daemon=True
+        )
+        watcher_thread.start()
         application.state.watcher = watcher
-        logger.info("embedded_watcher_started")
+        application.state.watcher_thread = watcher_thread
+        ready = getattr(watcher, "ready", None)
+
+        def _wait_started() -> bool:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if ready is not None and ready.is_set():
+                    return True
+                if settled.wait(0.02):
+                    return ready is not None and ready.is_set()
+            return ready is not None and ready.is_set()
+
+        if await asyncio.to_thread(_wait_started):
+            logger.info("embedded_watcher_started")
     try:
         yield
     finally:
-        if stop is not None:
-            stop()
+        if watcher is not None:
+            watcher.stop()
+        if watcher_thread is not None:
+            await asyncio.to_thread(watcher_thread.join, timeout=30)
 
 
 def create_app() -> FastAPI:
@@ -384,6 +488,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(api)
+    application.include_router(push_api)
 
     @application.get("/health")
     def health() -> dict:

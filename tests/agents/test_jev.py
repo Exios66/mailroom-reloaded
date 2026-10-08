@@ -14,6 +14,7 @@ from mailroom_reloaded.agents.jev import (
     JevClient,
     JevError,
     JevGate,
+    _jev_questions,
     choice,
     load_jev_gate,
     noul,
@@ -142,12 +143,30 @@ def test_question_builders_shape():
         "r",
         {"type": "choice", "instructions": "i", "criteria": {"a": "A"}},
     )
-    assert noul("n", "i") == ("n", {"type": "noul", "instructions": "i", "criteria": {}})
+    assert noul("n", "i") == ("n", {"type": "noul", "instructions": "i"})
     assert noul("n", "i", {"x": "X"})[1]["criteria"] == {"x": "X"}
     assert score("s", "i", ["a", "b"]) == (
         "s",
         {"type": "score", "instructions": "i", "criteria": ["a", "b"]},
     )
+
+
+def test_jev_questions_noul_payload_is_schema_valid():
+    """The built route questions omit/validate ``criteria`` per the decisions schema."""
+    questions = _jev_questions()
+
+    escalate = questions["escalate"]
+    assert escalate["type"] == "noul"
+    assert "criteria" not in escalate
+
+    for question in questions.values():
+        if question["type"] == "noul":
+            # When present, noul criteria must be a non-empty true/false mapping.
+            criteria = question.get("criteria")
+            assert criteria is None or set(criteria) <= {"true", "false"}
+            assert criteria != {}
+        if "criteria" in question:
+            assert question["criteria"] not in ({}, None)
 
 
 def test_ask_no_key_omits_authorization():
@@ -406,3 +425,39 @@ def test_enabled_with_calibration_prefers_jev_gate(tmp_path, monkeypatch):
     gate = load_jev_gate()
     assert isinstance(gate, JevGate)
     assert isinstance(load_gate(), JevGate)
+
+
+def test_corrupt_calibration_falls_back_without_raising(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "jev_calibration.json").write_text("{ not valid json", encoding="utf-8")
+
+    assert load_jev_gate() is None
+    assert isinstance(load_gate(), BandGate)
+
+
+def test_incomplete_calibration_falls_back_without_raising(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "jev_calibration.json").write_text(
+        json.dumps({"temperature": 1.0}), encoding="utf-8"
+    )
+
+    assert load_jev_gate() is None
+    assert isinstance(load_gate(), BandGate)
+
+
+def test_invariant_violating_calibration_falls_back_without_raising(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    models = tmp_path / "models"
+    models.mkdir()
+    bad = {**_neutral_calibration(), "temperature": 0.0}
+    (models / "jev_calibration.json").write_text(json.dumps(bad), encoding="utf-8")
+
+    assert load_jev_gate() is None
+    assert isinstance(load_gate(), BandGate)

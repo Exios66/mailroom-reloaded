@@ -19,6 +19,7 @@ The artifact is a flat, clear JSON object written to
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
@@ -56,10 +57,32 @@ class JevCalibration:
     n: int
 
 
+def _validate_calibration(cal: JevCalibration) -> None:
+    """Raise ``ValueError`` when a calibration violates the gate invariants."""
+    if not math.isfinite(cal.temperature) or cal.temperature <= 0:
+        raise ValueError(
+            f"temperature must be finite and > 0, got {cal.temperature!r}"
+        )
+    if not (
+        math.isfinite(cal.verify_threshold)
+        and math.isfinite(cal.accept_threshold)
+        and 0.0 <= cal.verify_threshold <= cal.accept_threshold <= 1.0
+    ):
+        raise ValueError(
+            "require 0 <= verify_threshold <= accept_threshold <= 1, got "
+            f"verify={cal.verify_threshold!r}, accept={cal.accept_threshold!r}"
+        )
+
+
 def load_jev_calibration(path: str | Path) -> JevCalibration:
-    """Read a ``jev_calibration.json`` written by :func:`fit_jev_calibration`."""
+    """Read a ``jev_calibration.json`` written by :func:`fit_jev_calibration`.
+
+    Raises ``ValueError`` when the dataclass invariants are violated
+    (``temperature > 0`` and ``0 <= verify_threshold <= accept_threshold <= 1``),
+    so callers such as ``agents.jev.load_jev_gate`` can fall back safely.
+    """
     data = json.loads(Path(path).read_text("utf-8"))
-    return JevCalibration(
+    calibration = JevCalibration(
         temperature=float(data["temperature"]),
         accept_threshold=float(data["accept_threshold"]),
         verify_threshold=float(data["verify_threshold"]),
@@ -67,6 +90,8 @@ def load_jev_calibration(path: str | Path) -> JevCalibration:
         ece_after=float(data["ece_after"]),
         n=int(data["n"]),
     )
+    _validate_calibration(calibration)
+    return calibration
 
 
 def _candidates(values: np.ndarray) -> list[float]:
@@ -103,12 +128,37 @@ def _search_thresholds(q: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     return float(tied[-1]), float(tied[0])
 
 
+def _check_confidence(value: float) -> float:
+    """Return ``value`` if finite and within ``[0, 1]``, else raise ``ValueError``."""
+    if not math.isfinite(value) or not (0.0 <= value <= 1.0):
+        raise ValueError(
+            f"confidence must be finite and within [0, 1], got {value!r}"
+        )
+    return value
+
+
+def _check_finite_payload(payload: dict) -> None:
+    """Raise ``ValueError`` if any numeric payload field is NaN/Inf."""
+    for key in (
+        "temperature",
+        "accept_threshold",
+        "verify_threshold",
+        "ece_before",
+        "ece_after",
+    ):
+        value = payload[key]
+        if not math.isfinite(value):
+            raise ValueError(f"refusing to write non-finite {key}: {value!r}")
+
+
 def fit_jev_calibration(rows, out: Path) -> dict:
     """Fit Jev temperature scaling and thresholds; write ``out`` and return it.
 
     Every row must have ``split == 'train'``; otherwise ``ValueError`` is raised
     before anything is written. Missing ``confidence``/``correct`` keys raise
-    ``KeyError``. Empty input writes a neutral calibration and returns zeroed
+    ``KeyError``. A ``confidence`` that is non-finite or outside ``[0, 1]``
+    raises ``ValueError`` naming the offending value, so no NaN/Inf calibration
+    is ever written. Empty input writes a neutral calibration and returns zeroed
     ECE. The returned dict has ``temperature``, ``accept_threshold``,
     ``verify_threshold``, ``ece_before``, ``ece_after`` and ``n``.
     """
@@ -116,10 +166,13 @@ def fit_jev_calibration(rows, out: Path) -> dict:
     n = len(rows)
     if n == 0:
         payload: dict = {**_NEUTRAL, "ece_before": 0.0, "ece_after": 0.0, "n": 0}
+        _check_finite_payload(payload)
         _write_json(out, payload)
         return payload
 
-    conf = np.asarray([float(row["confidence"]) for row in rows], dtype=float)
+    conf = np.asarray(
+        [_check_confidence(float(row["confidence"])) for row in rows], dtype=float
+    )
     y = np.asarray([int(bool(row["correct"])) for row in rows], dtype=int)
     logits = np.asarray([_logit(v) for v in conf], dtype=float)
     temperature = _fit_temperature(logits, y)
@@ -134,5 +187,6 @@ def fit_jev_calibration(rows, out: Path) -> dict:
         "ece_after": ece(calibrated, y),
         "n": n,
     }
+    _check_finite_payload(payload)
     _write_json(out, payload)
     return payload
