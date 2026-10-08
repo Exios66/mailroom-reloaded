@@ -1,6 +1,9 @@
 """Offline dataset validation and sampling boundary cases."""
 
 import json
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -64,6 +67,43 @@ def test_loader_aliases_unicode_hashes_and_ground_truth_json(tmp_path):
         maud_clause_labels=["single label"],
         retry_expected=False,
     )
+
+
+def test_remote_loader_pins_revision_and_joins_by_filename(monkeypatch):
+    from mailroom_reloaded.eval.dataset import REPO
+
+    blind = [{"filename": "a.txt", "doc_text": "alpha"}, {"filename": "b.txt", "doc_text": "beta"}]
+    truth = [
+        {"filename": "b.txt", "content_sha256": sha256_text("beta"), "expected": "contract"},
+        {"filename": "a.txt", "content_sha256": sha256_text("alpha"), "expected": "correspondence"},
+    ]
+    load = Mock(side_effect=[blind, truth])
+    monkeypatch.setitem(sys.modules, "datasets", SimpleNamespace(load_dataset=load))
+
+    docs, gts = load_split(revision="pinned-revision", split="validation")
+
+    assert load.call_args_list == [
+        call(REPO, "default", revision="pinned-revision", split="validation"),
+        call(REPO, "ground_truth", revision="pinned-revision", split="validation"),
+    ]
+    assert docs == [BlindDoc("a.txt", "alpha", sha256_text("alpha")), BlindDoc("b.txt", "beta", sha256_text("beta"))]
+    assert gts["a.txt"].expected == "correspondence"
+    assert gts["b.txt"].expected == "contract"
+
+
+@pytest.mark.parametrize("declared", [sha256_text("alpha"), sha256_text("different")])
+def test_joined_ground_truth_hash_takes_precedence_over_blind_hash(tmp_path, declared):
+    # A stale blind-side hash must neither reject valid GT nor hide corrupt GT.
+    blind = {"filename": "a.txt", "doc_text": "alpha", "content_sha256": sha256_text("alpha") if declared != sha256_text("alpha") else "stale"}
+    truth = {"filename": "a.txt", "content_sha256": declared}
+    for filename, row in [("default.jsonl", blind), ("ground_truth.jsonl", truth)]:
+        (tmp_path / filename).write_text(json.dumps(row))
+    if declared == sha256_text("alpha"):
+        docs, _ = load_split(local_dir=tmp_path)
+        assert docs[0].content_sha256 == declared
+    else:
+        with pytest.raises(DatasetIntegrityError, match="content_sha256 mismatch"):
+            load_split(local_dir=tmp_path)
 
 
 @pytest.fixture
