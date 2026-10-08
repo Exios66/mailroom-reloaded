@@ -80,7 +80,7 @@ class ToolDef:
                 return f"error: invalid arguments for {self.name}: {msgs}"
             try:
                 return raw(ctx, **params.model_dump())
-            except Exception as exc:  # tools never raise
+            except Exception as exc:  # noqa: BLE001 - tools never raise
                 return f"error: {self.name} failed: {exc}"
 
         return replace(self, fn=call, bound=True)
