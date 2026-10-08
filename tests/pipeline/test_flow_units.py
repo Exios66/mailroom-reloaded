@@ -12,8 +12,9 @@ from pydantic import BaseModel
 from mailroom_reloaded.agents.arbiter import ArbiterDecision
 from mailroom_reloaded.agents.boss import BossDecision
 from mailroom_reloaded.agents.judge import JudgeVerdict
+from mailroom_reloaded.agents.sorter import SortResult
 from mailroom_reloaded.agents.specialists import ExtractResult
-from mailroom_reloaded.ingest.bert import Handoff, SortMode
+from mailroom_reloaded.ingest.bert import BertVerdict, Handoff, SortMode
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.pipeline.archivist import ArchiveResult
@@ -89,6 +90,37 @@ def test_classification_route_without_results_fails_closed(flow, action, route):
         == features.bert_window_agreement
         == 0
     )
+
+
+@pytest.mark.parametrize("resorted", [False, True])
+def test_routes_pass_disagreement_and_resort_history_to_gate(flow, resorted):
+    flow.state.sort = SortResult(
+        doc_type="correspondence", doc_subclass="email", confidence=0.85,
+        raw_confidence=0.9, calibrated=True, mode=SortMode.SUBCLASS_ONLY,
+        confidence_source="self_report", doc_type_disagree=True,
+        disagree_reason="contract instead", usage=Usage(),
+    )
+    flow.state.bert = BertVerdict(
+        available=True, reason="ok", calibrated_confidence=0.97,
+        margin=0.7, window_agreement=0.95,
+    )
+    flow.state.resorted = resorted
+    flow.state.extract = extraction()
+    flow._gate.decide.return_value = SimpleNamespace(action="proceed")
+
+    assert flow._classify_route() == "do_extract"
+    classify = flow._gate.decide.call_args.args[0]
+    assert classify.confidence == 0.85
+    assert (classify.bert_confidence, classify.bert_margin, classify.bert_window_agreement) == (0.97, 0.7, 0.95)
+    assert classify.doc_type_disagree is True
+    assert classify.resorted is resorted
+
+    assert flow._extract_route() == "report"
+    extract = flow._gate.decide.call_args.args[0]
+    assert extract.doc_type_disagree is True
+    assert extract.resorted is resorted
+    assert extract.schema_valid is True
+    assert extract.field_coverage == 1
 
 
 @pytest.mark.parametrize(
