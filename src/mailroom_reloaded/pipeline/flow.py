@@ -587,10 +587,12 @@ class MailroomFlow(Flow[MailroomState]):
                     node = "extract"
                 elif route == "retry_sort":
                     state.classify_attempts += 1
+                    self._resume_done.discard("sort")
                     node = "sort"
                 elif route == "re_sort":
                     state.resorted = True
                     self._reset_handoff_full()
+                    self._resume_done.discard("sort")
                     node = "sort"
                 else:
                     return self._park("classify_human_review")
@@ -601,6 +603,7 @@ class MailroomFlow(Flow[MailroomState]):
                     node = "report_catalog_archive"
                 elif route == "retry_extract":
                     state.extract_attempts += 1
+                    self._resume_done.discard("extract")
                     node = "extract"
                 elif route == "do_verify":
                     state.route_trail.append("verify")
@@ -611,6 +614,7 @@ class MailroomFlow(Flow[MailroomState]):
                     arbiter_route = self._arbiter_route()
                     if arbiter_route == "retry_extract":
                         state.extract_attempts += 1
+                        self._resume_done.discard("extract")
                         node = "extract"
                     elif arbiter_route == "do_boss":
                         node = "boss"
@@ -628,6 +632,7 @@ class MailroomFlow(Flow[MailroomState]):
                     return state
                 action = state.boss.action if state.boss is not None else "accept"
                 if action == "reassign_class":
+                    self._resume_done.discard("extract")
                     node = "extract"
                 elif action == "human_review":
                     return self._park("boss_human_review")
