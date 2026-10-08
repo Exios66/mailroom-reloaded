@@ -10,6 +10,7 @@ SQLite catalog and the hash-chained audit log:
 * ``GET /v1/documents`` / ``GET /v1/documents/{id}`` — catalog listing and one
   document's manifest + report.
 * ``GET /v1/audit/{id}`` — the document's audit entries and chain verification.
+* ``GET /v1/jev`` — Jev gate status (provider, calibration; never keys).
 * ``POST /v1/review/{id}/resolve`` — disposition a parked document.
 * ``GET /v1/runs`` / ``GET /v1/runs/{run_id}/cards`` — eval runs (SQLite) and
   card JSONs (empty until Task 21 lands).
@@ -288,6 +289,39 @@ def audit_endpoint(doc_id: str) -> dict:
         "doc_id": doc_id,
         "entries": [e.model_dump(mode="json") for e in entries],
         "chain": chain.model_dump(),
+    }
+
+
+@api.get("/jev")
+def jev_status_endpoint() -> dict:
+    """Jev (TypeSafe System One) gate status. Never exposes API keys."""
+    from dataclasses import asdict
+
+    from mailroom_reloaded.eval.jev_calibration import load_jev_calibration
+    from mailroom_reloaded.settings import jev_config
+
+    cfg = jev_config()
+    path = get_settings().base_dir / "models" / "jev_calibration.json"
+    calibration = None
+    if cfg.enabled and path.is_file():
+        try:
+            calibration = asdict(load_jev_calibration(path))
+        except (OSError, ValueError, KeyError, TypeError):
+            calibration = None
+    if cfg.enabled and calibration is not None:
+        gate = "jev"
+    elif (get_settings().base_dir / "models" / "route_gate.json").exists():
+        gate = "learned"
+    else:
+        gate = "band"
+    return {
+        "enabled": cfg.enabled,
+        "provider": cfg.provider,
+        "model": cfg.model or None,
+        "base_url": cfg.base_url or None,
+        "calibrated": calibration is not None,
+        "calibration": calibration,
+        "gate": gate,
     }
 
 

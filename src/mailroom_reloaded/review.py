@@ -28,9 +28,10 @@ import structlog
 
 from mailroom_reloaded.pipeline import flow as _flow
 from mailroom_reloaded.pipeline.state import MailroomState
+from mailroom_reloaded.schemas.audit import CatalogRecord
 from mailroom_reloaded.schemas.manifest import Manifest
 from mailroom_reloaded.settings import get_settings
-from mailroom_reloaded.storage import audit_log
+from mailroom_reloaded.storage import audit_log, catalog
 from mailroom_reloaded.storage.bins import Bins, load_manifest, save_manifest
 
 logger = structlog.get_logger(__name__)
@@ -114,6 +115,18 @@ def _resolve_claimed(
         manifest.state = state.model_dump(mode="json")
         save_manifest(bins, manifest)
         audit_log.append(doc_id, "review", "review_resolved", payload)
+        try:
+            catalog.upsert(
+                CatalogRecord(
+                    doc_id=doc_id,
+                    filename=manifest.filename,
+                    doc_type=state.sort.doc_type if state.sort else None,
+                    doc_subclass=state.sort.doc_subclass if state.sort else None,
+                    status="failed",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - catalog is best-effort durability
+            logger.warning("catalog_upsert_failed", doc_id=doc_id, error=str(exc))
         logger.info("review_rejected", doc_id=doc_id, reviewer=reviewer)
         return state
 

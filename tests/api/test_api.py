@@ -478,3 +478,53 @@ def test_push_route_unconfigured_oidc_rejects_non_static_token(env, monkeypatch)
     monkeypatch.setattr(app_mod, "_verify_google_oidc", lambda *_: pytest.fail("no OIDC"))
     h = {"Authorization": "Bearer jwt"}
     assert c.post("/v1/intake/gmail", json=PUSH_ENVELOPE, headers=h).status_code == 401
+
+
+def test_jev_status_off_by_default(env, monkeypatch, client):
+    for key in ("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER"):
+        monkeypatch.delenv(key, raising=False)
+    body = client.get("/v1/jev").json()
+    assert body["enabled"] is False
+    assert body["provider"] == "off"
+    assert body["calibrated"] is False and body["calibration"] is None
+    assert body["gate"] == "band"
+
+
+def test_jev_status_with_calibration_and_no_key_leak(env, monkeypatch, client):
+    import json
+
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    monkeypatch.setenv("MAILROOM_JEV_API_KEY", "sk-super-secret")
+    models = env / "models"
+    models.mkdir()
+    (models / "jev_calibration.json").write_text(
+        json.dumps(
+            {
+                "temperature": 1.1,
+                "accept_threshold": 0.9,
+                "verify_threshold": 0.6,
+                "ece_before": 0.2,
+                "ece_after": 0.05,
+                "n": 60,
+            }
+        )
+    )
+    resp = client.get("/v1/jev")
+    body = resp.json()
+    assert body["enabled"] is True and body["provider"] == "local"
+    assert body["calibrated"] is True and body["gate"] == "jev"
+    assert body["calibration"]["accept_threshold"] == 0.9
+    assert body["calibration"]["n"] == 60
+    assert "sk-super-secret" not in resp.text
+    assert "api_key" not in resp.text
+
+
+def test_jev_status_requires_token(env, monkeypatch):
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "t0k")
+    from fastapi.testclient import TestClient
+
+    from mailroom_reloaded.api.app import app
+
+    with TestClient(app) as c:
+        assert c.get("/v1/jev").status_code == 401
+        assert c.get("/v1/jev", headers={"Authorization": "Bearer t0k"}).status_code == 200

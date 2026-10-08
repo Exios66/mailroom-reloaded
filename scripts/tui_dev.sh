@@ -2,6 +2,7 @@
 # Local harness for the /tui browser terminal: mock LLM + API + embedded watcher.
 #   scripts/tui_dev.sh up|down|status
 #   MAILROOM_API_TOKEN=secret scripts/tui_dev.sh up    # exercise the auth path
+#   JEV=1 scripts/tui_dev.sh up    # also start the mock Jev, calibrate it, seed Jev docs
 # Loopback only. State lives under ./data/tui-dev (gitignored).
 set -euo pipefail
 
@@ -15,6 +16,8 @@ API_PORT="${TUI_API_PORT:-8000}"
 API="http://127.0.0.1:${API_PORT}"
 MOCK_PID="$STATE/mock.pid"
 API_PID="$STATE/api.pid"
+JEV_PID="$STATE/mock_jev.pid"
+JEV_PORT="${TUI_JEV_PORT:-8898}"
 
 alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
@@ -38,7 +41,7 @@ stop_one() {
 }
 
 up() {
-  if alive "$API_PID" || alive "$MOCK_PID"; then
+  if alive "$API_PID" || alive "$MOCK_PID" || alive "$JEV_PID"; then
     echo "tui_dev: already running (use 'down' first)" >&2
     exit 1
   fi
@@ -48,6 +51,25 @@ up() {
   echo $! >"$MOCK_PID"
   wait_http "http://127.0.0.1:${MOCK_PORT}/health" "mock provider" "$MOCK_PID"
 
+  local -a jev_env=()
+  if [[ "${JEV:-}" == "1" ]]; then
+    uv run uvicorn --app-dir deploy mock_jev:app --host 127.0.0.1 --port "$JEV_PORT" \
+      >"$STATE/mock_jev.log" 2>&1 &
+    echo $! >"$JEV_PID"
+    wait_http "http://127.0.0.1:${JEV_PORT}/health" "mock jev" "$JEV_PID"
+    mkdir -p "$BASE/models"
+    uv run python scripts/jev_dev_rows.py >"$STATE/jev_rows.jsonl"
+    uv run mailroom jev calibrate --rows "$STATE/jev_rows.jsonl" \
+      --out "$BASE/models/jev_calibration.json" >"$STATE/jev_calibrate.log"
+    jev_env=(
+      "MAILROOM_JEV_PROVIDER=local"
+      "MAILROOM_JEV_BASE_URL=http://127.0.0.1:${JEV_PORT}/v1/systemone"
+    )
+  else
+    rm -f "$BASE/models/jev_calibration.json"
+  fi
+
+  env ${jev_env[@]+"${jev_env[@]}"} \
   MOCK_BASE_URL="http://127.0.0.1:${MOCK_PORT}/v1" \
   DEFAULT_PROVIDER=mock \
   MAILROOM_BASE_DIR="$BASE" \
@@ -58,16 +80,21 @@ up() {
 
   mkdir -p "$BASE/inbox"
   cp scripts/tui_seed/* "$BASE/inbox/"
+  if [[ "${JEV:-}" == "1" ]]; then cp scripts/tui_seed_jev/* "$BASE/inbox/"; fi
   echo "tui_dev: up"
   echo "  tui   $API/tui"
   echo "  ui    $API/ui"
   echo "  mock  http://127.0.0.1:${MOCK_PORT}"
   if [[ -n "${MAILROOM_API_TOKEN:-}" ]]; then echo "  token set"; else echo "  token none"; fi
+  if [[ "${JEV:-}" == "1" ]]; then
+    echo "  jev   http://127.0.0.1:${JEV_PORT} (gate: $API/v1/jev)"
+  fi
   echo "  pids  mock=$(cat "$MOCK_PID") api=$(cat "$API_PID")"
 }
 
 down() {
   stop_one "$API_PID"
+  stop_one "$JEV_PID"
   stop_one "$MOCK_PID"
   echo "tui_dev: down"
 }
@@ -78,6 +105,10 @@ status() {
     if alive "${pair#*:}"; then echo "${pair%%:*}: running (pid $(cat "${pair#*:}"))"
     else echo "${pair%%:*}: stopped"; rc=1; fi
   done
+  if [[ -f "$JEV_PID" ]]; then
+    if alive "$JEV_PID"; then echo "jev: running (pid $(cat "$JEV_PID"))"
+    else echo "jev: stopped"; rc=1; fi
+  fi
   if curl -fsS "$API/health" >/dev/null 2>&1; then echo "health: ok"; else echo "health: unreachable"; rc=1; fi
   return "$rc"
 }

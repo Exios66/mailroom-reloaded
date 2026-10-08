@@ -269,3 +269,27 @@ threshold, the leakage guard and the neutral empty calibration.
 - [CONFIGURATION.md](CONFIGURATION.md) — env vars and the `jev:` taxonomy block.
 - [EVALUATION.md](EVALUATION.md) — Jev calibration in the fitting workflow.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the gate slot Jev can back.
+
+## Local dev with Jev
+
+`JEV=1 scripts/tui_dev.sh up` wires the opt-in gate end-to-end with no network:
+
+- `deploy/mock_jev.py` (`127.0.0.1:8898`, `POST /v1/systemone`, `GET /health`)
+  answers the `route` choice and `escalate` noul questions deterministically
+  from the gate features (confidence >= 0.90 proceed, 0.87-0.90 verify, lower
+  escalates), or from a `[jev:proceed|verify|boss|...]` marker in a string state.
+- `scripts/jev_dev_rows.py` emits 60 synthetic `split=train` rows;
+  `mailroom jev calibrate` writes `data/tui-dev/base/models/jev_calibration.json`.
+- The API runs with `MAILROOM_JEV_PROVIDER=local` and
+  `MAILROOM_JEV_BASE_URL=http://127.0.0.1:8898/v1/systemone`.
+- `deploy/mock_openai.py` honours a `[confidence:0.NN]` marker in the document
+  text, so seeded docs (`scripts/tui_seed_jev/*.txt`) land in the correspondence
+  classify medium band (0.85 <= c < 0.95), where the gate consults Jev.
+- Observe it: `GET /v1/jev` (provider, calibration, active `gate`; never keys)
+  and `GET /v1/audit/{doc_id}`, whose `gate_classify` / `gate_extract`
+  `gate_decision` entries carry `source` (`band`, `rule`, `model` or `jev`).
+
+Caveat: dev correspondence extraction confidence is `0.6*coverage + 0.4`, which
+never lands in the extract medium band, so only the classify gate consults Jev
+locally. Classify has no `verify` route, so a Jev `verify` parks the document.
+Without `JEV=1` the stack is unchanged and `GET /v1/jev` reports `gate: band`.

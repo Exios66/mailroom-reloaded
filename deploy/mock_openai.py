@@ -1,6 +1,7 @@
 """Dev-only OpenAI endpoint: fixed synthetic correspondence, no inference."""
 
 import json
+import re
 
 from fastapi import FastAPI, HTTPException
 
@@ -19,6 +20,21 @@ EXTRACT = {
 }
 
 
+_MARKER = re.compile(r"\[confidence:(\d?\.\d+)\]")
+
+
+def _marker_confidence(body: dict) -> float | None:
+    """A ``[confidence:0.NN]`` marker in any message overrides the confidence."""
+    for message in body.get("messages", []):
+        content = message.get("content")
+        if isinstance(content, list):
+            content = " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+        match = _MARKER.search(content) if isinstance(content, str) else None
+        if match:
+            return min(max(float(match.group(1)), 0.0), 1.0)
+    return None
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -30,10 +46,13 @@ def complete(body: dict):
         raise HTTPException(400, "The dev mock supports non-streaming requests only")
     schema = body.get("response_format", {}).get("json_schema", {}).get("schema", {})
     properties = schema.get("properties", {})
+    marker = _marker_confidence(body)
     if "doc_subclass" in properties:
-        content = json.dumps({key: value for key, value in SORT.items() if key in properties})
+        sort = dict(SORT, **({"confidence": marker} if marker is not None else {}))
+        content = json.dumps({key: value for key, value in sort.items() if key in properties})
     elif "sender" in properties:
-        content = json.dumps(EXTRACT)
+        extract = dict(EXTRACT, **({"confidence": marker} if marker is not None else {}))
+        content = json.dumps(extract)
     elif schema:
         raise HTTPException(400, "The dev mock supports correspondence schemas only")
     else:
