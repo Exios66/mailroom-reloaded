@@ -186,6 +186,19 @@ def test_context_overflow_400_propagates_and_does_not_poison_cache(mock_provider
     assert len(mock_provider.requests) == 1
 
 
+def test_context_overflow_400_mentioning_tools_propagates(mock_provider):
+    import openai
+
+    from mailroom_reloaded.llm import tooling
+
+    mock_provider.fail(
+        400, message="maximum context length is 8192 tokens; messages 8000 + tools 900"
+    )
+    with pytest.raises(openai.BadRequestError):
+        _run()
+    assert tooling._NO_TOOLS == set()
+
+
 def test_tool_unsupported_400_falls_back_and_caches(mock_provider):
     from mailroom_reloaded.llm import tooling
 

@@ -60,11 +60,15 @@ def reset_tool_support_cache() -> None:
 
 
 _TOOL_REJECTION_MARKERS = ("tool", "function")
+# A 400 about request size or our own tool schema is a real error, not missing support.
+_NOT_TOOL_SUPPORT_MARKERS = ("context length", "context window", "too many tokens", "invalid schema")
 
 
 def is_tool_rejection(exc: Exception) -> bool:
     """A 400 whose body says the endpoint/model does not support tool calling."""
     text = str(exc).lower()
+    if any(m in text for m in _NOT_TOOL_SUPPORT_MARKERS):
+        return False
     return any(m in text for m in _TOOL_REJECTION_MARKERS)
 
 
