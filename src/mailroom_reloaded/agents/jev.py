@@ -348,10 +348,19 @@ class JevGate:
             else float(self.client.cfg.accept_threshold)
         )
         confidence = self._confidence(route)
-        if confidence is None or confidence < accepted:
+        # Three-tier official pattern: below verify -> a human; the medium band
+        # (< accept) proceeds with caution via ``verify``; at/above accept the
+        # chosen action is trusted. Without a calibration there is no verify
+        # band, so behaviour matches the pre-calibration single-threshold gate.
+        verify = (
+            float(self.calibration.verify_threshold)
+            if self.calibration is not None
+            else accepted
+        )
+        if confidence is None or confidence < verify:
             return GateDecision(
                 "human_review",
-                f"jev confidence {confidence} < accept {accepted}",
+                f"jev confidence {confidence} < verify {verify}",
                 "jev",
             )
         if escalate is not None and escalate.noul is not None and escalate.noul >= _NOUL_ESCALATE:
@@ -360,6 +369,18 @@ class JevGate:
             )
         if route.choice not in ("proceed", "retry", "verify", "boss", "human_review"):
             return GateDecision("human_review", f"jev unknown action {route.choice!r}", "jev")
+        if confidence < accepted:
+            if route.choice in ("proceed", "verify"):
+                return GateDecision(
+                    "verify",
+                    f"jev confidence {confidence} in verify band (< accept {accepted})",
+                    "jev",
+                )
+            return GateDecision(
+                "human_review",
+                f"jev confidence {confidence} < accept {accepted}",
+                "jev",
+            )
         action: Action = route.choice  # type: ignore[assignment]
         return GateDecision(action, f"jev choice {route.choice} p={confidence:.3f}", "jev")
 

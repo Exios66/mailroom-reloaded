@@ -321,7 +321,37 @@ def test_jev_gate_uses_calibration_accept_threshold():
         n=1,
     )
     decision = JevGate(BandGate(load_taxonomy()), client, calibration).decide(_feature())
-    assert decision.action == "human_review"
+    assert decision.action == "verify"  # 0.5 <= 0.9 < 0.95 -> medium band
+    assert decision.source == "jev"
+
+
+def test_jev_gate_below_verify_threshold_is_human_review():
+    client = StubClient({"route": _ans("choice", choice="proceed", confidence=0.4)})
+    calibration = JevCalibration(
+        temperature=1.0,
+        accept_threshold=0.95,
+        verify_threshold=0.5,
+        ece_before=0.0,
+        ece_after=0.0,
+        n=1,
+    )
+    decision = JevGate(BandGate(load_taxonomy()), client, calibration).decide(_feature())
+    assert decision.action == "human_review"  # 0.4 < verify 0.5
+    assert decision.source == "jev"
+
+
+def test_jev_gate_medium_band_keeps_escalation_choice():
+    client = StubClient({"route": _ans("choice", choice="boss", confidence=0.9)})
+    calibration = JevCalibration(
+        temperature=1.0,
+        accept_threshold=0.95,
+        verify_threshold=0.5,
+        ece_before=0.0,
+        ece_after=0.0,
+        n=1,
+    )
+    decision = JevGate(BandGate(load_taxonomy()), client, calibration).decide(_feature())
+    assert decision.action == "human_review"  # escalation is never downgraded to verify
     assert decision.source == "jev"
 
 
