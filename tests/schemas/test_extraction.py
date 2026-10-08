@@ -106,3 +106,37 @@ def test_assess_schema_invalid():
     res = assess_payload("correspondence", {"parties": 3, "demand_amount": "lots"})
     assert res.schema_valid is False
     assert res.parsed is not None
+
+
+@pytest.mark.parametrize("doc_type", ["contract", "merger_agreement"])
+def test_reasoning_first_and_strict(doc_type):
+    schema = response_format(doc_type)["json_schema"]["schema"]
+    assert next(iter(schema["properties"])) == "reasoning"
+    assert "reasoning" in schema["required"]
+    defs = schema["$defs"]
+    assert {"Reasoning", "ReasoningEntry"} <= set(defs)
+    for d in defs.values():
+        assert d["additionalProperties"] is False
+        assert sorted(d["required"]) == sorted(d["properties"])
+
+
+@pytest.mark.parametrize("doc_type", ["corporate_record", "correspondence", "insurance_claim"])
+def test_other_classes_have_no_reasoning(doc_type):
+    assert "reasoning" not in response_format(doc_type)["json_schema"]["schema"]["properties"]
+
+
+def test_reasoning_payload_validates():
+    payload = {
+        "reasoning": {
+            "summary": "s",
+            "entries": [{"field": "governing_law", "evidence": "Section 9", "section_ref": "9.1"}],
+        },
+        "parties": ["A", "B"],
+    }
+    res = assess_payload("contract", payload)
+    assert res.schema_valid and res.coerced_fields == []
+
+
+def test_legacy_dict_reasoning_coerced():
+    res = assess_payload("merger_agreement", {"reasoning": {"governing_law": "Delaware per s.9"}})
+    assert res.schema_valid and "reasoning" in res.coerced_fields

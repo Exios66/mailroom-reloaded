@@ -38,7 +38,9 @@ def _coerce_money(v: Any) -> Any:
 
 
 def _coerce_date(v: Any) -> Any:
-    """Accept date/datetime objects (and ints are left alone) as ISO strings."""
+    """Serves direct Python callers (date objects); model JSON only ever carries strings.
+
+    Accept date/datetime objects (and ints are left alone) as ISO strings."""
     if isinstance(v, _dt.datetime):
         return v.isoformat()
     if isinstance(v, _dt.date):
@@ -46,7 +48,38 @@ def _coerce_date(v: Any) -> Any:
     return v
 
 
+class ReasoningEntry(BaseModel):
+    field: str
+    evidence: str | None = None
+    section_ref: str | None = None
+
+
+class Reasoning(BaseModel):
+    """Per-field reasoning trace the frozen prompts ask for: {summary, entries[]}."""
+
+    summary: str | None = None
+    entries: list[ReasoningEntry] | None = None
+
+
+def _coerce_reasoning(v: Any) -> Any:
+    """Accept legacy free-form dict traces by folding them into {summary, entries}."""
+    if not isinstance(v, dict) or not v or set(v) <= {"summary", "entries"}:
+        return v
+    entries = []
+    for k, val in v.items():
+        if k in ("summary", "entries"):
+            continue
+        entries.append({"field": str(k), "evidence": None if val is None else str(val)})
+    out: dict[str, Any] = {"entries": entries}
+    if isinstance(v.get("summary"), str):
+        out["summary"] = v["summary"]
+    if isinstance(v.get("entries"), list):
+        out["entries"] = v["entries"] + entries
+    return out
+
+
 class ContractExtraction(BaseModel):
+    reasoning: Reasoning | None = None  # first: prompt says produce it before the values
     document_name: str | None = None
     parties: list[str] = Field(default_factory=list)
     effective_date: str | None = None
@@ -58,12 +91,13 @@ class ContractExtraction(BaseModel):
     merger_consideration: str | None = None
     cuad_clauses: list[str] = Field(default_factory=list)
     maud_clauses: list[str] = Field(default_factory=list)
-    reasoning: dict | None = None
 
+    _reasoning = field_validator("reasoning", mode="before")(_coerce_reasoning)
     _dates = field_validator("effective_date", mode="before")(_coerce_date)
 
 
 class MergerAgreementExtraction(BaseModel):
+    reasoning: Reasoning | None = None  # first: prompt says produce it before the values
     document_name: str | None = None
     parties: list[str] = Field(default_factory=list)
     effective_date: str | None = None
@@ -75,8 +109,8 @@ class MergerAgreementExtraction(BaseModel):
     subject_matter: str | None = None
     keywords: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-    reasoning: dict | None = None
 
+    _reasoning = field_validator("reasoning", mode="before")(_coerce_reasoning)
     _dates = field_validator("effective_date", mode="before")(_coerce_date)
 
 
@@ -154,10 +188,6 @@ def get_extraction_schema(doc_type: str) -> type[BaseModel]:
 
 # --------------------------------------------------------------------------- strict schema
 
-# Open-ended objects cannot satisfy OpenAI strict mode; these trace-only keys are omitted.
-_STRICT_OMIT = frozenset({"reasoning"})
-
-
 def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
     if "anyOf" in prop:
         if any(b.get("type") == "null" for b in prop["anyOf"]):
@@ -182,9 +212,6 @@ def _strictify(node: Any) -> None:
         node.pop("default", None)
         if node.get("type") == "object" or "properties" in node:
             props = node.setdefault("properties", {})
-            for k in list(props):
-                if k in _STRICT_OMIT:
-                    del props[k]
             for k in props:
                 props[k] = _make_nullable(props[k])
             node["required"] = list(props)
@@ -280,10 +307,13 @@ def _pydantic_valid(doc_type: str, payload: dict[str, Any]) -> tuple[bool, list[
         validated = model.model_validate(payload)
     except ValidationError:
         return False, []
-    coerced = [
-        k for k, v in payload.items()
-        if k in model.model_fields and getattr(validated, k) != v
-    ]
+    def _changed(k: str, v: Any) -> bool:
+        got = getattr(validated, k)
+        if isinstance(got, BaseModel):
+            return got.model_dump(exclude_unset=True) != v
+        return got != v
+
+    coerced = [k for k, v in payload.items() if k in model.model_fields and _changed(k, v)]
     return True, sorted(coerced)
 
 
