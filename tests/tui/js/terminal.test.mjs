@@ -123,3 +123,17 @@ test('renderBanner wraps the art in div.title-card > pre.banner as text only', (
   assert.equal(pre.textContent, HOSTILE);
   assert.equal(pre.children.length, 0);
 });
+
+test('renderTable passes (rowIndex, colIndex) to cellClass', () => {
+  const doc = makeDoc();
+  const seen = [];
+  const table = renderTable(doc, ['a', 'b'], [['1', 'x'], ['2', 'y']], {
+    cellClass: (r, c) => {
+      seen.push([r, c]);
+      return c === 1 ? 'success' : '';
+    },
+  });
+  assert.deepEqual(seen, [[0, 0], [0, 1], [1, 0], [1, 1]]);
+  const tbody = table.children[1];
+  assert.equal(tbody.children[1].children[1].className.includes('success'), true);
+});

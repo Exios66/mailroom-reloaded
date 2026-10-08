@@ -47,14 +47,14 @@ export function renderTable(doc, headers, rows, opts = {}) {
   thead.appendChild(headRow);
   table.appendChild(thead);
   const tbody = el(doc, 'tbody');
-  for (const row of rows) {
+  rows.forEach((row, rowIdx) => {
     const tr = el(doc, 'tr');
     row.forEach((cell, col) => {
-      const cls = opts.cellClass ? opts.cellClass(row, col) : '';
+      const cls = opts.cellClass ? opts.cellClass(rowIdx, col) : '';
       tr.appendChild(el(doc, 'td', cls || '', cell));
     });
     tbody.appendChild(tr);
-  }
+  });
   table.appendChild(tbody);
   return table;
 }

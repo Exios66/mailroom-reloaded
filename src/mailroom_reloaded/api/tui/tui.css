@@ -411,3 +411,13 @@ table.mr td.success { color: var(--term-green); }
 table.mr td.error { color: var(--term-red); }
 table.mr td.warn { color: var(--term-amber-bright, var(--term-amber)); }
 table.mr td.info { color: var(--term-cyan); }
+
+/* keep ids, types and statuses whole; only the long filename column wraps */
+table.mr th, table.mr td { white-space: nowrap; }
+table.mr td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; min-width: 12ch; }
+
+@media (max-width: 640px) {
+  /* tables scroll inside themselves rather than crushing columns or the page */
+  table.mr { display: block; overflow-x: auto; max-width: 100%; }
+  table.mr td:nth-child(2) { white-space: nowrap; }
+}

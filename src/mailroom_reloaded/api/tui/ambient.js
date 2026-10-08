@@ -140,6 +140,7 @@ export function createAmbient(root, { reducedMotion = false, storage, rnd = Math
       if (name === 'hc') st.phosphor = null;
     } else if (name === 'amber') {
       st.phosphor = null;
+      if (st.theme === 'hc') st.theme = 'dark';
     } else {
       st.phosphor = name;
       if (st.theme === 'hc') st.theme = 'dark';
