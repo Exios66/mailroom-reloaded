@@ -1,0 +1,16 @@
+/* Mailroom terminal: component styles. Placeholder shell rules; filled in by a later task. */
+html, body {
+  margin: 0;
+  background: var(--term-bg-deep);
+  color: var(--term-fg);
+  font: var(--text-term-body, 400 14px/1.55 "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace);
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.terminal {
+  padding: var(--term-pad-y) var(--term-pad-x);
+}
+
+.ambient-skyline, .grain, .crt-overlay {
+  pointer-events: none;
+}

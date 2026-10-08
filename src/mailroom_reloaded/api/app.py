@@ -48,6 +48,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -74,6 +75,7 @@ _ACCEPTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".rtf", ".html", ".htm"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 _UI_INDEX = Path(__file__).parent / "ui" / "index.html"
+_TUI_DIR = Path(__file__).parent / "tui"
 
 
 # --------------------------------------------------------------------------- config
@@ -507,6 +509,20 @@ def create_app() -> FastAPI:
         if not _UI_INDEX.is_file():
             raise HTTPException(status_code=404, detail="UI is not packaged")
         return FileResponse(_UI_INDEX, media_type="text/html")
+
+    @application.get("/tui")
+    @application.get("/tui/")
+    def tui() -> FileResponse:
+        """Serve the browser terminal shell (public, like ``/ui``)."""
+        index = _TUI_DIR / "index.html"
+        if not index.is_file():
+            raise HTTPException(status_code=404, detail="TUI is not packaged")
+        return FileResponse(index, media_type="text/html")
+
+    if _TUI_DIR.is_dir():
+        application.mount(
+            "/tui/assets", StaticFiles(directory=_TUI_DIR), name="tui-assets"
+        )
 
     return application
 
