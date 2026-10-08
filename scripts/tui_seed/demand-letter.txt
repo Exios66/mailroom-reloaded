@@ -1,0 +1,11 @@
+From: alice@example.com
+To: bob@example.com
+Date: 2026-01-02
+Subject: Payment demand
+
+Dear Bob,
+
+Please remit the outstanding balance of $1,000.00 by Friday. Reply to confirm.
+
+Regards,
+Alice

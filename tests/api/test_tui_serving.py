@@ -75,3 +75,8 @@ def test_tui_public_with_token_set(env, monkeypatch, client):
 def test_ui_unchanged(client):
     """Verify /ui still serves."""
     assert client.get("/ui").status_code == 200
+
+
+def test_ui_header_links_to_tui(client):
+    """Verify the /ui header carries the tui link."""
+    assert 'href="/tui"' in client.get("/ui").text
