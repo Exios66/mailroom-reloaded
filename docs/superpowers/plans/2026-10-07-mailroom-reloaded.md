@@ -76,13 +76,13 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.** Expected assertions:
+- [x] **Step 1: Write the failing tests.** Expected assertions:
   - `test_taxonomy_has_five_live_classes`: `set(load_taxonomy().classes) == {"contract","merger_agreement","corporate_record","correspondence","insurance_claim"}`.
   - `test_confidence_by_class`: `confidence_for("insurance_claim").judge_band_high == 0.92`, `confidence_for(None).low == 0.70`.
   - `test_specialist_conditions`: `specialist_conditions("contract") == RunConditions(24000, 8192, 0.7, 2, "frozen")`.
   - `test_no_forbidden_imports`: walk `src/` with `ast`; no import root in `{"langgraph","langchain","langchain_core","langchain_openai","langfuse","braintrust","litellm"}`. Also parse `pyproject.toml` dependencies for the same names.
-- [ ] **Step 2: Run the tests and confirm they fail.** Run `uv run pytest tests/test_settings.py tests/test_dependency_fence.py -v`. Expected: ImportError.
-- [ ] **Step 3: Write `pyproject.toml`, `settings.py` and `taxonomy.yaml`.**
+- [x] **Step 2: Run the tests and confirm they fail.** Run `uv run pytest tests/test_settings.py tests/test_dependency_fence.py -v`. Expected: ImportError.
+- [x] **Step 3: Write `pyproject.toml`, `settings.py` and `taxonomy.yaml`.**
   - `pyproject.toml` (hatchling):
     - Core deps: crewai, openai, pydantic, pydantic-settings, pyyaml, structlog, fastapi, uvicorn, sqlalchemy, pypdf, pdfplumber, pymupdf, python-docx, reportlab, watchdog, httpx, python-dateutil, jellyfish, numpy, opentelemetry-sdk, opentelemetry-exporter-otlp, openinference-instrumentation-crewai, openinference-instrumentation-openai.
     - Extras: `bert` (mailroom-ml[serve] @ git+https://github.com/LLM-Mailroom-Services/mailroom-ml.git), `eval` (datasets, pandas, matplotlib), `embeddings` (scipy, sentence-transformers), `deploy` (modal==1.5.5), `dev` (pytest, pytest-asyncio, respx, scikit-learn, ruff), `parity` (llm-dojo-scoring @ git tag v0.21.0, same URL as in `L/pyproject.toml`).
@@ -90,8 +90,8 @@
     - Drop `gateway`, `free_model_swarm`, `free_quota`, `ollama_model_map`, `relations`, `gmail_triage`, `sorter_reviewer`.
     - Add a `bert:` block (`enabled: false`, `defer_classes: [contract, merger_agreement]`, `max_trusted_windows: 1`).
     - Add a `specialist_conditions:` block with the Global Constraints values.
-- [ ] **Step 4: Run the tests and confirm they pass.** Same command. Expected: PASS.
-- [ ] **Step 5: Commit.** `git add -A && git commit -m "feat: scaffold package, taxonomy contract, dependency fence"`
+- [x] **Step 4: Run the tests and confirm they pass.** Same command. Expected: PASS.
+- [x] **Step 5: Commit.** `git add -A && git commit -m "feat: scaffold package, taxonomy contract, dependency fence"`
 
 ### Task 2: Vendored scoring subset
 
@@ -113,16 +113,16 @@
 
 **Steps:**
 
-- [ ] **Step 1: Copy the modules.** Copy them verbatim from `D/llm_dojo_scoring/` and rewrite `llm_dojo_scoring.` imports to relative imports. Strip unused functions only if they import modules outside this set. Record the upstream tag and per-file sha256 in `PARITY.md`.
-- [ ] **Step 2: Write the tests.**
+- [x] **Step 1: Copy the modules.** Copy them verbatim from `D/llm_dojo_scoring/` and rewrite `llm_dojo_scoring.` imports to relative imports. Strip unused functions only if they import modules outside this set. Record the upstream tag and per-file sha256 in `PARITY.md`.
+- [x] **Step 2: Write the tests.**
   - `test_fbeta_f2`: `fbeta(0.5, 1.0, beta=2) == pytest.approx(0.8333, abs=1e-4)`.
   - `test_money_exact_after_normalisation`: `score_field("money", "$1,000.00", "1000")` == 1.0.
   - `test_date_partial_credit`: same year and month but a different day scores between 0 and 1.
   - `test_entity_list_hungarian`: two reordered names score 1.0.
   - `test_subclass_vocab_covers_dataset_strata`: the union over the 5 classes has `len >= 55` and contains `"all_cash"`.
   - `test_parity_with_upstream`: `pytest.importorskip("llm_dojo_scoring")`. For 10 fixture pairs in `tests/scoring/fixtures/pairs.json` (copied from `L/src/tests` dojo parity fixtures), vendored `score_extraction(...).overall` equals upstream.
-- [ ] **Step 3: Run and fix until all pass.** Run `uv run pytest tests/scoring -v`. Expected: PASS (parity is SKIPPED without the `parity` extra).
-- [ ] **Step 4: Commit.** `git commit -am "feat: vendor slim llm-dojo-scoring v0.21.0 subset"`
+- [x] **Step 3: Run and fix until all pass.** Run `uv run pytest tests/scoring -v`. Expected: PASS (parity is SKIPPED without the `parity` extra).
+- [x] **Step 4: Commit.** `git commit -am "feat: vendor slim llm-dojo-scoring v0.21.0 subset"`
 
 ### Task 3: Prompts with sha256 lock
 
@@ -144,7 +144,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Export the prompt bytes.**
+- [x] **Step 1: Export the prompt bytes.**
   - frozen_v1: write `D.prompts.get_prompt(agent, family="production_prompts").text` for each agent and check it against `L/src/llm/frozen_v1/lineage.json` sha256. Store the text after the provenance HTML comment only if that is what the lineage hash covers; verify both ways and keep the variant whose sha matches.
   - sand37: copy `S/config/prompts/<sandbox_stem>.txt` byte-identical and copy the lineage JSON.
   - maud_v1: copy from `S/config/prompts/merger_agreement_specialist_maud_v1.txt`.
@@ -152,13 +152,13 @@
   - Judge, arbiter and boss: copy from `judge.production.md`, `judge-correctness.production.md`, `arbiter.production.md` and `boss.production.md`.
   - `judge_grade.md`: new. It instructs field-by-field grading against supplied ground truth, using the labels `correct|partial|wrong|missing|hallucinated` and JSON output matching `JudgeGrade` (Task 14).
   - `sorter_subclass_scope.md`: new. It covers the locked `doc_type`, the allowed subclass list placeholder `{subclasses}`, and the `doc_type_disagree` escape.
-- [ ] **Step 2: Write the tests.**
+- [x] **Step 2: Write the tests.**
   - `test_every_frozen_prompt_matches_lineage` (both sets, all 5 specialists).
   - `test_tampered_prompt_raises`: monkeypatch the read bytes; expect `PromptLockError`.
   - `test_unknown_prompt_keyerror`.
-- [ ] **Step 3: Implement `loader.py`.** Use `importlib.resources`. Check the sha256 for any name listed in a lineage file; cache with `lru_cache`.
-- [ ] **Step 4: Run the tests.** Run `uv run pytest tests/test_prompts.py -v`. Expected: PASS.
-- [ ] **Step 5: Commit.** `git commit -am "feat: vendor frozen_v1 and sand37 prompts with sha256 lock"`
+- [x] **Step 3: Implement `loader.py`.** Use `importlib.resources`. Check the sha256 for any name listed in a lineage file; cache with `lru_cache`.
+- [x] **Step 4: Run the tests.** Run `uv run pytest tests/test_prompts.py -v`. Expected: PASS.
+- [x] **Step 5: Commit.** `git commit -am "feat: vendor frozen_v1 and sand37 prompts with sha256 lock"`
 
 ### Task 4: Extraction schemas and schema compliance
 
@@ -174,15 +174,15 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_response_format_is_strict` covers every class: `additionalProperties is False`, and `required` equals all property names.
   - `test_insurance_gt_shape_validates`: a dict built from the dataset column list in the spec validates. Money arrives as a string `"$12,500.00"`, and the dates are ISO strings.
   - `test_assess_parses_fenced_json`: input `"```json\n{...}\n```"` gives `schema_valid` True.
   - `test_assess_reports_parse_error`.
-- [ ] **Step 2: Run the tests and confirm they fail.**
-- [ ] **Step 3: Implement.** Add `field_validator(mode="before")` coercers for money and date fields so the insurance schema accepts the value formats the model emits. This is the "optimized schema" change that addresses the 0.20–0.30 schema-valid rate SAND-37 measured.
-- [ ] **Step 4: Run the tests and confirm they pass.** Run `uv run pytest tests/schemas -v`.
-- [ ] **Step 5: Commit.** `git commit -am "feat: strict extraction schemas and compliance assessment"`
+- [x] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 3: Implement.** Add `field_validator(mode="before")` coercers for money and date fields so the insurance schema accepts the value formats the model emits. This is the "optimized schema" change that addresses the 0.20–0.30 schema-valid rate SAND-37 measured.
+- [x] **Step 4: Run the tests and confirm they pass.** Run `uv run pytest tests/schemas -v`.
+- [x] **Step 5: Commit.** `git commit -am "feat: strict extraction schemas and compliance assessment"`
 
 ### Task 5: Bins, manifests and atomic claim
 
@@ -201,13 +201,13 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_claim_race_single_winner`: 8 threads claim one file and exactly one gets a non-None path.
   - `test_manifest_roundtrip_atomic`.
   - `test_resume_point`: a manifest with `completed_nodes=["ingest","bert_primary","sort"]` has `next_node == "gate_classify"`. The node order is supplied by Task 16 as `NODE_ORDER` and imported lazily; until then the test uses a local list.
-- [ ] **Step 2: Implement** by porting `L/src/pipeline/bins.py`. Keep it to the functions above.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/storage/test_bins.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: filesystem bins, manifests, atomic claim"`
+- [x] **Step 2: Implement** by porting `L/src/pipeline/bins.py`. Keep it to the functions above.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/storage/test_bins.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: filesystem bins, manifests, atomic claim"`
 
 ### Task 6: SQLite catalog and hash-chained audit log
 
@@ -227,13 +227,13 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_chain_verifies`: 5 appends, then `verify_chain(...).ok`.
   - `test_tamper_detected`: edit row 3's payload in SQL; expect `broken_at == 3`.
   - `test_append_idempotent_per_node`: appending the same `(doc_id, node, event)` twice with an identical payload stores one entry. This prevents duplicate entries on resume (Review Focus 5).
-- [ ] **Step 2: Implement** by porting `L/src/schemas/audit.py` (hash = sha256 over canonical JSON of the entry without `entry_hash`, plus `prev_hash`), `storage/audit_log.py`, `storage/catalog.py` and `storage/db.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/storage -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: sqlite catalog and sha256 audit chain"`
+- [x] **Step 2: Implement** by porting `L/src/schemas/audit.py` (hash = sha256 over canonical JSON of the entry without `entry_hash`, plus `prev_hash`), `storage/audit_log.py`, `storage/catalog.py` and `storage/db.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/storage -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: sqlite catalog and sha256 audit chain"`
 
 ### Task 7: LLM client, retry and tool loop (standalone LLMs)
 
@@ -258,7 +258,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_resolve_vllm_uses_base_url`
   - `test_tool_loop_executes_and_finishes`: script `tool_call("list_subclasses", {"doc_type":"correspondence"})` then a JSON reply. Assert that `tool_rounds == 1` and that the second request's messages contain a `role:"tool"` message with the tool output.
   - `test_tool_loop_cap_three_rounds`: 4 consecutive tool calls; the 4th request carries `tool_choice="none"`.
@@ -269,13 +269,13 @@
   - `test_label_logprob_from_label_line`: the model emits `LABEL: correspondence/memo` and then the JSON. `exp(label_logprob)` equals the product of the scripted token probabilities on the label line only.
   - `test_vllm_disables_thinking`: vLLM provider requests carry `chat_template_kwargs.enable_thinking == False`.
   - `@pytest.mark.live test_live_tool_call_and_schema`: against the configured provider.
-- [ ] **Step 2: Run the tests and confirm they fail.**
-- [ ] **Step 3: Implement.**
+- [x] **Step 2: Run the tests and confirm they fail.**
+- [x] **Step 3: Implement.**
   - Port the provider resolution and model maps from `L/src/llm/client.py`, and the backoff from `L/src/llm/retry.py`, minus gateway and free-swarm.
   - `tooling.run_tool_loop(client, req, tools, max_rounds=3)`.
   - Label logprob: find the label value span in the streamed or returned tokens and sum its logprobs.
-- [ ] **Step 4: Run the tests and confirm they pass.** Run `uv run pytest tests/llm -v -m "not live"`.
-- [ ] **Step 5: Commit.** `git commit -am "feat: OpenAI-compatible client, retry, tool loop with inline fallback"`
+- [x] **Step 4: Run the tests and confirm they pass.** Run `uv run pytest tests/llm -v -m "not live"`.
+- [x] **Step 5: Commit.** `git commit -am "feat: OpenAI-compatible client, retry, tool loop with inline fallback"`
 
 ### Task 8: Tools (one definition, two surfaces)
 
@@ -296,14 +296,14 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_role_tool_matrix`: sorter → `{get_taxonomy, list_subclasses}`; each specialist → `{get_extraction_schema, get_field_types}`; judge → `{get_extraction_schema, get_field_types, search_source, get_ground_truth}`; arbiter → `{get_taxonomy, get_extraction_schema, search_source}`; boss → `{get_taxonomy, list_subclasses, search_source}`.
   - `test_ground_truth_absent_outside_eval`: `tools_for("judge", ToolContext(eval_mode=False, ...))` has no `get_ground_truth`.
   - `test_crewai_tool_runs`: `crewai_tool(TOOLS["list_subclasses"], ctx).run(doc_type="merger_agreement")` contains `"all_cash"`.
   - `test_unknown_args_return_error_string`: the call does not raise.
-- [ ] **Step 2: Implement**, porting the handlers from `L/src/langchain_agents/toolkit.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/test_tools.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: shared tool definitions for agents and standalone LLMs"`
+- [x] **Step 2: Implement**, porting the handlers from `L/src/langchain_agents/toolkit.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/test_tools.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: shared tool definitions for agents and standalone LLMs"`
 
 ### Task 9: Deterministic ingest (clerk, PDF, vision)
 
@@ -318,15 +318,15 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_txt_ingest`
   - `test_pdf_text_layer`: method `pdf_text`.
   - `test_scanned_pdf_uses_vision`: monkeypatch `transcribe_pages`; method `vision`.
   - `test_corrupt_pdf_sets_error`: `error` is set and nothing is raised.
   - `test_400k_chars_under_2s`: a synthetic 400,000-char text ingests in under 2 s. This covers Review Focus 1.
-- [ ] **Step 2: Implement.** Generate the fixtures with reportlab in a conftest helper; do not commit binaries if they can be generated.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/ingest -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: deterministic ingest with PDF and vision fallback"`
+- [x] **Step 2: Implement.** Generate the fixtures with reportlab in a conftest helper; do not commit binaries if they can be generated.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/ingest -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: deterministic ingest with PDF and vision fallback"`
 
 ### Task 10: ModernBERT adapter and handoff policy
 
@@ -344,16 +344,16 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.** One test per row of the spec §5 table, plus these:
+- [x] **Step 1: Write the failing tests.** One test per row of the spec §5 table, plus these:
   - `test_contract_defers` and `test_merger_defers`: mode `FULL`, and `prior` mentions the BERT class.
   - `test_multiwindow_defers`: `n_windows=3` with a correspondence fast path gives `FULL`.
   - `test_fast_path_correspondence_subclass_only`: `locked_doc_type == "correspondence"`.
   - `test_unavailable_full`
   - `test_package_missing_reason`: monkeypatch the import to fail; `reason == "no_package"`.
   - `test_long_doc_does_not_call_model_past_cap`: a 400k-char doc is accepted, the classifier is not called, and the result is `FULL` with `reason="too_long"` when the length exceeds `8192*4*max_trusted_windows` chars. This covers Review Focus 1.
-- [ ] **Step 2: Implement**, porting the fail-open structure from `L/src/agents/bert_intake.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/ingest/test_bert.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: ModernBERT primary classifier with contract/merger deferral"`
+- [x] **Step 2: Implement**, porting the fail-open structure from `L/src/agents/bert_intake.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/ingest/test_bert.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: ModernBERT primary classifier with contract/merger deferral"`
 
 ### Task 11: Sorter (FULL / SUBCLASS_ONLY)
 
@@ -370,7 +370,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** (FakeOpenAI).
+- [x] **Step 1: Write the failing tests** (FakeOpenAI).
   - `test_subclass_only_prompt_scoped`: the system message contains `sorter_v14` verbatim as a prefix and the allowed list. The JSON schema enum equals `subclass_vocab("correspondence")`.
   - `test_disagree_flag_propagates`
   - `test_confidence_from_logprobs`: `confidence_source == "logprob"`, and `raw_confidence` is kept beside the calibrated `confidence`.
@@ -378,9 +378,9 @@
   - `test_self_report_fallback`
   - `test_sorter_uses_list_subclasses_tool`: a scripted tool call, and the result is valid.
   - `test_input_truncated_to_sorter_cap`: the cap comes from `taxonomy.agents.sorter`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_sorter.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: sorter with BERT-scoped subclass mode"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_sorter.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: sorter with BERT-scoped subclass mode"`
 
 ### Task 12: Specialists (frozen v1, structured, merger dagger)
 
@@ -401,7 +401,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_system_prompt_is_frozen_bytes`: the request's system message equals `load_prompt(...)` exactly for all 5 classes.
   - `test_response_format_sent`
   - `test_conditions_applied`: the request has `max_tokens=8192`, and temperature 0.1 for insurance or 0.7 for contract.
@@ -413,9 +413,9 @@
   - `test_parity_mode_tools_off`: with `prompt_set="sand37"` or `tools=False`, the requests carry no `tools` key.
   - `test_extraction_confidence_formula`: with schema_valid True, coverage 0.5 and mean token probability 0.9, `confidence == 0.6*0.5 + 0.4*0.9`. With schema_valid False it is 0.
   - `test_no_ground_truth_in_messages` uses the GT leak helper `assert_no_gt(requests, gt_row)` from `tests/helpers.py` (created here, reused in Task 20).
-- [ ] **Step 2: Implement**, porting the class prompts' user-message template from `L/src/agents/<class>_specialist.py` and the dagger windowing from `S/src/mailroom_sandbox/job/specialist_posture.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_specialists.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: frozen-v1 specialists with merger dagger mode"`
+- [x] **Step 2: Implement**, porting the class prompts' user-message template from `L/src/agents/<class>_specialist.py` and the dagger windowing from `S/src/mailroom_sandbox/job/specialist_posture.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_specialists.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: frozen-v1 specialists with merger dagger mode"`
 
 ### Task 13: Route gate (bands + learned logistic)
 
@@ -450,16 +450,16 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - A parametrized table covering each rule above at exact boundaries: 0.70, 0.9499 and 0.95 for classify; 0.92 and 0.94 by class for extract.
   - `test_learned_gate_only_in_medium_band`: a model coefficient that always says `human_review` does not change a 0.99 or a 0.10 decision.
   - `test_deterministic`: identical features give an identical decision over 100 calls.
   - `test_train_gate_writes_json` uses 40 synthetic rows.
   - `test_fit_refuses_test_split`: `train_gate` and `fit_calibration` raise `ValueError` when any row has `split == "test"`.
   - `test_fit_calibration_reduces_ece`: on synthetic overconfident data, ECE after calibration is below ECE before.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_gate.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: deterministic route gate replacing reviewer nodes"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_gate.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: deterministic route gate replacing reviewer nodes"`
 
 ### Task 14: CrewAI agents: judge, arbiter, boss
 
@@ -483,7 +483,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** (FakeOpenAI as the agents' endpoint).
+- [x] **Step 1: Write the failing tests** (FakeOpenAI as the agents' endpoint).
   - `test_judge_grade_calls_ground_truth_tool`: script a `get_ground_truth` tool call, then the final JSON. Assert the tool was invoked with the doc_id and that the output is a valid `JudgeGrade`.
   - `test_judge_verify_has_no_gt_tool`: the request `tools` list has no `get_ground_truth`.
   - `test_arbiter_returns_decision`
@@ -493,9 +493,9 @@
   - `test_judge_grades_classification`: `JudgeGrade.classification` has `verdict` and `rationale`.
   - `test_crewai_telemetry_disabled`: `os.environ["CREWAI_DISABLE_TELEMETRY"] == "true"` after `import mailroom_reloaded.agents`.
   - `@pytest.mark.live test_live_agent_tool_use`
-- [ ] **Step 2: Implement.** Set the env var in `mailroom_reloaded/__init__.py` before anything imports crewai.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_crew_agents.py -v -m "not live"`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: CrewAI judge (live + GT grading), arbiter, boss"`
+- [x] **Step 2: Implement.** Set the env var in `mailroom_reloaded/__init__.py` before anything imports crewai.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/agents/test_crew_agents.py -v -m "not live"`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: CrewAI judge (live + GT grading), arbiter, boss"`
 
 ### Task 15: Deterministic report writer and archivist
 
@@ -510,14 +510,14 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_report_includes_caveats`
   - `test_report_no_llm`: patch `call_structured` to raise; the report still succeeds.
   - `test_archive_sha_matches_file`
   - `test_archive_audit_chain_verifies`
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/pipeline/test_report_archive.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: deterministic report writer and archivist"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/pipeline/test_report_archive.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: deterministic report writer and archivist"`
 
 ### Task 16: MailroomFlow
 
@@ -549,7 +549,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.** Each uses the `mock` provider via FakeOpenAI and monkeypatched `classify_primary`, and asserts `route_trail`, the final bin and the LLM call count.
+- [x] **Step 1: Write the failing tests.** Each uses the `mock` provider via FakeOpenAI and monkeypatched `classify_primary`, and asserts `route_trail`, the final bin and the LLM call count.
   - `test_fast_path_two_llm_calls`: correspondence fast path. Trail `ingest,bert_primary,sort,gate_classify,extract,gate_extract,report_catalog_archive`; exactly 2 LLM calls; file in `archive/correspondence/`.
   - `test_contract_deferred_full_sort`
   - `test_subclass_disagree_resorts_once`
@@ -558,9 +558,9 @@
   - `test_extract_low_conf_boss_reassign`: boss reassigns the class and extraction reruns with the new class.
   - `test_resume_skips_completed_nodes`: crash injected after `sort`. The rerun makes no sorter call and the audit chain verifies with no duplicate `sort` entry.
   - `test_deadline_guard_fails_doc`
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/pipeline/test_flow.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: CrewAI MailroomFlow with gate routing and manifest resume"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/pipeline/test_flow.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: CrewAI MailroomFlow with gate routing and manifest resume"`
 
 ### Task 17: Watcher and human-review resume
 
@@ -574,15 +574,15 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_two_workers_one_file`: two `drain_once` calls in threads give one archived doc and one manifest.
   - `test_corrupt_file_goes_failed_and_watcher_continues`: a corrupt and a good file give 1 failed + 1 archived.
   - `test_startup_resumes_processing_manifest`
   - `test_review_correct_resumes_at_extract`: no sorter call; extraction runs with the corrected class; audit `review_resolved`.
   - `test_review_reject_moves_failed`
-- [ ] **Step 2: Implement**, porting from `L/src/pipeline/watcher.py` (loop and lock only) and `L/src/pipeline/review_resolve.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/test_watcher_review.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: watcher with lock and resume; review resolve"`
+- [x] **Step 2: Implement**, porting from `L/src/pipeline/watcher.py` (loop and lock only) and `L/src/pipeline/review_resolve.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/test_watcher_review.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: watcher with lock and resume; review resolve"`
 
 ### Task 18: Observability (traces + metrics)
 
@@ -599,14 +599,14 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_flow_emits_node_spans`: an InMemorySpanExporter receives `mailroom.node.ingest` … spans under one trace per document.
   - `test_llm_span_has_genai_attrs`: an OpenInference LLM span carries the token counts.
   - `test_masking_redacts_content`: with `trace_mask`, input and output values are `"<masked>"`.
   - `test_metric_names_emitted`: an InMemoryMetricReader collects every name in `M` after one fast-path document.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/obs -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: OTel tracing via OpenInference and pipeline metrics"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/obs -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: OTel tracing via OpenInference and pipeline metrics"`
 
 ### Task 19: FastAPI /v1 and the localhost runs UI
 
@@ -639,16 +639,16 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** (TestClient).
+- [x] **Step 1: Write the failing tests** (TestClient).
   - `test_upload_then_process`: `drain_once` gives `GET` status `archived`.
   - `test_audit_verify_ok`
   - `test_review_resolve_endpoint`
   - `test_ui_served`
   - `test_offbind_without_token_refuses`
   - `test_bearer_required_when_token_set`
-- [ ] **Step 2: Implement**, porting the relevant handlers from `L/src/api/main.py`.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/api -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: /v1 API, localhost runs UI, CLI"`
+- [x] **Step 2: Implement**, porting the relevant handlers from `L/src/api/main.py`.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/api -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: /v1 API, localhost runs UI, CLI"`
 
 ### Task 20: Dataset loader and eval runner
 
@@ -670,7 +670,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_blind_doc_has_no_label_attrs`
   - `test_sha_mismatch_raises`
   - `test_nested_sampling`
@@ -678,9 +678,9 @@
   - `test_judge_sample_rate`: rate 0.5 with seed 42 grades a deterministic half.
   - `test_eval_run_records_rows` uses the mini dataset (10 docs, 2 per class) with the mock provider.
   - `test_no_gt_leak_in_agent_requests`: `assert_no_gt` over every FakeOpenAI request except the judge's `get_ground_truth` tool result.
-- [ ] **Step 2: Implement.** Use `datasets.load_dataset(REPO, "default"|"ground_truth", revision=...)` behind the `eval` extra. `local_dir` reads JSONL for tests and offline runs.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_dataset_runner.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: blind/GT dataset loader and eval runner"`
+- [x] **Step 2: Implement.** Use `datasets.load_dataset(REPO, "default"|"ground_truth", revision=...)` behind the `eval` extra. `local_dir` reads JSONL for tests and offline runs.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_dataset_runner.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: blind/GT dataset loader and eval runner"`
 
 ### Task 21: KPIs, SAND-37 cards, vLLM telemetry, cost
 
@@ -703,7 +703,7 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_sorter_kpis_exact_vs_primary`: 4 rows = (right/right, right/wrong-sub, wrong/right-sub-name, wrong/wrong). Expected `exact_match 0.25`, `primary_accuracy 0.5`, `subclass_accuracy 0.5`, `subclass_accuracy_given_primary 0.5`.
   - `test_micro_vs_mean_f1`: doc A has TP=9, FN=1; doc B has TP=0, FP=1. Expected micro F1 = 2·9/(2·9+1+1) = 0.9; mean doc F1 = (0.947+0)/2.
   - `test_f2_weights_recall`
@@ -715,9 +715,9 @@
   - `test_token_split_recovers_known_I`: synthetic rows with I=2702, r=4.46 recover I ± 1%.
   - `test_card_has_all_sand37_blocks`: keys ⊇ `{conditions,cost,documents,engine_telemetry,latency,quality,throughput,time,tokens,concurrency}`.
   - `test_master_md_has_tables`
-- [ ] **Step 2: Implement**, porting the card math from `S/src/mailroom_sandbox/job/{metrics,grid_cards,grid_master}.py` (formulas only, not the CLI or plotting). The vLLM metric names are listed in spec §8.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_metrics_cards.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: sorter/specialist KPIs and SAND-37-parity cards"`
+- [x] **Step 2: Implement**, porting the card math from `S/src/mailroom_sandbox/job/{metrics,grid_cards,grid_master}.py` (formulas only, not the CLI or plotting). The vLLM metric names are listed in spec §8.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_metrics_cards.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: sorter/specialist KPIs and SAND-37-parity cards"`
 
 ### Task 22: Docker topology and observability stack
 
@@ -748,18 +748,18 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_compose_config_valid`, parametrized over `[], ["local-llm"], ["gpu"], ["split-watcher"], ["local-llm","gpu"]`. Run `docker compose -f deploy/docker-compose.yml --profile ... config -q`; exit 0. Skip if `docker` is absent.
   - `test_collector_config_parses`: YAML loads, and the pipelines reference only defined receivers and exporters.
   - `test_dashboards_valid_json_with_datasource_uid`
-- [ ] **Step 2: Implement.** Base the Dockerfile on `L/Dockerfile`: builder, model stage (`ML_BUILD_NONE`), runtime as uid 10001 with a HEALTHCHECK.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/deploy -v`. Expected: PASS.
-- [ ] **Step 4: Run the smoke test.**
+- [x] **Step 2: Implement.** Base the Dockerfile on `L/Dockerfile`: builder, model stage (`ML_BUILD_NONE`), runtime as uid 10001 with a HEALTHCHECK.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/deploy -v`. Expected: PASS.
+- [ ] **Step 4: Run the smoke test.** **NOT DONE (blocked):** the full compose smoke (`scripts/smoke.sh`, Phoenix/Grafana health) was never run end to end; only `docker compose ... config -q` validation and `tests/deploy` pass. Needs a host with Docker, model weights and a provider.
   1. `docker compose -f deploy/docker-compose.yml --profile local-llm up -d --build`
   2. `scripts/smoke.sh` drops `tests/ingest/fixtures/letter.txt` into the inbox and polls `/v1/documents` until it is `archived`.
   3. Check that `curl -s localhost:6006` returns 200 and that Grafana `localhost:3000/api/health` is OK.
   4. Expected: the smoke script prints `SMOKE OK`.
-- [ ] **Step 5: Commit.** `git commit -am "feat: docker topology with OTel collector, Phoenix, Prometheus, Grafana, GPU profile"`
+- [x] **Step 5: Commit.** `git commit -am "feat: docker topology with OTel collector, Phoenix, Prometheus, Grafana, GPU profile"`
 
 ### Task 23: Modal vLLM deploy
 
@@ -775,13 +775,13 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests.**
+- [x] **Step 1: Write the failing tests.**
   - `test_deploy_config_defaults`: gpu `"L4"`, count 1, model `Qwen/Qwen3-8B-AWQ`, flags include `--enable-prefix-caching` and `--kv-cache-dtype fp8`.
   - `test_gpu_count_sets_tp`: `MODAL_GPU_COUNT=2` gives `--tensor-parallel-size 2`.
   - `test_module_imports_without_modal`: `importorskip` semantics; the config function works without the `modal` import.
-- [ ] **Step 2: Implement.** In the README, cover deploy, pointing the app (`DEFAULT_PROVIDER=vllm`, `VLLM_BASE_URL`, `VLLM_METRICS_URLS`), running a SAND-37-style posture (`mailroom eval --mode specialist_cell --per-class 50 --gpus 2 --concurrency 32 --revision ed7576b6 --prompt-set sand37`), and teardown with a spend check.
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/deploy/test_modal_config.py -v`. Expected: PASS.
-- [ ] **Step 4: Commit.** `git commit -am "feat: Modal vLLM deploy with metrics and posture runbook"`
+- [x] **Step 2: Implement.** In the README, cover deploy, pointing the app (`DEFAULT_PROVIDER=vllm`, `VLLM_BASE_URL`, `VLLM_METRICS_URLS`), running a SAND-37-style posture (`mailroom eval --mode specialist_cell --per-class 50 --gpus 2 --concurrency 32 --revision ed7576b6 --prompt-set sand37`), and teardown with a spend check.
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/deploy/test_modal_config.py -v`. Expected: PASS.
+- [x] **Step 4: Commit.** `git commit -am "feat: Modal vLLM deploy with metrics and posture runbook"`
 
 ### Task 24: Behavioural conformance suite
 
@@ -798,15 +798,15 @@
 
 **Steps:**
 
-- [ ] **Step 1: Write the failing tests** (FakeOpenAI scripted per role).
+- [x] **Step 1: Write the failing tests** (FakeOpenAI scripted per role).
   - `test_sorter_subclass_only_doc_type_change_without_flag_fails_invariant`
   - `test_specialist_extra_key_fails_invariant`
   - `test_judge_live_mode_gt_tool_call_fails_invariant`
   - `test_card_rates`: 3 of 4 tool calls succeed, so `tool_call_success_rate == 0.75`.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_conformance.py -v`. Expected: PASS.
-- [ ] **Step 4: Run live.** Run `uv run mailroom conformance --provider llamafile` (and later `vllm`). Expected: a card is written; record the pass rates in the PR description.
-- [ ] **Step 5: Commit.** `git commit -am "feat: behavioural conformance suite for all LLM roles"`
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run the tests.** Run `uv run pytest tests/eval/test_conformance.py -v`. Expected: PASS.
+- [ ] **Step 4: Run live.** Run `uv run mailroom conformance --provider llamafile` (and later `vllm`). Expected: a card is written; record the pass rates in the PR description. **NOT DONE (blocked):** no live provider (llamafile/vllm) is available in this environment, so no live conformance card or pass rates exist. Card generation is proven only against FakeOpenAI.
+- [x] **Step 5: Commit.** `git commit -am "feat: behavioural conformance suite for all LLM roles"`
 
 ---
 
@@ -829,3 +829,57 @@
 
 - **Type names used across tasks:** `Handoff`/`SortMode` (10 → 11, 16), `SortResult`/`ExtractResult` (11, 12 → 13, 16), `GateFeatures`/`GateDecision` (13 → 16), `ToolContext` (8 → 14, 16, 20), `EvalContext` (20 → 16), `Usage`/`LLMResult` (7 → all callers), `MailroomState` (16 → 15, 17, 19).
 - **Open item:** the "Jev" model named in the request was not found in any repo or doc. `RouteGate` is the slot for it; Task 13 ships the deterministic default.
+
+
+## Status (2026-10-08)
+
+Audited against the code on branch `feat/jev-tui-hardening`. Checkboxes above are ticked only where the named files exist and the covering tests pass. 22 of 24 tasks are fully done, Task 22 is partial and Task 24 is partial. Both gaps are environment-blocked (no Docker stack run, no live provider), not skipped work.
+
+| Task | Status | Note |
+| --- | --- | --- |
+| 1 Scaffold, settings, taxonomy, fence | done | |
+| 2 Vendored scoring subset | done | parity test skipped without the `parity` extra, as planned |
+| 3 Prompts with sha256 lock | done | prompts live under `src/mailroom_reloaded/prompts/`, not top-level `prompts/` |
+| 4 Extraction schemas | done | |
+| 5 Bins, manifests, claim | done | |
+| 6 Catalog and audit chain | done | |
+| 7 LLM client and tool loop | done | |
+| 8 Tools | done | |
+| 9 Ingest | done | PDF fixtures are generated in a conftest helper, not committed |
+| 10 ModernBERT adapter | done | |
+| 11 Sorter | done | |
+| 12 Specialists | done | |
+| 13 Route gate | done | extended later by the opt-in Jev gate |
+| 14 CrewAI agents | done | live-marked tests are deselected by default |
+| 15 Report and archivist | done | |
+| 16 MailroomFlow | done | resume/retry crash windows hardened in PRs #11 and #12 |
+| 17 Watcher and review | done | hardened in PRs #9 and #11 |
+| 18 Observability | done | |
+| 19 API and runs UI | done | `/tui` and `/v1/jev` added on top |
+| 20 Dataset and eval runner | done | |
+| 21 KPIs, cards, telemetry, cost | done | |
+| 22 Docker topology | partial | files, config and `tests/deploy` pass; Step 4 smoke run NOT done |
+| 23 Modal vLLM deploy | done (code and tests) | no real Modal deploy or spend check was performed |
+| 24 Conformance suite | partial | Steps 1-3 and 5 done; Step 4 live run blocked (no provider) |
+
+### Evidence
+
+- `uv run pytest -q`: 673 passed, 1 skipped, 2 deselected (live-marked).
+- `node --test tests/tui/js/*.test.mjs`: 117 tests, 117 pass, 0 fail.
+- `uv run ruff check .`: all checks passed.
+- Every file named in the tasks' Files lists exists (checked by script), except the generated PDF fixtures noted above.
+
+### Deviations from the plan
+
+- Prompt files are packaged inside `src/mailroom_reloaded/prompts/` so `importlib.resources` works from an installed wheel.
+- Commit messages end with `Co-Authored-By: Claude Sonnet 5.5`, not Opus 5.5 as the constraint says, because the session model changed.
+- Added beyond the plan: Gmail intake route (optional extra), dedicated dev server (`scripts/dev.sh`, `docker-compose.dev.yml`, `deploy/mock_openai.py`, `deploy/mock_jev.py`), the operator docs set, the opt-in Jev probabilistic gate with calibration, gate audit entries and `GET /v1/jev`, and the `/tui` browser terminal (see the TUI plan).
+- Review hardening landed after the plan: PR #5 audit findings 1-12 (PRs #9, #11, #12), parked documents are now catalogued, `.env` support for `JEV_*`, OTLP protocol/endpoint settings honoured, no vacuous conformance pass rates.
+- The pytest `live` marker is registered once with `--strict-markers` and `addopts = "-m 'not live'"`.
+
+### Incomplete or blocked
+
+1. Task 24 Step 4: no live `mailroom conformance --provider ...` run, so no pass rates have been recorded.
+2. Task 22 Step 4: compose smoke (`SMOKE OK`, Phoenix and Grafana health) never run.
+3. Task 23: Modal deploy and teardown spend check never run against a real account.
+4. Jev extract-stage gating is unreachable locally: dev correspondence extraction confidence never lands in the extract medium band, so only the classify gate consults Jev (see `docs/JEV.md`).

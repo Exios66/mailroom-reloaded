@@ -53,6 +53,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from mailroom_reloaded import __version__
 from mailroom_reloaded.intake import gmail as gmail_intake
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.settings import get_settings
@@ -520,7 +521,7 @@ def create_app() -> FastAPI:
     application = FastAPI(
         title="mailroom-reloaded",
         description="Compressed Digital Mailroom API",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
     application.include_router(api)

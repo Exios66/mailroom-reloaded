@@ -8,4 +8,4 @@ from mailroom_reloaded.obs.tracing import setup_tracing
 
 setup_tracing()
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
