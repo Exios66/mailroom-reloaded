@@ -137,7 +137,7 @@ def _patch_handoff(monkeypatch, mode=SortMode.SUBCLASS_ONLY, doc_type="correspon
         route=route,
     )
     handoff = Handoff(mode, locked, f"BERT predicts class {doc_type}", route)
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
     return verdict, handoff
 
@@ -146,7 +146,7 @@ def _patch_bert_unavailable(monkeypatch):
     """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 

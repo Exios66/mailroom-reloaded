@@ -23,8 +23,12 @@ public so a load balancer and a browser can reach them.
 
 from __future__ import annotations
 
+import asyncio
+import hmac
 import json
 import os
+import re
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -95,7 +99,9 @@ def require_token(request: Request) -> None:
         return
     auth = request.headers.get("authorization", "")
     prefix = "Bearer "
-    if not auth.startswith(prefix) or auth[len(prefix) :].strip() != token:
+    if not auth.startswith(prefix) or not hmac.compare_digest(
+        auth[len(prefix) :].strip().encode("utf-8"), token.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Missing or invalid API token")
 
 
@@ -249,6 +255,8 @@ def list_runs_endpoint() -> dict:
 @api.get("/runs/{run_id}/cards")
 def run_cards_endpoint(run_id: str) -> dict:
     """Card JSONs for a run; empty until Task 21 writes them."""
+    if re.fullmatch(r"[0-9a-f]{12}", run_id) is None:
+        raise HTTPException(status_code=400, detail="Invalid run ID")
     cards_dir = get_settings().base_dir / "runs" / run_id / "cards"
     cards: list[dict] = []
     if cards_dir.is_dir():
@@ -355,24 +363,32 @@ async def lifespan(application: FastAPI):
     a background drainer.
     """
     _bins().inbox.mkdir(parents=True, exist_ok=True)
-    stop = None
+    watcher = None
+    watcher_thread = None
     if _embed_watcher_enabled():
         from mailroom_reloaded.watcher import Watcher
 
         watcher = Watcher(_bins(), f"api-{os.getpid()}", 1)
-        stop = watcher.stop
-        import threading
+        def run_watcher() -> None:
+            try:
+                watcher.run_forever()
+            except Exception:
+                logger.exception("embedded_watcher_failed")
 
-        threading.Thread(
-            target=watcher.run_forever, name="mailroom-embedded-watcher", daemon=True
-        ).start()
+        watcher_thread = threading.Thread(
+            target=run_watcher, name="mailroom-embedded-watcher", daemon=True
+        )
+        watcher_thread.start()
         application.state.watcher = watcher
+        application.state.watcher_thread = watcher_thread
         logger.info("embedded_watcher_started")
     try:
         yield
     finally:
-        if stop is not None:
-            stop()
+        if watcher is not None:
+            watcher.stop()
+        if watcher_thread is not None:
+            await asyncio.to_thread(watcher_thread.join, timeout=30)
 
 
 def create_app() -> FastAPI:

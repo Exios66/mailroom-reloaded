@@ -257,7 +257,14 @@ def call_structured(
     tools_in_play = False
     loop = None
     if tools:
-        loop = run_tool_loop(client, req, list(tools))
+        try:
+            loop = run_tool_loop(client, req, list(tools))
+        except LengthFinishReasonError as exc:
+            _record_usage_metrics(role, r, usage + exc.usage)
+            M.length_capped.add(
+                1, {"role": role, "provider": r.provider, "model": r.model}
+            )
+            raise
         usage, tool_rounds, final_messages = usage + loop.usage, loop.rounds, loop.messages
         tools_in_play = not loop.inline
     final: dict[str, Any] = {**req, "messages": final_messages}

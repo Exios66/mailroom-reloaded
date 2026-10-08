@@ -135,7 +135,7 @@ def _patch_handoff(
         route=route,
     )
     handoff = Handoff(mode, locked, f"BERT predicts class {doc_type}", route)
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
     return verdict, handoff
 
@@ -144,7 +144,7 @@ def _patch_bert_unavailable(monkeypatch):
     """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 
@@ -273,9 +273,9 @@ def test_runs_shape(client):
     assert resp.status_code == 200
     assert resp.json() == {"runs": []}
 
-    cards = client.get("/v1/runs/nope/cards")
+    cards = client.get("/v1/runs/000000000000/cards")
     assert cards.status_code == 200
-    assert cards.json() == {"run_id": "nope", "cards": []}
+    assert cards.json() == {"run_id": "000000000000", "cards": []}
 
 
 def test_offbind_without_token_refuses(env, monkeypatch):
@@ -309,3 +309,72 @@ def test_bearer_required_when_token_set(env, monkeypatch, client):
 
     # /health stays public.
     assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize("run_id", ["%2e%2e", "%5c..", "not-a-run", "a" * 11, "a" * 13, "A" * 12])
+def test_cards_reject_invalid_run_ids(client, run_id):
+    assert client.get(f"/v1/runs/{run_id}/cards").status_code == 400
+
+
+def test_cards_reads_valid_run(env, client):
+    cards_dir = env / "runs" / "012345abcdef" / "cards"
+    cards_dir.mkdir(parents=True)
+    (cards_dir / "card.json").write_text('{"score": 1}')
+    assert client.get("/v1/runs/012345abcdef/cards").json() == {
+        "run_id": "012345abcdef", "cards": [{"score": 1}]
+    }
+
+
+@pytest.mark.parametrize("authorization", [b"Basic s3cret", b"Bearer ", b"Bearer \xff", b"bearer s3cret"])
+def test_invalid_authorization_is_unauthorized(env, client, monkeypatch, authorization):
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    assert client.get("/v1/documents", headers={b"Authorization": authorization}).status_code == 401
+
+
+@pytest.mark.parametrize("failure", [None, "lock", "unexpected"])
+def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
+    import importlib
+    import threading
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.watcher import WatcherLockHeld
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    started = threading.Event()
+    stopped = threading.Event()
+    finished = threading.Event()
+    error = WatcherLockHeld("occupied") if failure == "lock" else RuntimeError("failed")
+
+    class FakeWatcher:
+        def __init__(self, *args):
+            pass
+
+        def run_forever(self):
+            started.set()
+            try:
+                if failure:
+                    raise error
+                assert stopped.wait(5)
+            finally:
+                finished.set()
+
+        def stop(self):
+            stopped.set()
+
+    monkeypatch.setenv("MAILROOM_EMBED_WATCHER", "1")
+    monkeypatch.setattr("mailroom_reloaded.watcher.Watcher", FakeWatcher)
+    log = Mock()
+    monkeypatch.setattr(app_mod, "logger", log)
+    application = app_mod.create_app()
+    with TestClient(application):
+        assert started.wait(5)
+    assert stopped.is_set()
+    assert finished.is_set()
+    assert not application.state.watcher_thread.is_alive()
+    if failure:
+        log.exception.assert_called_once_with("embedded_watcher_failed")
+    else:
+        log.exception.assert_not_called()

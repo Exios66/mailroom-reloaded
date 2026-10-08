@@ -436,7 +436,8 @@ async def _run_cell(
         doc_subclass = gt.expected_subclass if gt is not None else None
         start = time.monotonic()
         try:
-            result = _extract(
+            result = await asyncio.to_thread(
+                _extract,
                 doc.doc_text,
                 doc_type,
                 doc_subclass,
