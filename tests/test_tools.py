@@ -101,7 +101,7 @@ def test_unknown_role_empty():
 
 
 def test_crewai_ground_truth_gated_outside_eval():
-    gt = lambda d: {"secret": d}  # noqa: E731
+    gt = lambda d: {"secret": d}
     for ctx in (
         _ctx(eval_mode=False, ground_truth=gt),
         _ctx(eval_mode=True, ground_truth=None),
