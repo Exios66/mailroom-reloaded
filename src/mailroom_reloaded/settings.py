@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
@@ -138,3 +141,131 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+# ------------------------------------------------------------------ Jev (issue #8)
+
+_JEV_PROVIDERS = ("off", "openrouter", "typesafe", "local")
+
+# Per-provider model/base_url used when the env/taxonomy leaves them blank.
+_JEV_PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    "off": {"model": "", "base_url": ""},
+    "openrouter": {
+        "model": "typesafe/jev-1.13",
+        "base_url": "https://openrouter.ai/api/alpha/decisions",
+    },
+    "typesafe": {
+        "model": "jev-latest",
+        "base_url": "https://api.typesafe.ai/v1/systemone",
+    },
+    "local": {
+        "model": "jevk5",
+        "base_url": "http://127.0.0.1:8090/v1/systemone",
+    },
+}
+
+_JEV_DEFAULTS: dict[str, float | int] = {
+    "temperature": 1.0,
+    "accept_threshold": 0.8,
+    "timeout_s": 10.0,
+    "max_retries": 2,
+}
+
+
+@dataclass(frozen=True)
+class JevConfig:
+    """Resolved Jev (TypeSafe System One) decision-model configuration.
+
+    ``provider`` is one of ``off``/``openrouter``/``typesafe``/``local``.
+    Resolution order per field is ``MAILROOM_JEV_<FIELD>`` -> ``JEV_<FIELD>`` ->
+    the taxonomy ``jev:`` block -> a default. ``model``/``base_url`` default per
+    provider; the numeric fields use the module defaults.
+    """
+
+    provider: Literal["off", "openrouter", "typesafe", "local"]
+    model: str
+    base_url: str
+    api_key: str | None
+    temperature: float
+    accept_threshold: float
+    timeout_s: float
+    max_retries: int
+
+    @property
+    def enabled(self) -> bool:
+        """True when a provider other than ``off`` is configured."""
+        return self.provider != "off"
+
+
+def _jev_env(name: str) -> str | None:
+    """Return ``MAILROOM_JEV_<NAME>`` then ``JEV_<NAME>`` when set and non-empty."""
+    for key in (f"MAILROOM_JEV_{name}", f"JEV_{name}"):
+        value = os.environ.get(key)
+        if value:
+            return value
+    return None
+
+
+def _jev_field(name: str, taxonomy: dict[str, Any]) -> str | None:
+    """Resolve one string field: env -> taxonomy -> None (caller applies defaults)."""
+    value = _jev_env(name)
+    if value is None:
+        raw = taxonomy.get(name.lower())
+        if raw is not None and raw != "":
+            return str(raw)
+    return value
+
+
+def _jev_scalar(
+    name: str, taxonomy: dict[str, Any], default: float, cast: Callable[[Any], Any]
+) -> Any:
+    """Resolve a numeric field: env -> taxonomy -> ``default``, then ``cast``."""
+    value = _jev_field(name, taxonomy)
+    if value is None:
+        return cast(default)
+    return cast(value)
+
+
+def _jev_api_key(settings: Settings) -> str | None:
+    """Resolve the API key.
+
+    Order: ``MAILROOM_JEV_API_KEY`` -> ``JEV_API_KEY`` -> ``TYPESAFE_API_KEY`` ->
+    ``OPENROUTER_API_KEY`` -> ``settings.openrouter_api_key``. It may be ``None``
+    for the ``local`` provider (no auth header is then sent).
+    """
+    value = _jev_env("API_KEY")
+    if value:
+        return value
+    for key in ("TYPESAFE_API_KEY", "OPENROUTER_API_KEY"):
+        value = os.environ.get(key)
+        if value:
+            return value
+    return settings.openrouter_api_key
+
+
+def jev_config() -> JevConfig:
+    """Resolve the Jev config from env, the taxonomy ``jev:`` block and defaults.
+
+    Not cached on purpose: env changes (tests, CLI overrides) take effect
+    immediately. Unknown providers collapse to ``off`` so the default pipeline
+    behaviour is unchanged.
+    """
+    taxonomy = dict(load_taxonomy().raw.get("jev") or {})
+    provider = (
+        _jev_env("PROVIDER") or str(taxonomy.get("provider") or "off")
+    ).strip().lower()
+    if provider not in _JEV_PROVIDERS:
+        provider = "off"
+    defaults = _JEV_PROVIDER_DEFAULTS[provider]
+    return JevConfig(
+        provider=provider,  # type: ignore[arg-type]
+        model=_jev_field("MODEL", taxonomy) or defaults["model"],
+        base_url=_jev_field("BASE_URL", taxonomy) or defaults["base_url"],
+        api_key=_jev_api_key(get_settings()),
+        temperature=_jev_scalar("TEMPERATURE", taxonomy, _JEV_DEFAULTS["temperature"], float),
+        accept_threshold=_jev_scalar(
+            "ACCEPT_THRESHOLD", taxonomy, _JEV_DEFAULTS["accept_threshold"], float
+        ),
+        timeout_s=_jev_scalar("TIMEOUT_S", taxonomy, _JEV_DEFAULTS["timeout_s"], float),
+        max_retries=_jev_scalar("MAX_RETRIES", taxonomy, _JEV_DEFAULTS["max_retries"], int),
+    )

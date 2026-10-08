@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 
 import structlog
@@ -243,6 +244,90 @@ def conformance(
             }
         )
     )
+
+
+jev_app = typer.Typer(
+    name="jev",
+    help="Jev (TypeSafe System One) decision model: ask decisions and calibrate.",
+    no_args_is_help=True,
+)
+app.add_typer(jev_app, name="jev")
+
+
+def _jev_off() -> None:
+    """Print the disabled message and exit non-zero."""
+    typer.echo(
+        "Jev is off (MAILROOM_JEV_PROVIDER=off). Set a provider "
+        "(openrouter|typesafe|local) to enable it.",
+        err=True,
+    )
+    raise typer.Exit(code=1)
+
+
+@jev_app.command()
+def decide(
+    state: str = typer.Option(..., "--state", help="State text/prompt passed to Jev."),
+    question_type: str = typer.Option(..., "--type", help="choice | noul | score."),
+    instructions: str = typer.Option(..., "--instructions", help="Question instructions."),
+    criteria: list[str] = typer.Option(
+        None, "--criteria", help="Repeatable KEY=DESCRIPTION (choice/noul)."
+    ),
+    criteria_list: str = typer.Option(
+        None, "--criteria-list", help="Comma-separated criteria labels (score)."
+    ),
+) -> None:
+    """Ask Jev one question and print the JSON ``{"answers": ...}`` envelope."""
+    from mailroom_reloaded.agents.jev import JevClient, choice, noul, score
+    from mailroom_reloaded.settings import jev_config
+
+    cfg = jev_config()
+    if not cfg.enabled:
+        _jev_off()
+
+    pairs: dict[str, str] = {}
+    for item in criteria or []:
+        key, _, description = item.partition("=")
+        pairs[key.strip()] = description.strip()
+    labels = [c.strip() for c in (criteria_list or "").split(",") if c.strip()]
+
+    if question_type == "choice":
+        question = choice("question", instructions, pairs)
+    elif question_type == "noul":
+        question = noul("question", instructions, pairs or None)
+    elif question_type == "score":
+        question = score("question", instructions, labels)
+    else:
+        typer.echo(f"unknown --type {question_type!r}; use choice|noul|score", err=True)
+        raise typer.Exit(code=1)
+
+    name, payload = question
+    answers = JevClient(cfg).ask(state, {name: payload})
+    envelope = {"answers": {key: asdict(value) for key, value in answers.items()}}
+    typer.echo(json.dumps(envelope, default=str))
+
+
+@jev_app.command()
+def calibrate(
+    rows: Path = typer.Option(
+        ...,
+        "--rows",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="JSONL rows with split=train, confidence and correct.",
+    ),
+    out: Path = typer.Option(Path("models/jev_calibration.json"), "--out"),
+) -> None:
+    """Fit the Jev temperature + thresholds and write the calibration JSON."""
+    from mailroom_reloaded.eval.jev_calibration import fit_jev_calibration
+
+    data = [
+        json.loads(line)
+        for line in rows.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    result = fit_jev_calibration(data, out)
+    typer.echo(json.dumps(result, default=str))
 
 
 gmail_app = typer.Typer(
