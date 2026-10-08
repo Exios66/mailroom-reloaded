@@ -76,7 +76,7 @@ def test_coverage_uses_configured_required_fields():
 
 
 def test_coverage_falls_back_to_schema_fields_when_unconfigured(monkeypatch):
-    import mailroom_reloaded.agents.specialists as specialists
+    from mailroom_reloaded.agents import specialists
 
     class _FakeTaxonomy:
         def __init__(self, raw):

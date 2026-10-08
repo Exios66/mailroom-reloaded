@@ -43,6 +43,7 @@ def env(tmp_path, monkeypatch):
 
 
 def _state(**overrides) -> MailroomState:
+    """Build a populated pipeline state with optional attribute overrides."""
     state = MailroomState(
         doc_id="d1",
         path="",
@@ -90,6 +91,7 @@ def _state(**overrides) -> MailroomState:
 
 
 def test_report_includes_caveats():
+    """Verify reports retain arbiter caveats, stage outputs, route and usage totals."""
     state = _state()
     report = compile_report(state)
 
@@ -111,6 +113,7 @@ def test_report_includes_caveats():
 
 
 def test_report_no_llm(monkeypatch):
+    """Verify compiling a report does not call the structured LLM client."""
     def _boom(*args, **kwargs):
         raise AssertionError("compile_report must not call the LLM")
 
@@ -122,6 +125,7 @@ def test_report_no_llm(monkeypatch):
 
 
 def test_archive_sha_matches_file(env):
+    """Verify archival preserves bytes, computes their hash and creates a sidecar."""
     bins = Bins(env)
     src = bins.processing("w1") / "letter.txt"
     src.write_text("hello world")
@@ -140,6 +144,7 @@ def test_archive_sha_matches_file(env):
 
 
 def test_archive_audit_chain_verifies(env):
+    """Verify archival records its file hash in a valid audit chain."""
     bins = Bins(env)
     src = bins.processing("w1") / "letter.txt"
     src.write_text("hello world")
@@ -157,6 +162,7 @@ def test_archive_audit_chain_verifies(env):
 
 
 def test_report_handles_document_without_agent_results():
+    """Verify missing agent results produce empty report sections and zero usage."""
     report = compile_report(MailroomState(doc_id="empty", status="failed"))
     assert report["doc_id"] == "empty"
     assert report["status"] == "failed"
@@ -173,6 +179,7 @@ def test_report_handles_document_without_agent_results():
 
 
 def test_report_retains_failed_extraction_diagnostics():
+    """Verify reports retain invalid-schema, parse and truncation diagnostics."""
     state = _state(
         extract=ExtractResult(
             "correspondence",
@@ -197,6 +204,7 @@ def test_report_retains_failed_extraction_diagnostics():
 
 
 def test_report_copies_route_and_caveat_lists():
+    """Verify mutating report lists does not change pipeline state."""
     state = _state()
     report = compile_report(state)
     report["route_trail"].clear()
@@ -223,6 +231,7 @@ def test_report_copies_route_and_caveat_lists():
     ],
 )
 def test_report_token_price_calculation(monkeypatch, prices, expected):
+    """Verify cost estimates handle configured, partial and unavailable token prices."""
     taxonomy = SimpleNamespace(
         agent=lambda role: SimpleNamespace(model="test-model"),
         raw={"cost_models": {"test-model": prices}},
@@ -238,6 +247,7 @@ def test_report_token_price_calculation(monkeypatch, prices, expected):
 
 
 def test_report_survives_unavailable_taxonomy(monkeypatch):
+    """Verify taxonomy loading failures yield zero cost while preserving usage."""
     def unavailable():
         raise OSError("taxonomy unavailable")
 
@@ -259,6 +269,7 @@ def test_report_survives_unavailable_taxonomy(monkeypatch):
     ],
 )
 def test_archive_type_selection_and_sidecar(env, sort_type, extract_type, expected):
+    """Verify archive class precedence, safe directory names and report serialization."""
     bins = Bins(env)
     src = bins.processing("w1") / "letter.txt"
     src.write_bytes(b"synthetic document\x00\xff")
@@ -292,6 +303,7 @@ def test_archive_type_selection_and_sidecar(env, sort_type, extract_type, expect
 
 
 def test_archiving_same_filename_preserves_both_documents(env):
+    """Verify colliding filenames preserve both document contents and sidecars."""
     bins = Bins(env)
     results = []
     for worker, text in [("w1", "first"), ("w2", "second")]:
@@ -309,6 +321,7 @@ def test_archiving_same_filename_preserves_both_documents(env):
 
 
 def test_missing_archive_source_does_not_record_success(env):
+    """Verify a missing source leaves state, audit entries and sidecars unchanged."""
     bins = Bins(env)
     state = _state(doc_id="missing", path=str(env / "missing.txt"))
     manifest = Manifest(

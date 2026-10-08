@@ -161,7 +161,7 @@ class MailroomFlow(Flow[MailroomState]):
     def _node_bert_primary(self) -> None:
         """Classify with ModernBERT and derive the sorter handoff."""
         state = self.state
-        verdict = classify_primary(state.text)
+        verdict = classify_primary(state.text, filename=Path(state.path).name)
         state.bert = verdict
         state.handoff = decide_handoff(verdict, load_taxonomy().bert)
         route = (
@@ -289,6 +289,7 @@ class MailroomFlow(Flow[MailroomState]):
     ) -> Any:
         """Run a node under resume-skip, manifest/audit, span and budget guards."""
         if node_name in self._resume_done:
+            self._resume_done.remove(node_name)
             return None
         deadlines = self._overrides.get("deadlines", {})
         budgets = self._overrides.get("token_budgets", {})
@@ -534,9 +535,13 @@ class MailroomFlow(Flow[MailroomState]):
 
         doc_id = doc_id_for(work)
         content_sha256 = _sha256_file(work)
-        manifest = load_manifest(self._bins, doc_id) or Manifest(
-            doc_id=doc_id, filename=work.name, content_sha256=content_sha256
-        )
+        manifest = load_manifest(self._bins, doc_id)
+        if manifest is None or (
+            resume_from is None and manifest.status in {"archived", "failed"}
+        ):
+            manifest = Manifest(
+                doc_id=doc_id, filename=work.name, content_sha256=content_sha256
+            )
         manifest.doc_id = doc_id
         manifest.filename = work.name
         manifest.content_sha256 = content_sha256

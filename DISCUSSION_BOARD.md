@@ -23,8 +23,69 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Jev gate + docs] Opt-in Jev probabilistic scorer / route gate landed on PR #5 — orchestrator
+- **Status:** done (Task 24 Step 4 live run still env-blocked)
+- **Sources (issue #8):** hosted Jev `typesafe/jev-1.13` via OpenRouter Decisions API
+  (`OPENROUTER_API_KEY`, 32k ctx) and TypeSafe native `/v1/systemone` (`TYPESAFE_API_KEY`,
+  64k ctx); offline `alibiserikbay/JevK5` (4.2B `qwen3_5_text`, read letter logits / 1.22)
+  via a local server.
+- **Files:** `agents/jev.py`, `eval/jev_calibration.py`, `agents/gate.py`, `cli.py` (`jev`),
+  `settings.py`, `config/taxonomy.yaml`, `.env.example`, `docs/JEV.md`,
+  README/ARCHITECTURE/CONFIGURATION/EVALUATION.
+- **Evidence:** `uv run pytest -q` → 610 passed, 1 skipped, 2 deselected;
+  `uv run ruff check .` clean; Jev tests proven no-network (fake transport).
+- **Commits:** `6691524` Jev scorer + gate; `007a0de` docs; `6d20939` consume
+  `verify_threshold`; rebased over CodeRabbit `2bdebcf` / `9f34df0`.
+- **Notes:** Jev is off by default and needs `models/jev_calibration.json`. `JevGate` now uses
+  the official three-tier pattern: `<verify` → `human_review`; `verify <= c < accept` → `verify`
+  (never downgrading a Jev escalation choice); `>= accept` → the chosen action. Shipped
+  calibration does not transfer (issue #8).
+
+---
+
+### [Tasks 21/24 + Dev server + Docs] scorecards, conformance, dev server, docs — subagents + orchestrator
+- **Status:** done
+- **Files:** `eval/{metrics,cards,vllm_telemetry,cost,conformance}.py`, `cli.py`,
+  `tests/eval/*`, `tests/test_cli.py`; `deploy/{Dockerfile.dev,docker-compose.dev.yml}`,
+  `scripts/dev.sh`, `scripts/dev_test.sh`, `Makefile`, `docs/DEV_SERVER.md`,
+  `tests/deploy/test_dev_compose.py`; `README.md`,
+  `docs/{ARCHITECTURE,CONFIGURATION,EVALUATION,OPERATIONS,TESTING}.md`.
+- **Evidence:** `uv run pytest -q` → **488 passed, 1 skipped, 2 deselected**;
+  `uv run ruff check .` → clean; `docker compose -f deploy/docker-compose.dev.yml config -q`
+  → rc 0; `uv run pytest tests/eval/test_conformance.py -v` → 5 passed;
+  `uv run pytest tests/deploy -v` → 26 passed.
+- **Commits:** `4e78005` conformance + card CLI; `bb5cd43` dev server + live marker;
+  `816bebf` docs set. Earlier this session: `39448ef`/`f9e9592` Task 21 KPIs;
+  `6d6b9a8` Gmail intake (optional `gmail` extra).
+- **Notes:** `mailroom card` and `mailroom conformance` placeholders replaced with
+  real commands; pytest `live` marker + `addopts = "-m 'not live'"` added (plan
+  Task 1); eval package exports sorted. Dev server = `make dev` (`scripts/dev.sh up`):
+  app (reload) + split watcher + OTel/Phoenix/Prometheus/Grafana, mock provider, no GPU.
+
+---
+
+### [Adversarial + test-suite review] PR #5 audit and hardening — reviewers + orchestrator
+- **Status:** done (one item environment-blocked)
+- **Verdict:** revise — no fabrication; the green suite and ruff claims reproduced exactly.
+- **Reviewed:** the full `main...feat/mailroom-reloaded-completion` diff (Tasks 11–24,
+  Gmail intake, dev server, docs).
+- **Verified independently:** `uv run pytest -q` → 494 passed, 1 skipped, 2 deselected;
+  `uv run ruff check .` clean; `docker compose -f deploy/docker-compose.dev.yml config -q`
+  rc 0; CrewAI 1.15.25 Flow/Agent/Task usage matches docs.crewai.com; no new mandatory
+  deps; dependency fence + `CREWAI_DISABLE_TELEMETRY` intact.
+- **Fixed after review:** conformance vacuous pass rates (empty run / zero tool calls now
+  render `n/a`, never 1.0); added recorder-error, invariant-failure, empty-role,
+  judge-live-seam and CLI-wiring tests; `--strict-markers` + single `live` registration;
+  refreshed stale doc line-refs.
+- **needs_attention (env):** Task 24 Step 4 — live `mailroom conformance --provider
+  llamafile|vllm` was NOT run (no `.env`/provider in this environment). Offline card
+  generation is proven; live pass rates are deferred to a configured host.
+- **Commits:** `2ad2f79` conformance hardening; `57b3e41` doc-ref refresh; `7d7187c` ruff fix.
+
+---
+
 ### [Task 19 + HF audit] API/CLI/UI + ModernBERT & dataset verification — subagent + lucius
-- **Status:** done (with three HF-derived fixes queued)
+- **Status:** done; BERT-1 / BERT-3 / HF-DS-3 fixed by `db75692`
 - **Files:** `src/mailroom_reloaded/api/*`, `cli.py`, `tests/api/*`;
   `config/taxonomy.yaml` (`required_fields`), `tests/agents/test_specialists.py`.
 - **Evidence:** `uv run pytest tests/api -v` → 7 passed; `uv run pytest -q` → 297 passed, 3 skipped.
@@ -35,15 +96,15 @@ this is a ledger, not a governance board.
   - Dataset `mailroom-dataset` @ `ed7576b6`; training/eval = `mailroom-modernbert-training`
     `documents` (2680/299/**323**); test split overlaps training `content_sha256` 323/323.
   - **F1 fixed:** `required_fields` derived from train-split GT presence ≥ 0.8.
-  - **BERT-1 (open, harness, blocks feature):** `ingest/bert.py` calls
-    `classify_document(text)`; real signature is `classify_document(bundle, title, doc_text)`.
-    Use `classify_document_default(text, filename=...)`.
-  - **BERT-3 (open):** `no_model`/`bundle_missing` markers only reachable via
-    `classify_document_default`; the current path maps missing bundle → `error`.
-  - **HF-DS-3 (open, harness):** `eval/dataset.py` reads `content_sha256` off the
-    blind row (absent; it lives in `ground_truth`) and GT `fields` (actual column is
-    `gt_fields` JSON) → live eval would drop all field GT.
-  - **§5 gap:** the BERT-manifest `content_sha256` overlap check is unimplemented.
+  - **BERT-1 (RESOLVED by `db75692`):** `ingest/bert.py` now prefers
+    `classify_document_default(text, filename=...)` (see `ingest/bert.py:66-69`).
+  - **BERT-3 (RESOLVED by `db75692`):** `no_model` / `bundle_missing` markers route
+    through `classify_document_default`.
+  - **HF-DS-3 (RESOLVED by `db75692`):** `eval/dataset.py:198-259` reads the blind-row
+    `metadata` blob and the `gt_fields` JSON; `content_sha256` is read/verified from
+    `ground_truth`.
+  - **§5 gap (still open):** the BERT-manifest `content_sha256` overlap check remains a
+    helper (`eval/dataset.py:302-311`), not called by the runner.
 
 ---
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .cards import CARD_SCHEMA, build_card, build_master, render_card_md
+from .cost import cell_cost, token_split
 from .dataset import (
     DEFAULT_REVISION,
     REPO,
@@ -12,9 +14,12 @@ from .dataset import (
     load_split,
     sample,
 )
+from .metrics import gate_kpis, sorter_kpis, specialist_kpis
 from .runner import EvalConfig, run_eval, select_graded
+from .vllm_telemetry import ReplicaTelemetry, scrape, telemetry_delta
 
 __all__ = [
+    "CARD_SCHEMA",
     "DEFAULT_REVISION",
     "REPO",
     "BlindDoc",
@@ -22,8 +27,19 @@ __all__ = [
     "EvalConfig",
     "EvalContext",
     "GroundTruth",
+    "ReplicaTelemetry",
+    "build_card",
+    "build_master",
+    "cell_cost",
+    "gate_kpis",
     "load_split",
+    "render_card_md",
     "run_eval",
     "sample",
+    "scrape",
     "select_graded",
+    "sorter_kpis",
+    "specialist_kpis",
+    "telemetry_delta",
+    "token_split",
 ]

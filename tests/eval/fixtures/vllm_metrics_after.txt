@@ -1,0 +1,26 @@
+# HELP vllm:prefix_cache_queries_total Total number of prefix cache queries.
+# TYPE vllm:prefix_cache_queries_total counter
+vllm:prefix_cache_queries_total{model_name="Qwen/Qwen3-8B-AWQ"} 1600.0
+# HELP vllm:prefix_cache_hits_total Total number of prefix cache hits.
+# TYPE vllm:prefix_cache_hits_total counter
+vllm:prefix_cache_hits_total{model_name="Qwen/Qwen3-8B-AWQ"} 700.0
+# HELP vllm:time_to_first_token_seconds Time to first token in seconds.
+# TYPE vllm:time_to_first_token_seconds histogram
+vllm:time_to_first_token_seconds_sum{model_name="Qwen/Qwen3-8B-AWQ"} 110.0
+vllm:time_to_first_token_seconds_count{model_name="Qwen/Qwen3-8B-AWQ"} 20.0
+# HELP vllm:request_success_total Count of successfully processed requests.
+# TYPE vllm:request_success_total counter
+vllm:request_success_total{finished_reason="stop",model_name="Qwen/Qwen3-8B-AWQ"} 140.0
+vllm:request_success_total{finished_reason="length",model_name="Qwen/Qwen3-8B-AWQ"} 5.0
+# HELP vllm:num_preemptions_total Cumulative number of preemption events.
+# TYPE vllm:num_preemptions_total counter
+vllm:num_preemptions_total{model_name="Qwen/Qwen3-8B-AWQ"} 4.0
+# HELP vllm:prompt_tokens_total Number of prefill tokens processed.
+# TYPE vllm:prompt_tokens_total counter
+vllm:prompt_tokens_total{model_name="Qwen/Qwen3-8B-AWQ"} 180000.0
+# HELP vllm:generation_tokens_total Number of generation tokens processed.
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model_name="Qwen/Qwen3-8B-AWQ"} 12000.0
+# HELP vllm:kv_cache_usage_perc KV-cache usage, fraction of blocks in use.
+# TYPE vllm:kv_cache_usage_perc gauge
+vllm:kv_cache_usage_perc{model_name="Qwen/Qwen3-8B-AWQ"} 0.35

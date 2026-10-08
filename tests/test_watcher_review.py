@@ -21,7 +21,7 @@ from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.storage import audit_log
 from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
-from mailroom_reloaded.watcher import Watcher
+from mailroom_reloaded.watcher import Watcher, _acquire_watcher_lock, _release_lock
 
 CORR_SUBCLASS = {
     "doc_subclass": "email",
@@ -61,6 +61,7 @@ CORRUPT_PDF = b"%PDF-1.4\n\x00\xff garbage not a real pdf"
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -71,6 +72,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -78,6 +80,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -96,6 +99,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -113,6 +117,7 @@ def _patch_handoff(
     doc_type="correspondence",
     route="fast_path",
 ):
+    """Stub BERT classification and handoff for a deterministic routing scenario."""
     locked = doc_type if mode is SortMode.SUBCLASS_ONLY else None
     verdict = BertVerdict(
         available=True,
@@ -126,15 +131,16 @@ def _patch_handoff(
         route=route,
     )
     handoff = Handoff(mode, locked, f"BERT predicts class {doc_type}", route)
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
     return verdict, handoff
 
 
 def _patch_bert_unavailable(monkeypatch):
+    """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 
@@ -144,6 +150,7 @@ def _reply(provider, payload):
 
 
 def _write_inbox(base, name="letter.txt", text="A short business letter about the deal."):
+    """Write a test document to the inbox and return its bins and path."""
     bins = Bins(base)
     path = bins.inbox / name
     path.write_text(text)
@@ -151,6 +158,7 @@ def _write_inbox(base, name="letter.txt", text="A short business letter about th
 
 
 def _fake_extract(confidence=1.0, data=None):
+    """Build an extractor stub with fixed confidence, data and token usage."""
     def run(text, doc_type, doc_subclass, **kwargs):
         return ExtractResult(
             doc_type,
@@ -182,6 +190,7 @@ def _park(env, mock_provider, monkeypatch):
 
 
 def test_two_workers_one_file(env, mock_provider, monkeypatch):
+    """Verify concurrent watchers claim and archive an inbox file exactly once."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
@@ -206,6 +215,7 @@ def test_two_workers_one_file(env, mock_provider, monkeypatch):
 
 
 def test_corrupt_file_goes_failed_and_watcher_continues(env, mock_provider, monkeypatch):
+    """Verify corrupt input fails with a valid audit trail while other work completes."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
@@ -229,6 +239,7 @@ def test_corrupt_file_goes_failed_and_watcher_continues(env, mock_provider, monk
 
 
 def test_startup_resumes_processing_manifest(env, mock_provider, monkeypatch):
+    """Verify startup recovers interrupted processing without repeating completed sorting."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     bins, path = _write_inbox(env)
@@ -248,7 +259,13 @@ def test_startup_resumes_processing_manifest(env, mock_provider, monkeypatch):
 
     monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
     watcher = Watcher(bins, "w2", 1)
-    assert watcher.drain_once() == 0  # inbox empty; only the crashed claim resumed
+    watcher._lock = _acquire_watcher_lock(bins.base / "watcher.lock")
+    assert watcher._lock is not None
+    try:
+        assert watcher.drain_once() == 0  # only the crashed claim resumed
+    finally:
+        _release_lock(watcher._lock)
+        watcher._lock = None
     assert watcher.resumed == 1
 
     assert list((bins.archive / "correspondence").glob("*.txt"))
@@ -258,6 +275,7 @@ def test_startup_resumes_processing_manifest(env, mock_provider, monkeypatch):
 
 
 def test_review_correct_resumes_at_extract(env, mock_provider, monkeypatch):
+    """Verify review corrections resume extraction with the new class and no sorting."""
     bins, parked = _park(env, mock_provider, monkeypatch)
     doc_id = parked.doc_id
 
@@ -304,6 +322,7 @@ def test_review_correct_resumes_at_extract(env, mock_provider, monkeypatch):
 
 
 def test_review_reject_moves_failed(env, mock_provider, monkeypatch):
+    """Verify rejection moves the source to failed and updates manifest and audit state."""
     bins, parked = _park(env, mock_provider, monkeypatch)
     doc_id = parked.doc_id
 

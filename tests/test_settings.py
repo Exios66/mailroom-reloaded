@@ -1,9 +1,12 @@
 from pathlib import Path
 
+import pytest
+
 from mailroom_reloaded.settings import (
     RunConditions,
     Settings,
     get_settings,
+    jev_config,
     load_taxonomy,
 )
 
@@ -91,3 +94,108 @@ def test_settings_env(monkeypatch):
     assert s.provider == "vllm" and s.vllm_base_url == "http://x/v1"
     assert s.openrouter_api_key == "k" and s.api_token == "tok" and s.trace_mask is True
     assert s.base_dir == Path("/tmp/mr")
+
+
+_JEV_ENV = (
+    "MAILROOM_JEV_PROVIDER",
+    "JEV_PROVIDER",
+    "MAILROOM_JEV_MODEL",
+    "JEV_MODEL",
+    "MAILROOM_JEV_BASE_URL",
+    "JEV_BASE_URL",
+    "MAILROOM_JEV_API_KEY",
+    "JEV_API_KEY",
+    "MAILROOM_JEV_TEMPERATURE",
+    "MAILROOM_JEV_ACCEPT_THRESHOLD",
+    "MAILROOM_JEV_TIMEOUT_S",
+    "MAILROOM_JEV_MAX_RETRIES",
+    "TYPESAFE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "MAILROOM_OPENROUTER_API_KEY",
+)
+
+
+def _clear_jev_env(monkeypatch):
+    for key in _JEV_ENV:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_jev_config_defaults(monkeypatch):
+    _clear_jev_env(monkeypatch)
+    cfg = jev_config()
+    assert cfg.provider == "off"
+    assert cfg.enabled is False
+    assert cfg.model == "" and cfg.base_url == ""
+    assert cfg.api_key is None
+    assert cfg.temperature == 1.0
+    assert cfg.accept_threshold == 0.8
+    assert cfg.timeout_s == 10.0
+    assert cfg.max_retries == 2
+
+
+def test_jev_config_env_override(monkeypatch):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "openrouter")
+    monkeypatch.setenv("JEV_MODEL", "custom-model")
+    monkeypatch.setenv("MAILROOM_JEV_ACCEPT_THRESHOLD", "0.9")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "tk")
+    cfg = jev_config()
+    assert cfg.provider == "openrouter"
+    assert cfg.enabled is True
+    assert cfg.model == "custom-model"
+    assert cfg.base_url == "https://openrouter.ai/api/alpha/decisions"
+    assert cfg.api_key == "tk"
+    assert cfg.accept_threshold == 0.9
+
+
+@pytest.mark.parametrize(
+    "provider,model,base_url",
+    [
+        ("openrouter", "typesafe/jev-1.13", "https://openrouter.ai/api/alpha/decisions"),
+        ("typesafe", "jev-latest", "https://api.typesafe.ai/v1/systemone"),
+        ("local", "jevk5", "http://127.0.0.1:8090/v1/systemone"),
+    ],
+)
+def test_jev_config_provider_defaults(monkeypatch, provider, model, base_url):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", provider)
+    cfg = jev_config()
+    assert (cfg.model, cfg.base_url) == (model, base_url)
+
+
+def test_jev_config_api_key_order(monkeypatch):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    assert jev_config().api_key is None
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    assert jev_config().api_key == "or"
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts")
+    assert jev_config().api_key == "ts"
+    monkeypatch.setenv("JEV_API_KEY", "jv")
+    assert jev_config().api_key == "jv"
+    monkeypatch.setenv("MAILROOM_JEV_API_KEY", "mjv")
+    assert jev_config().api_key == "mjv"
+
+
+@pytest.mark.parametrize(
+    "provider,expected",
+    [("openrouter", "or"), ("typesafe", "ts")],
+)
+def test_jev_config_api_key_prefers_provider_key(monkeypatch, provider, expected):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", provider)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts")
+
+    assert jev_config().api_key == expected
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "typesafe"])
+def test_jev_config_jev_api_key_overrides_provider_key(monkeypatch, provider):
+    _clear_jev_env(monkeypatch)
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", provider)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "ts")
+    monkeypatch.setenv("JEV_API_KEY", "jv")
+
+    assert jev_config().api_key == "jv"

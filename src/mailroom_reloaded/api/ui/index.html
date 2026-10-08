@@ -100,13 +100,29 @@
     return res.json();
   }
 
+  function textSpan(text, className) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    return span;
+  }
+
   function setError(target, err) {
-    $(target).innerHTML = '<span class="bad">' + String(err.message || err) + "</span>";
+    $(target).replaceChildren(textSpan(String(err.message || err), "bad"));
   }
 
   function statusPill(s) {
-    const cls = s === "archived" ? "ok" : (s === "failed" ? "bad" : "muted");
-    return '<span class="pill ' + cls + '">' + (s || "?") + "</span>";
+    const status = ["processing", "parked", "archived", "failed"].includes(s) ? s : "?";
+    const cls = status === "archived" ? "ok" : (status === "failed" ? "bad" : "muted");
+    return textSpan(status, "pill " + cls);
+  }
+
+  function addTextCells(tr, values) {
+    for (const value of values) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
   }
 
   async function loadDocuments() {
@@ -118,8 +134,10 @@
     for (const d of body.documents || []) {
       const tr = document.createElement("tr");
       tr.className = "clickable";
-      tr.innerHTML = "<td>" + (d.doc_id || "") + "</td><td>" + (d.filename || "") +
-        "</td><td>" + (d.doc_type || "—") + "</td><td>" + statusPill(d.status) + "</td>";
+      addTextCells(tr, [d.doc_id || "", d.filename || "", d.doc_type || "—"]);
+      const statusCell = document.createElement("td");
+      statusCell.appendChild(statusPill(d.status));
+      tr.appendChild(statusCell);
       tr.onclick = () => selectDocument(d.doc_id);
       tb.appendChild(tr);
     }
@@ -133,8 +151,7 @@
     for (const d of body.documents || []) {
       const tr = document.createElement("tr");
       tr.className = "clickable";
-      tr.innerHTML = "<td>" + (d.doc_id || "") + "</td><td>" + (d.filename || "") +
-        "</td><td>" + (d.doc_type || "—") + "</td>";
+      addTextCells(tr, [d.doc_id || "", d.filename || "", d.doc_type || "—"]);
       tr.onclick = () => selectDocument(d.doc_id);
       tb.appendChild(tr);
     }
@@ -148,7 +165,7 @@
     for (const r of body.runs || []) {
       const tr = document.createElement("tr");
       tr.className = "clickable";
-      tr.innerHTML = "<td>" + r.run_id + "</td><td>" + (r.documents ?? "—") + "</td>";
+      addTextCells(tr, [r.run_id, r.documents ?? "—"]);
       tr.onclick = () => loadCards(r.run_id);
       tb.appendChild(tr);
     }
@@ -182,10 +199,11 @@
     try {
       const body = await api("/v1/audit/" + encodeURIComponent(docId));
       const ok = body.chain && body.chain.ok;
-      $("auditResult").innerHTML =
-        (ok ? '<span class="ok">chain OK</span>' : '<span class="bad">chain BROKEN at ' +
-          (body.chain && body.chain.broken_at) + "</span>") +
-        " · " + (body.entries || []).length + " entries";
+      const summary = ok ? "chain OK" : "chain BROKEN at " + (body.chain && body.chain.broken_at);
+      $("auditResult").replaceChildren(
+        textSpan(summary, ok ? "ok" : "bad"),
+        document.createTextNode(" · " + (body.entries || []).length + " entries")
+      );
     } catch (err) { setError("auditResult", err); }
   }
 

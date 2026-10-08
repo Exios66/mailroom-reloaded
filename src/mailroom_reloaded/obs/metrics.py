@@ -47,9 +47,11 @@ class _Metrics:
     """Lazy attribute namespace of the spec section 8 instruments."""
 
     def __init__(self) -> None:
+        """Initialize the cache of lazily created metric instruments."""
         object.__setattr__(self, "_instruments", {})
 
     def __getattr__(self, name: str) -> Any:
+        """Return a cached instrument, rejecting names outside the metric specs."""
         if name.startswith("_"):
             raise AttributeError(name)
         spec = _SPECS.get(name)
@@ -62,6 +64,7 @@ class _Metrics:
 
     @staticmethod
     def _create(spec: tuple[str, str, str]) -> Any:
+        """Create a counter, histogram or gauge on the current meter provider."""
         otel_name, kind, unit = spec
         meter = metrics.get_meter(METER_NAME)
         if kind == "counter":
@@ -79,6 +82,7 @@ class _Metrics:
         object.__getattribute__(self, "_instruments").clear()
 
     def __dir__(self) -> list[str]:
+        """Expose the supported metric attribute names for introspection."""
         return sorted(_SPECS)
 
 
@@ -86,19 +90,32 @@ M = _Metrics()
 
 
 def _default_otlp_reader() -> Any:
-    """A periodic OTLP HTTP metric reader, or ``None`` when unavailable."""
-    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None and "pytest" in sys.modules:
+    """A periodic OTLP metric reader, or ``None`` when unavailable."""
+    if (
+        os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None
+        and os.environ.get("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") is None
+        and "pytest" in sys.modules
+    ):
         return None
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318").rstrip("/")
-    if not endpoint.endswith("/v1/metrics"):
-        endpoint = endpoint + "/v1/metrics"
+    protocol = os.environ.get(
+        "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+        os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+    )
     try:
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
-            OTLPMetricExporter,
-        )
+        if protocol == "grpc":
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                OTLPMetricExporter,
+            )
+        elif protocol == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+                OTLPMetricExporter,
+            )
+        else:
+            raise ValueError(f"Unsupported OTLP metrics protocol: {protocol}")
+
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-        return PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=endpoint))
+        return PeriodicExportingMetricReader(OTLPMetricExporter())
     except Exception:  # pragma: no cover - exporter package always installed
         logger.warning("otlp_metric_reader_unavailable", exc_info=True)
         return None

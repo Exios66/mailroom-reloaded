@@ -56,6 +56,7 @@ LETTER = b"A short business letter about the deal."
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -66,6 +67,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -73,6 +75,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -91,6 +94,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(env):
+    """Yield an API test client with the application lifespan active."""
     from mailroom_reloaded.api.app import app
 
     with TestClient(app) as c:
@@ -99,6 +103,7 @@ def client(env):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -116,6 +121,7 @@ def _patch_handoff(
     doc_type="correspondence",
     route="fast_path",
 ):
+    """Stub BERT classification and handoff for a deterministic routing scenario."""
     locked = doc_type if mode is SortMode.SUBCLASS_ONLY else None
     verdict = BertVerdict(
         available=True,
@@ -129,15 +135,16 @@ def _patch_handoff(
         route=route,
     )
     handoff = Handoff(mode, locked, f"BERT predicts class {doc_type}", route)
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
     return verdict, handoff
 
 
 def _patch_bert_unavailable(monkeypatch):
+    """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 
@@ -147,6 +154,7 @@ def _reply(provider, payload):
 
 
 def _upload(client, name="letter.txt", content=LETTER):
+    """Upload a text file, require acceptance and return its document ID."""
     resp = client.post(
         "/v1/documents",
         files={"file": (name, content, "text/plain")},
@@ -181,6 +189,7 @@ def _parked_doc(env, mock_provider, monkeypatch, client):
 
 
 def test_upload_then_process(env, mock_provider, monkeypatch, client):
+    """Verify an accepted upload becomes queryable after watcher archival."""
     _patch_handoff(monkeypatch)
     _reply(mock_provider, CORR_SUBCLASS)
     _reply(mock_provider, CORR_EXTRACT)
@@ -209,6 +218,7 @@ def test_upload_then_process(env, mock_provider, monkeypatch, client):
 
 
 def test_audit_verify_ok(env, mock_provider, monkeypatch, client):
+    """Verify an archived document exposes a valid audit chain through the API."""
     doc_id, _bins = _fast_path_doc(env, mock_provider, monkeypatch, client)
 
     resp = client.get(f"/v1/audit/{doc_id}")
@@ -221,6 +231,7 @@ def test_audit_verify_ok(env, mock_provider, monkeypatch, client):
 
 
 def test_review_resolve_endpoint(env, mock_provider, monkeypatch, client):
+    """Verify rejection moves a parked document to failed and unknown IDs return 404."""
     doc_id, bins = _parked_doc(env, mock_provider, monkeypatch, client)
 
     parked = client.get(f"/v1/documents/{doc_id}").json()
@@ -246,6 +257,7 @@ def test_review_resolve_endpoint(env, mock_provider, monkeypatch, client):
 
 
 def test_ui_served(client):
+    """Verify the UI serves HTML containing the observability links."""
     resp = client.get("/ui")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
@@ -256,16 +268,18 @@ def test_ui_served(client):
 
 
 def test_runs_shape(client):
+    """Verify absent evaluation runs and cards produce empty response lists."""
     resp = client.get("/v1/runs")
     assert resp.status_code == 200
     assert resp.json() == {"runs": []}
 
-    cards = client.get("/v1/runs/nope/cards")
+    cards = client.get("/v1/runs/000000000000/cards")
     assert cards.status_code == 200
-    assert cards.json() == {"run_id": "nope", "cards": []}
+    assert cards.json() == {"run_id": "000000000000", "cards": []}
 
 
 def test_offbind_without_token_refuses(env, monkeypatch):
+    """Verify public binding requires a token while loopback binding does not."""
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     from mailroom_reloaded import settings as settings_mod
 
@@ -281,6 +295,7 @@ def test_offbind_without_token_refuses(env, monkeypatch):
 
 
 def test_bearer_required_when_token_set(env, monkeypatch, client):
+    """Verify protected routes require the token while health stays public."""
     monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
     from mailroom_reloaded import settings as settings_mod
 
@@ -294,3 +309,72 @@ def test_bearer_required_when_token_set(env, monkeypatch, client):
 
     # /health stays public.
     assert client.get("/health").status_code == 200
+
+
+@pytest.mark.parametrize("run_id", ["%2e%2e", "%5c..", "not-a-run", "a" * 11, "a" * 13, "A" * 12])
+def test_cards_reject_invalid_run_ids(client, run_id):
+    assert client.get(f"/v1/runs/{run_id}/cards").status_code == 400
+
+
+def test_cards_reads_valid_run(env, client):
+    cards_dir = env / "runs" / "012345abcdef" / "cards"
+    cards_dir.mkdir(parents=True)
+    (cards_dir / "card.json").write_text('{"score": 1}')
+    assert client.get("/v1/runs/012345abcdef/cards").json() == {
+        "run_id": "012345abcdef", "cards": [{"score": 1}]
+    }
+
+
+@pytest.mark.parametrize("authorization", [b"Basic s3cret", b"Bearer ", b"Bearer \xff", b"bearer s3cret"])
+def test_invalid_authorization_is_unauthorized(env, client, monkeypatch, authorization):
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    assert client.get("/v1/documents", headers={b"Authorization": authorization}).status_code == 401
+
+
+@pytest.mark.parametrize("failure", [None, "lock", "unexpected"])
+def test_embedded_watcher_logs_errors_and_joins(env, monkeypatch, failure):
+    import importlib
+    import threading
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.watcher import WatcherLockHeld
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    started = threading.Event()
+    stopped = threading.Event()
+    finished = threading.Event()
+    error = WatcherLockHeld("occupied") if failure == "lock" else RuntimeError("failed")
+
+    class FakeWatcher:
+        def __init__(self, *args):
+            pass
+
+        def run_forever(self):
+            started.set()
+            try:
+                if failure:
+                    raise error
+                assert stopped.wait(5)
+            finally:
+                finished.set()
+
+        def stop(self):
+            stopped.set()
+
+    monkeypatch.setenv("MAILROOM_EMBED_WATCHER", "1")
+    monkeypatch.setattr("mailroom_reloaded.watcher.Watcher", FakeWatcher)
+    log = Mock()
+    monkeypatch.setattr(app_mod, "logger", log)
+    application = app_mod.create_app()
+    with TestClient(application):
+        assert started.wait(5)
+    assert stopped.is_set()
+    assert finished.is_set()
+    assert not application.state.watcher_thread.is_alive()
+    if failure:
+        log.exception.assert_called_once_with("embedded_watcher_failed")
+    else:
+        log.exception.assert_not_called()

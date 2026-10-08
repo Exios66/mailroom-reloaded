@@ -5,7 +5,7 @@ imports ``crewai``, so the OpenInference ``CrewAIInstrumentor`` and
 ``OpenAIInstrumentor`` wrap those libraries before first use. It is idempotent:
 a second call returns the configured provider (and attaches any exporter the
 caller passes, which the tests use to install an in-memory exporter). It is safe
-when no collector is reachable: the default OTLP HTTP exporter runs behind a
+when no collector is reachable: the default OTLP exporter runs behind a
 ``BatchSpanProcessor`` and dropped exports never raise into the pipeline.
 """
 
@@ -34,7 +34,6 @@ __all__ = ["MaskingSpanProcessor", "build_resource", "setup_tracing"]
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OTLP_ENDPOINT = "http://localhost:4318"
 MASKED = "<masked>"
 
 _PROVIDER: TracerProvider | None = None
@@ -87,6 +86,7 @@ class MaskingSpanProcessor(SpanProcessor):
 
     @staticmethod
     def _mask(span) -> None:
+        """Replace content attributes with the mask while preserving other values."""
         attrs = getattr(span, "_attributes", None)
         if not attrs:
             return
@@ -140,24 +140,36 @@ def build_resource(service_name: str = "mailroom") -> Resource:
 
 
 def _default_otlp_exporter() -> SpanExporter | None:
-    """An OTLP HTTP span exporter at ``OTEL_EXPORTER_OTLP_ENDPOINT`` or ``None``.
+    """An OTLP span exporter using the configured protocol and endpoint, or ``None``.
 
     Under pytest with no endpoint configured there is no collector to reach, so
     the default localhost exporter is skipped to keep test output clean; tests
     install an in-memory exporter through ``setup_tracing``. Production (or an
-    explicit ``OTEL_EXPORTER_OTLP_ENDPOINT``) always gets the exporter.
+    explicit generic or trace-specific endpoint) always gets the exporter.
     """
-    if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None and "pytest" in sys.modules:
+    if (
+        os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") is None
+        and os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") is None
+        and "pytest" in sys.modules
+    ):
         return None
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_OTLP_ENDPOINT).rstrip("/")
-    if not endpoint.endswith("/v1/traces"):
-        endpoint = endpoint + "/v1/traces"
+    protocol = os.environ.get(
+        "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+        os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+    )
     try:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-            OTLPSpanExporter,
-        )
+        if protocol == "grpc":
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter,
+            )
+        elif protocol == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
+        else:
+            raise ValueError(f"Unsupported OTLP traces protocol: {protocol}")
 
-        return OTLPSpanExporter(endpoint=endpoint)
+        return OTLPSpanExporter()
     except Exception:  # pragma: no cover - exporter package always installed
         logger.warning("otlp_span_exporter_unavailable", exc_info=True)
         return None
@@ -197,6 +209,9 @@ def setup_tracing(
 
     if _PROVIDER is not None:
         if mask and not _MASK_INSTALLED:
+            # Processors run in registration order: exporters already attached
+            # can see unmasked attributes. Enable masking on the first setup
+            # call to protect all exporters; this only protects later ones.
             _PROVIDER.add_span_processor(MaskingSpanProcessor())
             _MASK_INSTALLED = True
         if exporter is not None:

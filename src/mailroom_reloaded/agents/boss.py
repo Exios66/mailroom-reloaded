@@ -16,7 +16,7 @@ ROLE = "boss"
 
 
 class BossDecision(BaseModel):
-    """One boss escalation action; class fields are set only when reassigning."""
+    """One boss action; class fields are meaningful only for ``reassign_class``."""
 
     action: Literal["reassign_class", "accept", "human_review"]
     doc_type: str | None = None

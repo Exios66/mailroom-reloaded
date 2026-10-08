@@ -17,6 +17,7 @@ manifest checkpointing and audit dedupe apply unchanged.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -84,9 +85,10 @@ def resolve_review(
         if doc_subclass:
             overrides["doc_subclass"] = doc_subclass
 
+    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
     state = _flow.run_document(
         path,
-        worker_id=f"review-{reviewer}",
+        worker_id=f"review-{worker_reviewer}",
         resume_from="extract",
         overrides=overrides,
     )
@@ -102,6 +104,7 @@ def resolve_review(
 
 
 def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
+    """Find an existing source via its saved path or review-bin filename."""
     candidates: list[Path] = []
     state_path = (manifest.state or {}).get("path")
     if state_path:
@@ -119,6 +122,7 @@ def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
 
 
 def _restore_state(manifest: Manifest) -> MailroomState:
+    """Restore checkpointed state, falling back to the manifest identity."""
     if manifest.state:
         try:
             return MailroomState.model_validate(manifest.state)

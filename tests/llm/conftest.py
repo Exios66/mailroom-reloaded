@@ -2,10 +2,6 @@ import pytest
 from fakes.openai_server import fake_openai  # noqa: F401  (re-exported fixture)
 
 
-def pytest_configure(config):
-    config.addinivalue_line("markers", "live: hits a real configured provider (needs MAILROOM_LIVE=1)")
-
-
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
     """No real sleeping in retry; forget per-endpoint tool-support memory."""

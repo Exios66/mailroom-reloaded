@@ -29,6 +29,10 @@ MAX_PREFILL_COMBOS = 8
 class LengthFinishReasonError(Exception):
     """The model hit its output cap (``finish_reason == "length"``)."""
 
+    def __init__(self, message: str, *, usage: Usage | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage if usage is not None else Usage()
+
 
 @runtime_checkable
 class ToolLike(Protocol):
@@ -221,7 +225,9 @@ def run_tool_loop(
             if not calls:  # draft reply is discarded, so a length cap on it is irrelevant
                 return ToolLoopResult(messages, rounds, usage, False, None, log)
             if choice.finish_reason == "length":
-                raise LengthFinishReasonError("output hit the length cap during a tool round")
+                raise LengthFinishReasonError(
+                    "output hit the length cap during a tool round", usage=usage
+                )
             messages.append(
                 {
                     "role": "assistant",

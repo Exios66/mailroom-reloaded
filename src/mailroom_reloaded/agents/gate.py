@@ -50,7 +50,7 @@ class GateDecision:
 
     action: Action
     reason: str
-    source: Literal["band", "model", "rule"]
+    source: Literal["band", "model", "rule", "jev"]
 
 
 class RouteGate(Protocol):
@@ -167,8 +167,13 @@ class LearnedGate:
 
 
 def load_gate() -> RouteGate:
-    """Return a ``LearnedGate`` when ``models/route_gate.json`` exists, else bands."""
+    """Gate selection: a calibrated Jev gate when enabled, else learned, else bands."""
+    from mailroom_reloaded.agents.jev import load_jev_gate
+
     band = BandGate(load_taxonomy())
+    jev = load_jev_gate(load_taxonomy())
+    if jev is not None:
+        return jev
     path = get_settings().base_dir / "models" / "route_gate.json"
     if path.exists():
         return LearnedGate(band, path)

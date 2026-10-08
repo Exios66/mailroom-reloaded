@@ -12,6 +12,7 @@ from mailroom_reloaded.eval.train_gate import fit_calibration, train_gate
 
 @pytest.mark.parametrize("fit", [fit_calibration, train_gate])
 def test_empty_training_overwrites_stale_model(tmp_path, fit):
+    """Verify empty training replaces stale gate or calibration data with an empty model."""
     out = tmp_path / "models" / "model.json"
     out.parent.mkdir()
     out.write_text('{"stale": true}')
@@ -27,6 +28,7 @@ def test_empty_training_overwrites_stale_model(tmp_path, fit):
 
 @pytest.mark.parametrize("fit", [fit_calibration, train_gate])
 def test_rejected_training_preserves_existing_model(tmp_path, fit):
+    """Verify non-training rows are rejected without replacing the model file."""
     out = tmp_path / "model.json"
     original = '{"previous": "model"}\n'
     out.write_text(original)
@@ -37,6 +39,7 @@ def test_rejected_training_preserves_existing_model(tmp_path, fit):
 
 @pytest.mark.parametrize("stage", [None, "", "verify", "CLASSIFY"])
 def test_unknown_training_stage_does_not_write(tmp_path, stage):
+    """Verify missing or unsupported gate stages cannot create a model file."""
     out = tmp_path / "model.json"
     row = {"split": "train"}
     if stage is not None:
@@ -54,6 +57,7 @@ def test_unknown_training_stage_does_not_write(tmp_path, stage):
     ],
 )
 def test_training_requires_the_label_for_its_stage(tmp_path, stage, label):
+    """Verify each gate stage requires its own target label."""
     wrong_label = "review_expected" if stage == "classify" else "retry_expected"
     rows = [{"split": "train", "stage": stage, wrong_label: value} for value in (0, 1)]
     out = tmp_path / "model.json"
@@ -71,6 +75,7 @@ def test_training_requires_the_label_for_its_stage(tmp_path, stage, label):
 )
 @pytest.mark.parametrize("labels", [[0], [1], [0, 0], [1, 1]])
 def test_training_requires_two_label_classes(tmp_path, stage, label, labels):
+    """Verify gate fitting rejects targets containing only one label class."""
     rows = [{"split": "train", "stage": stage, label: value} for value in labels]
     out = tmp_path / "model.json"
     with pytest.raises(ValueError, match="at least two label classes"):
@@ -80,6 +85,7 @@ def test_training_requires_two_label_classes(tmp_path, stage, label, labels):
 
 def test_each_stage_learns_its_own_label_and_loads_for_inference(tmp_path):
     # Opposite labels for identical inputs detect accidental cross-stage pooling.
+    """Verify opposite stage targets train independently and reload for routing."""
     rows = []
     for _ in range(10):
         for attempts in (0, 2):
@@ -118,6 +124,7 @@ def test_each_stage_learns_its_own_label_and_loads_for_inference(tmp_path):
 
 
 def test_invalid_later_stage_preserves_existing_model(tmp_path):
+    """Verify a later stage's validation failure leaves the existing model intact."""
     out = tmp_path / "model.json"
     out.write_text('{"previous": true}')
     rows = [
@@ -130,6 +137,7 @@ def test_invalid_later_stage_preserves_existing_model(tmp_path):
 
 
 def test_calibration_groups_are_independent_and_loadable(tmp_path, monkeypatch):
+    """Verify calibration stays separate by provider, model and document type."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     rows = [
         {
@@ -165,6 +173,7 @@ def test_calibration_groups_are_independent_and_loadable(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("confidence", [0.0, 1.0])
 def test_calibration_probability_endpoints_stay_finite(tmp_path, confidence):
+    """Verify confidence endpoints produce finite, bounded calibration results."""
     rows = [
         {"split": "train", "confidence": confidence, "correct": correct}
         for correct in (0, 1)
@@ -179,6 +188,7 @@ def test_calibration_probability_endpoints_stay_finite(tmp_path, confidence):
 
 @pytest.mark.parametrize("missing", ["confidence", "correct"])
 def test_calibration_missing_required_value_does_not_write(tmp_path, missing):
+    """Verify incomplete calibration rows fail before creating an output file."""
     row = {"split": "train", "confidence": 0.9, "correct": 1}
     del row[missing]
     out = tmp_path / "calibration.json"

@@ -64,6 +64,7 @@ JUDGE_GRADE_JSON = json.dumps(
 
 @pytest.fixture
 def fake_openai():
+    """Yield a local fake OpenAI server and stop it after the test."""
     server = FakeOpenAI()
     server.start()
     try:
@@ -74,6 +75,7 @@ def fake_openai():
 
 @pytest.fixture
 def mock_provider(monkeypatch, fake_openai):
+    """Point the mock provider at the local fake OpenAI server."""
     monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
     monkeypatch.setenv("MOCK_BASE_URL", fake_openai.base_url)
     return fake_openai
@@ -81,6 +83,7 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    """Isolate the base directory and reset settings and SQLite state per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     from mailroom_reloaded import settings
 
@@ -97,6 +100,7 @@ def env(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fast_llm(monkeypatch):
+    """Disable retry delays and clear tool-support caches around each test."""
     from mailroom_reloaded.llm import retry, tooling
 
     monkeypatch.setattr(retry, "_sleep", lambda *_: None)
@@ -109,15 +113,18 @@ def _fast_llm(monkeypatch):
 
 
 def _load_mini():
+    """Load the local miniature dataset with its ground-truth mapping."""
     return load_split(local_dir=FIXTURES)
 
 
 def _sampled(per_class=2, seed=42):
+    """Return a seeded per-class sample and the miniature dataset's labels."""
     docs, gts = _load_mini()
     return sample(docs, gts, per_class=per_class, seed=seed), gts
 
 
 def _sorter_payload(doc_type, subclass):
+    """Encode a confident sorter response for the supplied class and subclass."""
     return json.dumps(
         {
             "doc_type": doc_type,
@@ -130,20 +137,24 @@ def _sorter_payload(doc_type, subclass):
 
 
 def _patch_bert_unavailable(monkeypatch):
+    """Force full LLM sorting by simulating disabled BERT inference."""
     verdict = BertVerdict(available=False, reason="flag_off")
     handoff = Handoff(SortMode.FULL, None, "", "bert_unavailable:flag_off")
-    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None: verdict)
+    monkeypatch.setattr(flow_mod, "classify_primary", lambda text, cfg=None, *, filename=None: verdict)
     monkeypatch.setattr(flow_mod, "decide_handoff", lambda v, cfg: handoff)
 
 
 def _patch_coverage(monkeypatch):
+    """Treat all extraction fields as covered to isolate runner behavior."""
     from mailroom_reloaded.agents import specialists
 
     monkeypatch.setattr(specialists, "_coverage", lambda doc_type, data: 1.0)
 
 
 def _patch_judge(monkeypatch):
+    """Install a deterministic judge grade with fixed findings and usage."""
     def fake_grade(text_, doc_type, data, ctx):
+        """Return a fixed passing grade tied to the evaluation document ID."""
         return JudgeGrade(
             doc_id=ctx.doc_id,
             doc_type=doc_type,
@@ -157,6 +168,7 @@ def _patch_judge(monkeypatch):
 
 
 def _script_pipeline(provider, sampled, gts):
+    """Queue sorter and extraction replies for every sampled document."""
     for doc in sampled:
         gt = gts[doc.filename]
         for _ in range(2):
@@ -166,6 +178,7 @@ def _script_pipeline(provider, sampled, gts):
 
 
 def _rows(run_id):
+    """Read persisted results for a run in filename order."""
     engine = db.get_engine()
     with engine.connect() as conn:
         result = conn.execute(
@@ -176,6 +189,7 @@ def _rows(run_id):
 
 
 def _gt_values(gts):
+    """Collect distinct ground-truth strings long enough to detect leakage."""
     values: set[str] = set()
     for gt in gts.values():
         for value in gt.fields.values():
@@ -185,6 +199,7 @@ def _gt_values(gts):
 
 
 def _strip_gt_tool_results(requests, gt_values):
+    """Exclude requests containing ground-truth canaries in tool messages."""
     kept = []
     for request in requests:
         is_gt_tool = False
@@ -204,6 +219,7 @@ def _strip_gt_tool_results(requests, gt_values):
 
 
 def test_blind_doc_has_no_label_attrs():
+    """Verify blind documents are immutable and expose no label fields."""
     docs, gts = _load_mini()
     assert docs and gts
     assert {f.name for f in dataclasses.fields(BlindDoc)} == {
@@ -228,6 +244,7 @@ def test_blind_doc_has_no_label_attrs():
 
 
 def test_sha_mismatch_raises(tmp_path):
+    """Verify a blind row with an incorrect content hash is rejected."""
     (tmp_path / "default.jsonl").write_text(
         json.dumps(
             {
@@ -279,6 +296,7 @@ def _real_columns(tmp_path, *, sha=None, blind_sha=None, with_gt_sha=True):
 
 
 def test_real_columns_join_verifies_and_parses_gt_fields(tmp_path):
+    """Verify the Hub-shaped join checks hashes and decodes nested ground truth."""
     body, actual = _real_columns(tmp_path)
     docs, gts = load_split(local_dir=tmp_path)
     assert len(docs) == 1
@@ -297,12 +315,14 @@ def test_real_columns_join_verifies_and_parses_gt_fields(tmp_path):
 
 
 def test_real_columns_sha_mismatch_raises(tmp_path):
+    """Verify a mismatched hash on the joined ground-truth row is rejected."""
     _real_columns(tmp_path, sha="0" * 64)
     with pytest.raises(DatasetIntegrityError):
         load_split(local_dir=tmp_path)
 
 
 def test_blind_metadata_hash_is_a_fallback(tmp_path):
+    """Verify blind metadata supplies the hash when ground truth omits it."""
     _, actual = _real_columns(tmp_path, with_gt_sha=False)
     with pytest.raises(DatasetIntegrityError):
         load_split(local_dir=tmp_path)
@@ -312,6 +332,7 @@ def test_blind_metadata_hash_is_a_fallback(tmp_path):
 
 
 def test_bert_manifest_overlap(tmp_path):
+    """Verify overlap detection for manifest files, directories and missing paths."""
     docs = [
         BlindDoc("a.txt", "alpha", sha256_text("alpha")),
         BlindDoc("b.txt", "beta", sha256_text("beta")),
@@ -331,6 +352,7 @@ def test_bert_manifest_overlap(tmp_path):
 
 
 def test_nested_sampling():
+    """Verify a smaller per-class draw is a prefix of the larger seeded draw."""
     classes = ["contract", "correspondence"]
     docs: list[BlindDoc] = []
     gts: dict[str, GroundTruth] = {}
@@ -357,6 +379,7 @@ def test_nested_sampling():
 
 
 def test_concurrency_bounded(env, monkeypatch):
+    """Verify evaluation overlaps document work without exceeding its semaphore."""
     active = 0
     peak = 0
 
@@ -385,6 +408,7 @@ def test_concurrency_bounded(env, monkeypatch):
 
 
 def test_judge_sample_rate(env, monkeypatch):
+    """Verify deterministic grading selection is reflected in persisted rows."""
     docs, gts = _load_mini()
     sampled = sample(docs, gts, per_class=2, seed=42)
 
@@ -414,6 +438,7 @@ def test_judge_sample_rate(env, monkeypatch):
 
 
 def test_eval_run_records_rows(env, mock_provider, monkeypatch):
+    """Verify every evaluated document stores outputs, grades, usage and gate features."""
     _patch_bert_unavailable(monkeypatch)
     _patch_coverage(monkeypatch)
     _patch_judge(monkeypatch)
@@ -442,6 +467,7 @@ def test_eval_run_records_rows(env, mock_provider, monkeypatch):
 
 
 def test_no_gt_leak_in_agent_requests(env, mock_provider, monkeypatch):
+    """Verify labels appear only in authorized judge tool results."""
     _patch_bert_unavailable(monkeypatch)
     _patch_coverage(monkeypatch)
     sampled, gts = _sampled()
