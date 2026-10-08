@@ -45,6 +45,6 @@ def test_unlocked_prompts_load_and_format():
     out = load_prompt("sorter_subclass_scope").format(doc_type="contract", subclasses="a, b")
     assert "a, b" in out
     out = load_prompt("judge_grade").format(doc_type="contract")
-    assert json.loads(out.split("shape:")[1].strip().replace("<name>", "x").replace(
-        "correct|partial|wrong|missing|hallucinated", "correct"
-    ).replace("<short reason or empty>", "").replace("<one sentence>", ""))
+    shape = out.split("this shape:")[1].split("\n")[1]
+    assert shape.startswith('{"fields"')
+    assert "get_ground_truth" in out and "gt_suspect" in out
