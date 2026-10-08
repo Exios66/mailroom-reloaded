@@ -1,0 +1,570 @@
+{
+ "$id": "https://github.com/Exios66/mailroom-sandbox-content/schemas/scenario.v2.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "additionalProperties": false,
+ "description": "Scenario file format v2 (addendum v2 \u00a74.8). One YAML file per scenario under scenarios/<Series>/.",
+ "properties": {
+  "expect": {
+   "additionalProperties": false,
+   "properties": {
+    "boss_actions": {
+     "items": {
+      "enum": [
+       "ack_signal",
+       "dismiss_signal",
+       "link_documents",
+       "annotate_document",
+       "raise_priority",
+       "request_human_review",
+       "task_correspondent",
+       "approve_outbound",
+       "hold_attachments",
+       "quarantine_attachments",
+       "release_attachments",
+       "recommend_callback"
+      ]
+     },
+     "type": "array"
+    },
+    "docs": {
+     "description": "Per-document expectations keyed by ref or pinned filename",
+     "type": "object"
+    },
+    "intent": {
+     "enum": [
+      "status_request",
+      "missing_document_followup",
+      "document_submission",
+      "correction_or_amendment",
+      "duplicate_submission",
+      "complaint",
+      "urgent_deadline",
+      "general_question",
+      "unrelated",
+      "auto_reply",
+      "bounce",
+      "spam_or_phishing",
+      "possible_prompt_injection",
+      "legal_notice",
+      "privacy_request",
+      "payment_or_identity_change",
+      "conflicting_instructions",
+      "retraction_or_withdrawal",
+      "disclosure_request"
+     ]
+    },
+    "invariants": {
+     "items": {
+      "enum": [
+       "audit_chain_ok",
+       "no_stuck_docs",
+       "fast_path_two_calls",
+       "comms_offpath"
+      ]
+     },
+     "type": "array"
+    },
+    "outbox": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "intent": {
+        "type": "string"
+       },
+       "reference_template": {
+        "description": "gen/templates/replies/<name>.j2: reference shape of the expected reply (scoring aid; never sent)",
+        "pattern": "^[a-z0-9_]+$",
+        "type": "string"
+       },
+       "state": {
+        "enum": [
+         "draft",
+         "approved",
+         "sent"
+        ]
+       },
+       "to_sender": {
+        "type": "boolean"
+       }
+      },
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "overblocking": {
+     "additionalProperties": false,
+     "description": "For benign messages / benign companions: expected hard actions (usually 0)",
+     "properties": {
+      "benign_hard_actions": {
+       "minimum": 0,
+       "type": "integer"
+      }
+     },
+     "type": "object"
+    },
+    "quarantine": {
+     "description": "refs or pinned filenames of attachments in the timeline",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "relations": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "a": {
+        "description": "a ref, a pinned filename attached in the timeline, or matter:<id>; reads 'a <kind> b'",
+        "type": "string"
+       },
+       "b": {
+        "description": "a ref, a pinned filename attached in the timeline, or matter:<id>; reads 'a <kind> b'",
+        "type": "string"
+       },
+       "kind": {
+        "enum": [
+         "references",
+         "supersedes",
+         "duplicates",
+         "amends",
+         "answers",
+         "contradicts",
+         "withdraws",
+         "completes",
+         "unknown"
+        ]
+       },
+       "min_conf": {
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "type": "number"
+       }
+      },
+      "required": [
+       "a",
+       "b",
+       "kind"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "signals": {
+     "items": {
+      "additionalProperties": false,
+      "properties": {
+       "attack_class": {
+        "enum": [
+         "impersonation",
+         "payment_fraud",
+         "credential_phish",
+         "injection",
+         "exfiltration",
+         "malicious_attachment",
+         "other"
+        ]
+       },
+       "kind": {
+        "enum": [
+         "new_info",
+         "doc_relation",
+         "status_request",
+         "missing_doc",
+         "correction",
+         "complaint",
+         "urgent",
+         "possible_attack",
+         "fyi",
+         "legal_notice",
+         "privacy_request",
+         "payment_change"
+        ]
+       },
+       "priority": {
+        "enum": [
+         "low",
+         "normal",
+         "high",
+         "critical"
+        ]
+       },
+       "within": {
+        "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "kind",
+       "priority"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "soft_hold": {
+     "description": "refs or pinned filenames of attachments in the timeline",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "trust": {
+     "additionalProperties": false,
+     "properties": {
+      "sender_level": {
+       "enum": [
+        "verified",
+        "unverified",
+        "suspicious",
+        "hostile"
+       ]
+      }
+     },
+     "required": [
+      "sender_level"
+     ],
+     "type": "object"
+    }
+   },
+   "required": [
+    "intent"
+   ],
+   "type": "object"
+  },
+  "gen": {
+   "enum": [
+    "scripted",
+    "frozen",
+    "live",
+    "loop"
+   ]
+  },
+  "name": {
+   "description": "Series letter + number + slug, e.g. E1_lookalike_wire_change",
+   "pattern": "^[A-GST][0-9]+_[a-z0-9_]+$",
+   "type": "string"
+  },
+  "owner": {
+   "type": "string"
+  },
+  "profile": {
+   "enum": [
+    "smoke",
+    "demo",
+    "prod_like",
+    "chaos",
+    "coverage"
+   ]
+  },
+  "seed": {
+   "minimum": 0,
+   "type": "integer"
+  },
+  "status": {
+   "default": "draft",
+   "enum": [
+    "draft",
+    "review",
+    "frozen",
+    "deprecated"
+   ]
+  },
+  "tags": {
+   "items": {
+    "type": "string"
+   },
+   "type": "array"
+  },
+  "timeline": {
+   "items": {
+    "additionalProperties": false,
+    "anyOf": [
+     {
+      "required": [
+       "client"
+      ]
+     },
+     {
+      "required": [
+       "ingress"
+      ]
+     },
+     {
+      "required": [
+       "fault"
+      ]
+     }
+    ],
+    "not": {
+     "required": [
+      "client",
+      "ingress"
+     ]
+    },
+    "properties": {
+     "at": {
+      "description": "Virtual-clock offset mm:ss",
+      "pattern": "^[0-9]{2}:[0-9]{2}(:[0-9]{2})?$",
+      "type": "string"
+     },
+     "client": {
+      "additionalProperties": false,
+      "properties": {
+       "attach": {
+        "items": {
+         "additionalProperties": false,
+         "oneOf": [
+          {
+           "required": [
+            "file"
+           ]
+          },
+          {
+           "required": [
+            "class",
+            "stratum"
+           ]
+          },
+          {
+           "required": [
+            "same_as"
+           ]
+          }
+         ],
+         "properties": {
+          "as": {
+           "description": "Filename the document is delivered under (overlaid name; the source document is never edited)",
+           "minLength": 1,
+           "type": "string"
+          },
+          "class": {
+           "description": "Dataset class (taxonomy/strata.csv) or off_taxonomy",
+           "type": "string"
+          },
+          "file": {
+           "description": "Pinned fixture filename; must be in attachments/manifest.csv",
+           "type": "string"
+          },
+          "group": {
+           "description": "Documents sharing a group are drawn from the same dataset bundle family / claim / matter",
+           "pattern": "^[a-z0-9_]+$",
+           "type": "string"
+          },
+          "in_taxonomy": {
+           "type": "boolean"
+          },
+          "ref": {
+           "description": "Scenario-local name for a document or message; expectations point at it",
+           "pattern": "^[a-z][a-z0-9_]*$",
+           "type": "string"
+          },
+          "same_as": {
+           "description": "Re-send the exact document already bound to this ref (duplicates)",
+           "type": "string"
+          },
+          "stratum": {
+           "description": "Stratum of the class (taxonomy/strata.csv or taxonomy/offtaxonomy.csv)",
+           "type": "string"
+          }
+         },
+         "type": "object"
+        },
+        "type": "array"
+       },
+       "auth": {
+        "additionalProperties": false,
+        "properties": {
+         "dkim": {
+          "enum": [
+           "pass",
+           "fail",
+           "none",
+           "softfail",
+           "temperror",
+           "permerror"
+          ]
+         },
+         "dmarc": {
+          "enum": [
+           "pass",
+           "fail",
+           "none"
+          ]
+         },
+         "spf": {
+          "enum": [
+           "pass",
+           "fail",
+           "none",
+           "softfail",
+           "temperror",
+           "permerror"
+          ]
+         }
+        },
+        "type": "object"
+       },
+       "channel": {
+        "enum": [
+         "email",
+         "ticket",
+         "chat",
+         "portal"
+        ]
+       },
+       "claimed_from": {
+        "pattern": "^[^@\\s]+@[A-Za-z0-9.-]+\\.sandbox\\.invalid$",
+        "type": "string"
+       },
+       "gen_spec": {
+        "pattern": "^gen_[a-zA-Z0-9_]+$",
+        "type": "string"
+       },
+       "persona": {
+        "pattern": "^p_[a-z0-9_]+$",
+        "type": "string"
+       },
+       "ref": {
+        "description": "Scenario-local name for a document or message; expectations point at it",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+       },
+       "reply_to": {
+        "description": "ref of an earlier message this one replies to (sets In-Reply-To/References)",
+        "type": "string"
+       },
+       "template": {
+        "description": "Scripted body: gen/templates/<template>.j2 (always required; the fallback for frozen/live/loop)",
+        "pattern": "^[a-z0-9_]+$",
+        "type": "string"
+       },
+       "vars": {
+        "additionalProperties": {
+         "type": [
+          "string",
+          "number",
+          "boolean"
+         ]
+        },
+        "description": "Template variables beyond the standard sender context",
+        "type": "object"
+       }
+      },
+      "required": [
+       "persona",
+       "channel",
+       "template"
+      ],
+      "type": "object"
+     },
+     "fault": {
+      "description": "FaultInjector directive (core \u00a76.2); alongside client it applies to that message",
+      "enum": [
+       "duplicate_delivery",
+       "out_of_order_delivery",
+       "delayed_delivery",
+       "crash_mid_triage",
+       "crash_mid_node",
+       "provider_429",
+       "provider_timeout",
+       "watcher_lock_contention",
+       "free_pool_429_storm",
+       "free_daily_cap_reached",
+       "all_gen_tiers_down",
+       "daily_spend_cap_reached_mid_run",
+       "prompt_contains_dataset_text_hash",
+       "egress_to_unallowlisted_host",
+       "draft_to_virtual_address_without_route",
+       "sse_client_reconnect_with_last_event_id",
+       "production_gmail_token_path_reachable_at_startup",
+       "outbound_send_disabled"
+      ]
+     },
+     "ingress": {
+      "additionalProperties": false,
+      "description": "Document dropped straight into the pipeline inbox (no email)",
+      "oneOf": [
+       {
+        "required": [
+         "file"
+        ]
+       },
+       {
+        "required": [
+         "class",
+         "stratum"
+        ]
+       }
+      ],
+      "properties": {
+       "as": {
+        "description": "Filename the document is delivered under (overlaid name; the source document is never edited)",
+        "minLength": 1,
+        "type": "string"
+       },
+       "class": {
+        "description": "Dataset class (taxonomy/strata.csv) or off_taxonomy",
+        "type": "string"
+       },
+       "file": {
+        "description": "Pinned fixture filename; must be in attachments/manifest.csv",
+        "type": "string"
+       },
+       "group": {
+        "description": "Documents sharing a group are drawn from the same dataset bundle family / claim / matter",
+        "pattern": "^[a-z0-9_]+$",
+        "type": "string"
+       },
+       "in_taxonomy": {
+        "type": "boolean"
+       },
+       "ref": {
+        "description": "Scenario-local name for a document or message; expectations point at it",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "type": "string"
+       },
+       "stratum": {
+        "description": "Stratum of the class (taxonomy/strata.csv or taxonomy/offtaxonomy.csv)",
+        "type": "string"
+       }
+      },
+      "type": "object"
+     }
+    },
+    "required": [
+     "at"
+    ],
+    "type": "object"
+   },
+   "minItems": 1,
+   "type": "array"
+  },
+  "title": {
+   "type": "string"
+  },
+  "transports": {
+   "description": "Legs the scenario is valid on. Identity-dependent scenarios (E1, E2, E13, ...) are not valid on the gmail leg.",
+   "items": {
+    "enum": [
+     "sim",
+     "agentmail",
+     "gmail"
+    ]
+   },
+   "minItems": 1,
+   "type": "array"
+  }
+ },
+ "required": [
+  "name",
+  "title",
+  "seed",
+  "profile",
+  "gen",
+  "transports",
+  "timeline",
+  "expect"
+ ],
+ "title": "mailroom.scenario/v2",
+ "type": "object"
+}

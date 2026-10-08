@@ -1,0 +1,17 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/Exios66/mailroom-reloaded/schemas/relation_kinds.v1.json",
+ "title": "relation_kinds.v1",
+ "description": "The eight relation kinds (addendum v2 section 8.2). Direction is normative: 'a <kind> b' (AM4). 'unknown' is a placeholder in linked_docs, not a kind.",
+ "type": "string",
+ "enum": [
+  "references",
+  "supersedes",
+  "duplicates",
+  "amends",
+  "answers",
+  "contradicts",
+  "withdraws",
+  "completes"
+ ]
+}

@@ -1,0 +1,21 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/Exios66/mailroom-reloaded/schemas/signal_kinds.v1.json",
+ "title": "signal_kinds.v1",
+ "description": "signal/v1 kinds as used by the content pack validator (core signal kinds plus the addendum amendments).",
+ "type": "string",
+ "enum": [
+  "new_info",
+  "doc_relation",
+  "status_request",
+  "missing_doc",
+  "correction",
+  "complaint",
+  "urgent",
+  "possible_attack",
+  "fyi",
+  "legal_notice",
+  "privacy_request",
+  "payment_change"
+ ]
+}
