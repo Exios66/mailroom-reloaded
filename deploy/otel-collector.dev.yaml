@@ -1,0 +1,45 @@
+# OTLP in; traces -> Phoenix; metrics -> Prometheus exporter :8889.
+# Dev only: optional file-SD targets; no Docker socket or GPU scrapes.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        # The dev otel-targets init service writes an empty targets list.
+        - job_name: vllm-remote
+          scrape_interval: 15s
+          metrics_path: /metrics
+          scheme: ${env:VLLM_METRICS_SCHEME}
+          file_sd_configs:
+            - files: [/etc/otelcol/targets/vllm.json]
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/phoenix:
+    traces_endpoint: http://phoenix:6006/v1/traces
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    metric_expiration: 24h
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/phoenix]
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [batch]
+      exporters: [prometheus]
