@@ -55,3 +55,19 @@ packages = ["src/mailroom_reloaded"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+# Vendored verbatim from llm-dojo-scoring v0.21.0 (see scoring/PARITY.md); keep upstream bytes.
+extend-exclude = [
+  "src/mailroom_reloaded/scoring/classification.py",
+  "src/mailroom_reloaded/scoring/config.py",
+  "src/mailroom_reloaded/scoring/corpus.py",
+  "src/mailroom_reloaded/scoring/equivalences.py",
+  "src/mailroom_reloaded/scoring/extraction_metrics.py",
+  "src/mailroom_reloaded/scoring/field_scoring.py",
+  "src/mailroom_reloaded/scoring/gt_metadata.py",
+  "src/mailroom_reloaded/scoring/intake.py",
+  "src/mailroom_reloaded/scoring/intents.py",
+  "src/mailroom_reloaded/scoring/maud.py",
+  "src/mailroom_reloaded/scoring/trace_knobs.py",
+]
