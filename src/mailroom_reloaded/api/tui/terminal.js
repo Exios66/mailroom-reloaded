@@ -39,7 +39,7 @@ export function renderPre(doc, text) {
   return el(doc, 'pre', 'out-pre', text);
 }
 
-export function renderTable(doc, headers, rows) {
+export function renderTable(doc, headers, rows, opts = {}) {
   const table = el(doc, 'table', 'mr');
   const thead = el(doc, 'thead');
   const headRow = el(doc, 'tr');
@@ -49,7 +49,10 @@ export function renderTable(doc, headers, rows) {
   const tbody = el(doc, 'tbody');
   for (const row of rows) {
     const tr = el(doc, 'tr');
-    for (const cell of row) tr.appendChild(el(doc, 'td', '', cell));
+    row.forEach((cell, col) => {
+      const cls = opts.cellClass ? opts.cellClass(row, col) : '';
+      tr.appendChild(el(doc, 'td', cls || '', cell));
+    });
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
@@ -72,6 +75,12 @@ export function renderListing(doc, items) {
     listing.appendChild(el(doc, 'span', `file${kind}`, item.name));
   }
   return listing;
+}
+
+export function renderBanner(doc, text) {
+  const card = el(doc, 'div', 'title-card');
+  card.appendChild(el(doc, 'pre', 'banner', text));
+  return card;
 }
 
 export function renderDivider(doc, width = 72) {
@@ -200,7 +209,8 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
   const out = {
     line: (text, cls) => append(renderLine(doc, text, cls)),
     pre: (text) => append(renderPre(doc, text)),
-    table: (headers, rows) => append(renderTable(doc, headers, rows)),
+    banner: (text) => append(renderBanner(doc, text)),
+    table: (headers, rows, opts) => append(renderTable(doc, headers, rows, opts)),
     kv: (pairs) => append(renderKv(doc, pairs)),
     listing: (items) => append(renderListing(doc, items)),
     divider: () => append(renderDivider(doc)),

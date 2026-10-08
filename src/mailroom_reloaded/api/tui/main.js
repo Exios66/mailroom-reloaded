@@ -1,35 +1,55 @@
-// Wires the engine, api client and terminal together for /tui.
+// Wires the engine, api client, terminal, commands, ambient layer and boot for /tui.
 import { createRegistry, createHistory } from './engine.js';
 import { createApi } from './api.js';
 import { createTerminal } from './terminal.js';
+import { boot } from './boot.js';
+import { createAmbient } from './ambient.js';
+import { registerPipeline } from './commands/pipeline.js';
+import { registerShell } from './commands/shell.js';
 
-// TEMP (Task 4): removed once the pipeline and shell commands exist.
-const echoCommand = {
-  name: 'echo',
-  summary: 'print arguments',
-  usage: 'echo [text...]',
-  man: 'NAME\n  echo - print arguments\n\nSYNOPSIS\n  echo [text...]\n',
-  run(ctx, args) {
-    ctx.out.line(args.join(' '));
-  },
-};
-
-/** Single seam where every command group is registered. */
-export function registerAll(registry) {
-  registry.register(echoCommand);
-  // Task 6: registerPipeline(registry);
-  // Task 7: registerShell(registry, { ambient });
+async function loadText(name) {
+  try {
+    const res = await fetch(`/tui/assets/${name}`);
+    return res.ok ? await res.text() : '';
+  } catch {
+    return '';
+  }
 }
 
-export function start() {
+export function registerAll(registry, { ambient }) {
+  registerPipeline(registry);
+  registerShell(registry, { ambient });
+}
+
+export async function start() {
+  const reducedMotion =
+    typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const compact = typeof matchMedia === 'function' && matchMedia('(max-width: 640px)').matches;
   const registry = createRegistry();
   const history = createHistory();
   const api = createApi();
-  registerAll(registry);
+  const ambient = createAmbient(document, { reducedMotion });
+  registerAll(registry, { ambient });
   document.body.classList.add('powering-on');
   setTimeout(() => document.body.classList.remove('powering-on'), 650);
   const term = createTerminal({ root: document, registry, history, api });
-  // Task 5: await boot(term);
+  const [banner, bannerCompact] = await Promise.all([
+    loadText('banner.txt'),
+    loadText('banner-compact.txt'),
+  ]);
+  term.ctx.banner = banner;
+  const st = ambient.state();
+  term.ctx.setStatus('theme', st.label);
+  term.ctx.setStatus('crt', st.crt ? 'on' : 'off');
+  // Any key or click skips the boot animation (checks still run).
+  const skip = new AbortController();
+  const onSkip = () => skip.abort();
+  document.addEventListener('keydown', onSkip, { once: true });
+  document.addEventListener('pointerdown', onSkip, { once: true });
+  await boot(term.ctx, { reducedMotion, signal: skip.signal, banner, bannerCompact, compact });
+  document.removeEventListener('keydown', onSkip);
+  document.removeEventListener('pointerdown', onSkip);
+  term.focus();
   return term;
 }
 

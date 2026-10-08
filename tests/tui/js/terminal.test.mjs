@@ -8,6 +8,7 @@ import {
   renderKv,
   renderListing,
   renderPre,
+  renderBanner,
 } from '../../../src/mailroom_reloaded/api/tui/terminal.js';
 
 // Tiny DOM stub: node has no document. Only createElement/textContent/appendChild.
@@ -106,6 +107,19 @@ test('renderLine, renderKv, renderListing and renderPre use text only', () => {
 
   const pre = renderPre(doc, HOSTILE);
   assert.equal(pre.tagName, 'pre');
+  assert.equal(pre.textContent, HOSTILE);
+  assert.equal(pre.children.length, 0);
+});
+
+test('renderBanner wraps the art in div.title-card > pre.banner as text only', () => {
+  const doc = makeDoc();
+  const card = renderBanner(doc, HOSTILE);
+  assert.equal(card.tagName, 'div');
+  assert.equal(card.className, 'title-card');
+  assert.equal(card.children.length, 1);
+  const pre = card.children[0];
+  assert.equal(pre.tagName, 'pre');
+  assert.equal(pre.className, 'banner');
   assert.equal(pre.textContent, HOSTILE);
   assert.equal(pre.children.length, 0);
 });

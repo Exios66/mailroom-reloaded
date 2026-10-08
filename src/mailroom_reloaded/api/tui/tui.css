@@ -304,6 +304,11 @@ html.theme-flash body { animation: term-theme-flash 0.35s ease-out; }
   animation: term-glow 4s ease-in-out infinite;
 }
 @keyframes term-glow { 0%, 100% { opacity: 0; } 15% { opacity: 0.9; } 45% { opacity: 0.35; } 60% { opacity: 0.85; } 80% { opacity: 0.15; } }
+.ambient-sparks { position: absolute; inset: 0; pointer-events: none; }
+.ambient-sparks .conveyor-dot {
+  animation: term-glow var(--glow, 4s) ease-in-out infinite, term-drift var(--drift, 7s) ease-in-out infinite alternate;
+}
+@keyframes term-drift { from { transform: translate(0, 0); } to { transform: translate(var(--dx, 20px), var(--dy, -12px)); } }
 
 .grain {
   position: fixed;
@@ -400,3 +405,9 @@ noscript a { color: var(--term-cyan); }
   }
   .conveyor-dot { display: none; }
 }
+
+/* status-coloured table cells (ls, review) */
+table.mr td.success { color: var(--term-green); }
+table.mr td.error { color: var(--term-red); }
+table.mr td.warn { color: var(--term-amber-bright, var(--term-amber)); }
+table.mr td.info { color: var(--term-cyan); }
