@@ -220,12 +220,17 @@ def test_review_resumes_extraction_with_only_requested_corrections(
         )
         is state
     )
-    run.assert_called_once_with(
-        path,
-        worker_id="review-alice",
-        resume_from="extract",
-        overrides={"bins": bins, **corrections},
-    )
+    run.assert_called_once()
+    called = run.call_args
+    # the parked file is claimed (atomically moved) into the reviewer's processing dir
+    assert called.args[0].parent == bins.processing("review-alice")
+    assert called.args[0].name.endswith(f"_{path.name}")
+    assert not path.exists()
+    assert called.kwargs == {
+        "worker_id": "review-alice",
+        "resume_from": "extract",
+        "overrides": {"bins": bins, **corrections},
+    }
     review.audit_log.append.assert_called_once_with(
         "doc",
         "review",
@@ -332,3 +337,53 @@ def test_locate_parked_escapes_glob_metacharacters(bins):
     decoy = bins.review / f"{'b' * 32}_a1zz.txt"
     decoy.write_bytes(body)
     assert review._locate_parked(bins, manifest) is None
+
+
+def test_concurrent_resolves_run_flow_once(bins, parked, monkeypatch):
+    """Two racing resolves of one parked doc: one runs the flow, one audit entry."""
+    import threading
+
+    barrier = threading.Barrier(2)
+    real_locate = review._locate_parked
+
+    def locate(b, m):
+        found = real_locate(b, m)
+        try:
+            barrier.wait(timeout=2)  # both threads located the file before either claims
+        except threading.BrokenBarrierError:
+            pass
+        return found
+
+    monkeypatch.setattr(review, "_locate_parked", locate)
+    run = Mock(return_value=MailroomState(status="archived"))
+    monkeypatch.setattr(review._flow, "run_document", run)
+    results = []
+    threads = [
+        threading.Thread(
+            target=lambda: results.append(review.resolve_review("doc", "approve", bins=bins))
+        )
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert run.call_count == 1
+    assert sorted(r is None for r in results) == [False, True]
+    assert review.audit_log.append.call_count == 1
+
+
+def test_failed_resume_returns_file_to_review_and_stays_parked(bins, parked, monkeypatch):
+    """A failing flow puts the claimed file back so the doc can be resolved again."""
+    _, path = parked
+    monkeypatch.setattr(
+        review._flow, "run_document", Mock(side_effect=RuntimeError("boom"))
+    )
+    with pytest.raises(RuntimeError):
+        review.resolve_review("doc", "approve", bins=bins)
+    assert path.is_file()
+    assert load_manifest(bins, "doc").status == "parked"
+    monkeypatch.setattr(
+        review._flow, "run_document", Mock(return_value=MailroomState(status="archived"))
+    )
+    assert review.resolve_review("doc", "approve", bins=bins) is not None
