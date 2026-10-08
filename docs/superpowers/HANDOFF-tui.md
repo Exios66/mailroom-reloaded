@@ -40,7 +40,7 @@ Only the **Terminal** edition applies. Do not mix console (unprefixed) or `obs-`
 
 ## Open decisions (ask the owner)
 
-1. **Banner art.** The kit's `TermBanner/preview.html` ASCII looks escape-damaged and does not obviously spell a name. The kit says never redraw it. Obtain the original `terminal/terminal.js` banner, or confirm the preview text is acceptable. Blocks Task 5 only.
+1. ~~Banner art~~ **Resolved:** the kit's banner is damaged, so `banner.txt` / `banner-compact.txt` are original `MAILROOM` wordmarks (block + box-drawing). Swap them if the owner supplies the original.
 2. **Execution method** for the plan (subagent-driven vs inline).
 3. Whether the kit's *proposed* light theme should ship (the plan includes it as a selectable theme).
 
