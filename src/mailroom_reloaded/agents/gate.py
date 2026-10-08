@@ -112,11 +112,20 @@ class LearnedGate:
       classify -> ``retry`` while attempts < retry_max else ``human_review``;
       extract  -> ``verify``.
     Otherwise -> ``proceed``. Stages missing from the file fall back to bands.
+    Inside the medium band a model ``proceed`` may override a band
+    ``human_review`` (classify with retries spent); this is intentional.
+    Unknown feature names in the file raise ValueError at load.
     """
 
     def __init__(self, band: BandGate, coef_path: Path) -> None:
         self.band = band
         self.models: dict = json.loads(Path(coef_path).read_text("utf-8"))
+        for stage, m in self.models.items():
+            for n in m["features"]:
+                if n not in NUMERIC_FEATURES and not n.startswith("doc_type="):
+                    raise ValueError(f"unknown gate feature {n!r} in stage {stage!r}")
+            if len(m["coef"]) != len(m["features"]):
+                raise ValueError(f"coef/features length mismatch in stage {stage!r}")
 
     def _p(self, m: dict, f: GateFeatures) -> float:
         x = feature_vector(m["features"], f)
