@@ -1,0 +1,387 @@
+# Mailroom taxonomy. Thresholds and per-class run conditions are edited here, not in code.
+# specialist_conditions: merger_agreement input_cap_chars is a head+tail cap.
+pipeline:
+  bins:
+    inbox: '{base_dir}/pipeline/inbox'
+    processing: '{base_dir}/pipeline/processing'
+    classified: '{base_dir}/pipeline/classified'
+    review: '{base_dir}/pipeline/review'
+    failed: '{base_dir}/pipeline/failed'
+    archive: '{base_dir}/archive'
+    manifests: '{base_dir}/manifests'
+  pdf_direct_chars_per_page: 800
+llm_retry:
+  max_attempts: 5
+  base_delay: 1.0
+  rate_limit_base_delay: 8.0
+  max_delay: 60.0
+  jitter: 0.3
+  modal_cold_start_delay: 90.0
+  modal_cold_start_max_delay: 240.0
+vllm_model_map:
+  qwen/qwen3.7-flash: Qwen/Qwen3-8B
+  deepseek/deepseek-v4-flash: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+  deepseek/deepseek-v4-pro: deepseek-ai/DeepSeek-R1-Distill-Qwen-14B
+  openrouter/free: Qwen/Qwen3-8B
+llamafile_model_map:
+  qwen/qwen3.7-flash: qwen3:7b
+  deepseek/deepseek-v4-flash: qwen3:7b
+  deepseek/deepseek-v4-pro: qwen3:14b
+  openrouter/free: qwen3:7b
+chunking:
+  enabled: true
+  chunk_chars: 90000
+  overlap_chars: 8000
+cost_models:
+  openrouter/free:
+    input_per_million: 0.0
+    output_per_million: 0.0
+  z-ai/glm-5.2:free:
+    input_per_million: 0.0
+    output_per_million: 0.0
+  qwen/qwen3.7-flash:
+    input_per_million: 0.03
+    output_per_million: 0.13
+  deepseek/deepseek-v4-flash:
+    input_per_million: 0.05
+    output_per_million: 0.25
+  deepseek/deepseek-v4-pro:
+    input_per_million: 0.435
+    output_per_million: 0.87
+  mailroom-fast:
+    input_per_million: 0.0
+    output_per_million: 0.0
+  mailroom-extract:
+    input_per_million: 0.0
+    output_per_million: 0.0
+  mailroom-vision:
+    input_per_million: 0.0
+    output_per_million: 0.0
+confidence:
+  high: 0.95
+  low: 0.7
+  retry_max: 2
+  judge_band_high: 0.95
+  by_class:
+    contract:
+      judge_band_high: 0.97
+    merger_agreement:
+      judge_band_high: 0.97
+    corporate_record:
+      judge_band_high: 0.97
+    correspondence:
+      judge_band_high: 0.94
+    insurance_claim:
+      judge_band_high: 0.92
+bert:
+  enabled: false
+  defer_classes:
+  - contract
+  - merger_agreement
+  max_trusted_windows: 1
+  pass_subclass_hint: false
+specialist_conditions:
+  insurance_claim:
+    input_cap_chars: 13500
+    output_cap_tokens: 8192
+    temperature: 0.1
+    retries: 2
+    merger_mode: frozen
+  contract:
+    input_cap_chars: 24000
+    output_cap_tokens: 8192
+    temperature: 0.7
+    retries: 2
+    merger_mode: frozen
+  corporate_record:
+    input_cap_chars: 15000
+    output_cap_tokens: 8192
+    temperature: 0.1
+    retries: 2
+    merger_mode: frozen
+  correspondence:
+    input_cap_chars: 12000
+    output_cap_tokens: 8192
+    temperature: 0.1
+    retries: 2
+    merger_mode: frozen
+  merger_agreement:
+    input_cap_chars: 30000
+    output_cap_tokens: 8192
+    temperature: 0.7
+    retries: 2
+    merger_mode: frozen
+field_scoring:
+  ambiguous_band:
+  - 0.5
+  - 0.85
+  type_bands:
+    date: never
+    id: never
+    money:
+    - 0.675
+    - 0.938
+    free_text:
+    - 0.6
+    - 0.95
+    name:
+    - 0.5
+    - 1.0
+    entity_list:
+    - 0.5
+    - 1.0
+  bipartite_match_threshold: 0.6
+  embedding_enabled: true
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  embedding_rescue_below: 0.7
+  containment_fields:
+  - governing_law
+  - term_length
+  - renewal_terms
+  - subject_matter
+  partial_gt_fields:
+  - parties
+  - keywords
+  - cuad_clauses
+  - maud_clauses
+  - claim_checklist
+  - action_items
+  factuality_verification:
+    enabled: true
+    token_coverage: 0.7
+vision:
+  enabled: true
+  max_pages: 10
+  dpi: 150
+  models:
+  - qwen/
+  - gpt-4o
+  - gpt-4.1
+  - claude
+  - gemini
+  - llava
+  - llama-3.2
+  - qwen-vl
+  - -vl-
+  - mailroom-vision
+  exclude:
+  - qwen/qwen3-8b
+  - qwen/qwen3-14b
+  - qwen/qwen3-32b
+  - qwen/qwen3-30b-a3b
+  - qwen/qwen3-4b
+  - mailroom-fast
+  - mailroom-extract
+doc_classes:
+- key: contract
+  label: Contract / Agreement
+  schema: ContractExtraction
+  specialist: contracts_specialist
+  description: "CUAD commercial contracts and agreements (vendor, employment, NDA, license, etc.) \u2014\
+    \ not MAUD merger agreements"
+  field_types:
+    document_name: name
+    parties: entity_list:name
+    effective_date: date
+    term_length: free_text
+    governing_law: name
+    contract_value: money
+    renewal_terms: free_text
+    cuad_family: name
+    merger_consideration: name
+    cuad_clauses: entity_list:free_text
+    maud_clauses: entity_list:free_text
+- key: merger_agreement
+  label: Merger Agreement
+  schema: MergerAgreementExtraction
+  specialist: merger_agreement_specialist
+  description: "MAUD merger agreements (agreement and plan of merger) \u2014 a distinct class from CUAD\
+    \ commercial contracts. Subclass is consideration type (all_cash, all_stock, mixed, \u2026)."
+  field_types:
+    document_name: name
+    parties: entity_list:name
+    effective_date: date
+    effective_time: free_text
+    governing_law: name
+    merger_consideration: name
+    maud_clauses: entity_list:free_text
+    intent: name
+    subject_matter: free_text
+    keywords: entity_list:name
+- key: corporate_record
+  label: Corporate Record
+  schema: CorporateRecordExtraction
+  specialist: corporate_records_specialist
+  description: Bylaws, articles/certificates of incorporation, powers of attorney, stockholder rights
+    instruments, specimen stock (including those filed as SEC exhibits)
+  field_types:
+    entity_name: name
+    record_type: name
+    effective_date: date
+    signatories: entity_list:name
+    jurisdiction: name
+    filing_number: id
+    intent: label
+    subject_matter: free_text
+    keywords: entity_list:name
+- key: correspondence
+  label: Correspondence
+  schema: CorrespondenceExtraction
+  specialist: correspondence_specialist
+  description: Letters, emails, memos, notices, demand letters, press releases, meeting requests
+  field_types:
+    sender: name
+    recipient: name
+    additional_recipients: entity_list
+    communication_type: name
+    communication_date: date
+    demand_amount: money
+    action_items: entity_list
+    urgency: name
+    intent: label
+    subject_matter: free_text
+    keywords: entity_list:name
+- key: insurance_claim
+  label: Insurance Claim
+  schema: InsuranceClaimExtraction
+  specialist: insurance_claims_specialist
+  description: "Insurance claim documentation: FNOL forms, adjuster reports, demand packages, coverage\
+    \ determinations, denial letters, CMS/DE-SynPUF claim tables (inpatient, outpatient, PDE, carrier),\
+    \ and the v8 synthetic LOB lines \u2014 property FNOL bundles, auto decision letters"
+  field_types:
+    claim_number: id
+    policy_number: id
+    insurer: name
+    insured_party: name
+    claim_type: name
+    date_of_loss: date
+    date_filed: date
+    claimed_amount: money
+    adjuster: name
+    damages_description: free_text
+    coverage_determination: name
+    denial_reasons: entity_list:free_text
+    supporting_documents: entity_list
+    intent: label
+    subject_matter: free_text
+    keywords: entity_list:name
+    claim_checklist: entity_list:free_text
+file_extensions:
+- .txt
+- .pdf
+- .docx
+- .md
+- .jpg
+- .jpeg
+- .png
+- .gif
+- .bmp
+- .webp
+- .tiff
+- .tif
+agents:
+  sorter:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: fast
+    temperature: 0.1
+    max_tokens: 2048
+    max_input_chars: 12000
+    reasoning_effort: none
+  intake:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: fast
+    temperature: 0.1
+    max_tokens: 2048
+    max_input_chars: 25000
+    reasoning_effort: none
+  arbiter:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 4096
+    max_input_chars: 100000
+    reasoning_effort: none
+  contracts_specialist:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 100000
+    reasoning_effort: none
+  merger_agreement_specialist:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 100000
+    reasoning_effort: none
+  corporate_records_specialist:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 60000
+    reasoning_effort: none
+  correspondence_specialist:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 40000
+    reasoning_effort: none
+  insurance_claims_specialist:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 60000
+    reasoning_effort: none
+  reporter:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: fast
+    temperature: 0.0
+    max_tokens: 512
+    max_input_chars: 40000
+    reasoning_effort: none
+    procedural: true
+  boss:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 40000
+    reasoning_effort: max
+  pdf_transcriber:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: vision
+    temperature: 0.1
+    max_tokens: 8192
+    max_input_chars: 40000
+    reasoning_effort: none
+  image_extractor:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: vision
+    temperature: 0.1
+    max_tokens: 4096
+    max_input_chars: 20000
+    reasoning_effort: none
+  judge:
+    provider: openrouter
+    model: qwen/qwen3.7-flash
+    tier: extract
+    temperature: 0.1
+    max_tokens: 2048
+    max_input_chars: 60000
+    reasoning_effort: none

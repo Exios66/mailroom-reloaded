@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mailroom-reloaded"
+version = "0.1.0"
+description = "Compressed Digital Mailroom on CrewAI Flows"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "crewai>=1.8,<2",
+    "openai",
+    "pydantic>=2",
+    "pydantic-settings",
+    "pyyaml",
+    "structlog",
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "pypdf",
+    "pdfplumber",
+    "pymupdf",
+    "python-docx",
+    "reportlab",
+    "watchdog",
+    "httpx",
+    "python-dateutil",
+    "jellyfish",
+    "numpy",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp",
+    "openinference-instrumentation-crewai",
+    "openinference-instrumentation-openai",
+]
+
+[project.optional-dependencies]
+bert = ["mailroom-ml[serve] @ git+https://github.com/LLM-Mailroom-Services/mailroom-ml.git"]
+eval = ["datasets", "pandas", "matplotlib"]
+embeddings = ["scipy", "sentence-transformers"]
+deploy = ["modal==1.5.5"]
+dev = ["pytest", "pytest-asyncio", "respx", "scikit-learn", "ruff"]
+parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.21.0"]
+
+[project.scripts]
+mailroom = "mailroom_reloaded.cli:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mailroom_reloaded"]
+# YAML/JSON/text data under the package ships in the wheel (hatchling includes all files in packages).
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
