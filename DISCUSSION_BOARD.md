@@ -44,8 +44,28 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Adversarial + test-suite review] PR #5 audit and hardening — reviewers + orchestrator
+- **Status:** done (one item environment-blocked)
+- **Verdict:** revise — no fabrication; the green suite and ruff claims reproduced exactly.
+- **Reviewed:** the full `main...feat/mailroom-reloaded-completion` diff (Tasks 11–24,
+  Gmail intake, dev server, docs).
+- **Verified independently:** `uv run pytest -q` → 494 passed, 1 skipped, 2 deselected;
+  `uv run ruff check .` clean; `docker compose -f deploy/docker-compose.dev.yml config -q`
+  rc 0; CrewAI 1.15.25 Flow/Agent/Task usage matches docs.crewai.com; no new mandatory
+  deps; dependency fence + `CREWAI_DISABLE_TELEMETRY` intact.
+- **Fixed after review:** conformance vacuous pass rates (empty run / zero tool calls now
+  render `n/a`, never 1.0); added recorder-error, invariant-failure, empty-role,
+  judge-live-seam and CLI-wiring tests; `--strict-markers` + single `live` registration;
+  refreshed stale doc line-refs.
+- **needs_attention (env):** Task 24 Step 4 — live `mailroom conformance --provider
+  llamafile|vllm` was NOT run (no `.env`/provider in this environment). Offline card
+  generation is proven; live pass rates are deferred to a configured host.
+- **Commits:** `2ad2f79` conformance hardening; `57b3e41` doc-ref refresh; `7d7187c` ruff fix.
+
+---
+
 ### [Task 19 + HF audit] API/CLI/UI + ModernBERT & dataset verification — subagent + lucius
-- **Status:** done (with three HF-derived fixes queued)
+- **Status:** done; BERT-1 / BERT-3 / HF-DS-3 fixed by `db75692`
 - **Files:** `src/mailroom_reloaded/api/*`, `cli.py`, `tests/api/*`;
   `config/taxonomy.yaml` (`required_fields`), `tests/agents/test_specialists.py`.
 - **Evidence:** `uv run pytest tests/api -v` → 7 passed; `uv run pytest -q` → 297 passed, 3 skipped.
@@ -56,15 +76,15 @@ this is a ledger, not a governance board.
   - Dataset `mailroom-dataset` @ `ed7576b6`; training/eval = `mailroom-modernbert-training`
     `documents` (2680/299/**323**); test split overlaps training `content_sha256` 323/323.
   - **F1 fixed:** `required_fields` derived from train-split GT presence ≥ 0.8.
-  - **BERT-1 (open, harness, blocks feature):** `ingest/bert.py` calls
-    `classify_document(text)`; real signature is `classify_document(bundle, title, doc_text)`.
-    Use `classify_document_default(text, filename=...)`.
-  - **BERT-3 (open):** `no_model`/`bundle_missing` markers only reachable via
-    `classify_document_default`; the current path maps missing bundle → `error`.
-  - **HF-DS-3 (open, harness):** `eval/dataset.py` reads `content_sha256` off the
-    blind row (absent; it lives in `ground_truth`) and GT `fields` (actual column is
-    `gt_fields` JSON) → live eval would drop all field GT.
-  - **§5 gap:** the BERT-manifest `content_sha256` overlap check is unimplemented.
+  - **BERT-1 (RESOLVED by `db75692`):** `ingest/bert.py` now prefers
+    `classify_document_default(text, filename=...)` (see `ingest/bert.py:66-69`).
+  - **BERT-3 (RESOLVED by `db75692`):** `no_model` / `bundle_missing` markers route
+    through `classify_document_default`.
+  - **HF-DS-3 (RESOLVED by `db75692`):** `eval/dataset.py:198-259` reads the blind-row
+    `metadata` blob and the `gt_fields` JSON; `content_sha256` is read/verified from
+    `ground_truth`.
+  - **§5 gap (still open):** the BERT-manifest `content_sha256` overlap check remains a
+    helper (`eval/dataset.py:302-311`), not called by the runner.
 
 ---
 
