@@ -17,6 +17,7 @@ manifest checkpointing and audit dedupe apply unchanged.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -84,9 +85,10 @@ def resolve_review(
         if doc_subclass:
             overrides["doc_subclass"] = doc_subclass
 
+    worker_reviewer = re.sub(r"[^a-zA-Z0-9_-]+", "-", reviewer).strip("-") or "reviewer"
     state = _flow.run_document(
         path,
-        worker_id=f"review-{reviewer}",
+        worker_id=f"review-{worker_reviewer}",
         resume_from="extract",
         overrides=overrides,
     )

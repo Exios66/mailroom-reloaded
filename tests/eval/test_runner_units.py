@@ -160,3 +160,20 @@ def test_empty_eval_returns_run_id_without_calling_pipeline(engine, monkeypatch)
     int(run_id, 16)
     assert rows(engine) == []
     kickoff.assert_not_called()
+
+
+def test_missing_predictions_never_use_ground_truth(engine, document):
+    from types import SimpleNamespace
+
+    from mailroom_reloaded.eval.metrics import sorter_kpis
+
+    truth = GroundTruth(document.filename, expected="contract")
+    for state in (None, SimpleNamespace(sort=None, extract=None)):
+        assert runner._state_doc_type(state) is None
+    predicted = SimpleNamespace(doc_type="correspondence")
+    assert runner._state_doc_type(SimpleNamespace(sort=predicted)) == "correspondence"
+    assert runner._state_doc_type(SimpleNamespace(extract=predicted)) == "correspondence"
+    row = runner._base_row("run", document, truth, mode="pipeline", latency_s=0, graded=False)
+    runner._insert(engine, row)
+    assert rows(engine)[0]["doc_type"] is None
+    assert sorter_kpis([{**row, "expected_doc_type": truth.expected}])["primary_accuracy"] == 0

@@ -20,6 +20,7 @@ import ast
 import hashlib
 import json
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -343,9 +344,16 @@ def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> li
     """Load a Hub split, falling back to filtering rows by their split field."""
     try:
         dataset = datasets.load_dataset(REPO, config, revision=revision, split=split)
-    except Exception:  # noqa: BLE001 - fall back to a split-column filter
+    except Exception:
         dataset = datasets.load_dataset(REPO, config, revision=revision)
-        return [row for row in dataset if _row_get(row, ("split",), split) == split]
+        splits = dataset.values() if isinstance(dataset, Mapping) else [dataset]
+        rows = [
+            row for subset in splits for row in subset
+            if _row_get(row, ("split",)) == split
+        ]
+        if not rows:
+            raise
+        return rows
     return list(dataset)
 
 

@@ -494,3 +494,33 @@ def test_catalog_failure_does_not_undo_successful_archive(flow, monkeypatch):
     assert flow.state.status == flow._manifest.status == "archived"
     assert flow.state.report["llm_calls"] == 3
     assert flow._manifest.state["status"] == "archived"
+
+
+@pytest.mark.parametrize("status", ["archived", "failed", "processing"])
+@pytest.mark.parametrize("resume_from", [None, "extract"])
+def test_configure_terminal_manifest_fresh_or_explicit_resume(flow, tmp_path, monkeypatch, status, resume_from):
+    from mailroom_reloaded.pipeline.state import MailroomState
+    from mailroom_reloaded.storage.bins import Bins, doc_id_for
+
+    bins = Bins(tmp_path)
+    path = bins.inbox / "rerun.txt"
+    path.write_text("same content")
+    manifest = Manifest(
+        doc_id=doc_id_for(path), filename=path.name, status=status,
+        content_sha256=flow_mod._sha256_file(path),
+        completed_nodes=["ingest", "sort"],
+        state=MailroomState(status=status, text="old text", classify_attempts=2).model_dump(mode="json"),
+    )
+    monkeypatch.setattr(flow_mod, "load_manifest", lambda *_: manifest)
+    monkeypatch.setattr(flow_mod, "load_gate", Mock())
+    flow._configure(path, "worker", resume_from, {"bins": bins}, None)
+    if resume_from is None and status in {"archived", "failed"}:
+        assert flow._manifest is not manifest
+        assert flow._manifest.completed_nodes == []
+        assert flow.state.classify_attempts == 0
+        assert flow.state.status != status
+        assert flow._resume_start() == "ingest"
+    else:
+        assert flow._manifest is manifest
+        assert flow.state.text == "old text"
+        assert flow.state.classify_attempts == 2

@@ -21,7 +21,10 @@ import json
 import os
 from pathlib import Path
 
+import structlog
 import typer
+
+logger = structlog.get_logger(__name__)
 
 app = typer.Typer(
     name="mailroom",
@@ -319,6 +322,9 @@ def gmail_watch(
                 doc_ids = gmail_intake.poll_and_ingest(limit=limit)
             except (gmail_intake.GmailNotInstalled, gmail_intake.GmailAuthError) as exc:
                 raise _gmail_failure(exc) from exc
+            except Exception:
+                logger.exception("gmail_poll_failed")
+                doc_ids = []
             if doc_ids:
                 summary: dict = {"doc_ids": doc_ids, "count": len(doc_ids)}
                 if process:

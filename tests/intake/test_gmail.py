@@ -387,3 +387,77 @@ def test_webhook_returns_204_and_requires_auth(env, client, monkeypatch):
         "/v1/intake/gmail", json=body, headers={"Authorization": "Bearer s3cret"}
     )
     assert ok.status_code == 204
+
+
+@pytest.mark.parametrize("workers", ["threads", "processes"])
+def test_concurrent_polls_ingest_message_once(tmp_path, workers):
+    import multiprocessing
+    import queue
+    import threading
+
+    context = multiprocessing.get_context("fork")
+    worker_type = threading.Thread if workers == "threads" else context.Process
+    event_type = threading.Event if workers == "threads" else context.Event
+    result_queue = queue.Queue() if workers == "threads" else context.Queue()
+    first_fetch = event_type()
+    release = event_type()
+    second_started = event_type()
+    second_fetch = event_type()
+    message = _message("m1", [_part("letter.txt", "text/plain", data=LETTER)])
+    bins = Bins(tmp_path)
+
+    def poll(first):
+        intake = GmailIntake(
+            _config(tmp_path), bins=bins,
+            service=FakeGmailService(["m1"], {"m1": message}),
+        )
+        original_fetch = intake.fetch_new
+
+        def fetch(limit=None):
+            (first_fetch if first else second_fetch).set()
+            if first:
+                assert release.wait(5)
+            return original_fetch(limit)
+
+        intake.fetch_new = fetch
+        if not first:
+            second_started.set()
+        result_queue.put(intake.poll())
+
+    first = worker_type(target=poll, args=(True,))
+    second = worker_type(target=poll, args=(False,))
+    first.start()
+    try:
+        assert first_fetch.wait(5)
+        second.start()
+        assert second_started.wait(5)
+        assert not second_fetch.wait(0.2)
+    finally:
+        release.set()
+        first.join(5)
+        if second.ident is not None:
+            second.join(5)
+    assert not first.is_alive() and not second.is_alive()
+    results = [result_queue.get(timeout=2), result_queue.get(timeout=2)]
+    assert sorted(map(len, results)) == [0, 1]
+    assert len(list(bins.inbox.iterdir())) == 1
+    assert json.loads((tmp_path / "gmail_state.json").read_text())["processed"] == ["m1"]
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_state_saves_use_distinct_temporary_paths(tmp_path, monkeypatch):
+    intake = GmailIntake(_config(tmp_path), bins=Bins(tmp_path))
+    paths = []
+    original_replace = gmail_intake.os.replace
+
+    def replace(source, dest):
+        paths.append(source)
+        if len(paths) == 1:
+            intake._save_state({"processed": ["inner"]})
+        original_replace(source, dest)
+
+    monkeypatch.setattr(gmail_intake.os, "replace", replace)
+    intake._save_state({"processed": ["outer"]})
+    assert len(set(paths)) == 2
+    assert intake.processed_message_ids() == {"outer"}
+    assert not list(tmp_path.glob("*.tmp"))

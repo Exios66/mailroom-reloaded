@@ -123,3 +123,30 @@ def test_grading_selection_bounds_and_order_independence(documents, rate, count)
     assert selected <= {doc.filename for doc in docs}
     assert selected == select_graded(list(reversed(docs)), rate, 7)
     assert select_graded([], rate, 7) == set()
+
+
+@pytest.mark.parametrize("as_dict", [False, True])
+def test_hf_fallback_filters_actual_rows(as_dict):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.eval.dataset import _load_hf_config
+
+    rows = [{"split": "train"}, {"split": "test", "filename": "a"}, {}]
+    data = {"train": rows, "other": [{"split": "test", "filename": "b"}]} if as_dict else rows
+    loader = Mock(side_effect=[ValueError("missing split"), data])
+    result = _load_hf_config(SimpleNamespace(load_dataset=loader), "default", "rev", "test")
+    assert result == [rows[1]] + ([data["other"][0]] if as_dict else [])
+
+
+def test_hf_fallback_preserves_original_error_without_matches():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.eval.dataset import _load_hf_config
+
+    original = ValueError("missing split")
+    loader = Mock(side_effect=[original, {"train": [{"split": "train"}, {}]}])
+    with pytest.raises(ValueError) as exc:
+        _load_hf_config(SimpleNamespace(load_dataset=loader), "default", "rev", "test")
+    assert exc.value is original

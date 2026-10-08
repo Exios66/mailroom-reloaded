@@ -209,6 +209,9 @@ def setup_tracing(
 
     if _PROVIDER is not None:
         if mask and not _MASK_INSTALLED:
+            # Processors run in registration order: exporters already attached
+            # can see unmasked attributes. Enable masking on the first setup
+            # call to protect all exporters; this only protects later ones.
             _PROVIDER.add_span_processor(MaskingSpanProcessor())
             _MASK_INSTALLED = True
         if exporter is not None:

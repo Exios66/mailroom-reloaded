@@ -21,7 +21,7 @@ from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.storage import audit_log
 from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
-from mailroom_reloaded.watcher import Watcher
+from mailroom_reloaded.watcher import Watcher, _acquire_watcher_lock, _release_lock
 
 CORR_SUBCLASS = {
     "doc_subclass": "email",
@@ -259,7 +259,13 @@ def test_startup_resumes_processing_manifest(env, mock_provider, monkeypatch):
 
     monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
     watcher = Watcher(bins, "w2", 1)
-    assert watcher.drain_once() == 0  # inbox empty; only the crashed claim resumed
+    watcher._lock = _acquire_watcher_lock(bins.base / "watcher.lock")
+    assert watcher._lock is not None
+    try:
+        assert watcher.drain_once() == 0  # only the crashed claim resumed
+    finally:
+        _release_lock(watcher._lock)
+        watcher._lock = None
     assert watcher.resumed == 1
 
     assert list((bins.archive / "correspondence").glob("*.txt"))

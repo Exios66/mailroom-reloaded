@@ -504,9 +504,9 @@ def _pooled(cards: Sequence[Mapping[str, Any]], gpus: int) -> dict[str, Any]:
 
 def _card_score(card: Mapping[str, Any]) -> float | None:
     quality = card.get("quality") or {}
-    clause = quality.get("clause") or {}
-    if (clause.get("kind") == "maud") and clause.get("accuracy") is not None:
-        return clause.get("accuracy")
+    maud = quality.get("maud") or {}
+    if maud.get("accuracy") is not None:
+        return maud.get("accuracy")
     return quality.get("overall_mean")
 
 
@@ -536,7 +536,11 @@ def build_master(
             rows = _load_rows(run_id, None)
             doc_types = sorted({row.get("doc_type") for row in rows if row.get("doc_type")})
             for doc_type in doc_types or [None]:
-                built.append(build_card(run_id, doc_type, rows=rows))
+                class_rows = (
+                    rows if doc_type is None
+                    else [row for row in rows if row.get("doc_type") == doc_type]
+                )
+                built.append(build_card(run_id, doc_type, rows=class_rows))
         cards = built
     cards = [dict(card) for card in cards]
 

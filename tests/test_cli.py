@@ -103,3 +103,40 @@ def test_card_master_flag_single_run(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "master.json").exists()
     assert (tmp_path / "master.md").exists()
+
+
+def test_gmail_watch_retries_once_per_interval(monkeypatch):
+    import time
+    from unittest.mock import Mock, call
+
+    from mailroom_reloaded.intake import gmail
+
+    poll = Mock(side_effect=[RuntimeError("temporary"), ["doc"], KeyboardInterrupt])
+    sleep = Mock()
+    log = Mock()
+    monkeypatch.setattr(gmail, "poll_and_ingest", poll)
+    monkeypatch.setattr(time, "sleep", sleep)
+    monkeypatch.setattr(cli.logger, "exception", log)
+    result = runner.invoke(cli.app, ["gmail", "watch", "--interval", "2"])
+    assert result.exit_code == 0, result.output
+    assert '"doc_ids": ["doc"]' in result.output
+    assert sleep.call_args_list == [call(2), call(2)]
+    log.assert_called_once_with("gmail_poll_failed")
+
+
+def test_gmail_watch_auth_and_install_errors_are_fatal(monkeypatch):
+    import time
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.intake import gmail
+
+    sleep = Mock()
+    monkeypatch.setattr(time, "sleep", sleep)
+    for error in (gmail.GmailAuthError, gmail.GmailNotInstalled):
+        poll = Mock(side_effect=error("fatal"))
+        monkeypatch.setattr(gmail, "poll_and_ingest", poll)
+        result = runner.invoke(cli.app, ["gmail", "watch"])
+        assert result.exit_code == 1
+        assert "fatal" in result.output
+        poll.assert_called_once()
+    sleep.assert_not_called()

@@ -250,3 +250,35 @@ def test_master_md_has_tables():
     assert "Serving efficiency" in markdown
     assert "Quality and cost by specialist" in markdown
     assert "## Cost" in markdown
+
+
+@pytest.mark.parametrize("accuracy", [0.0, 0.75, None])
+def test_master_uses_maud_accuracy(accuracy):
+    card = {"doc_type": "merger_agreement", "quality": {
+        "maud": {"accuracy": accuracy}, "overall_mean": 0.25,
+    }}
+    master, _ = build_master(["run"], cards=[card])
+    assert master["by_specialist"]["merger_agreement"]["score"] == (
+        accuracy if accuracy is not None else 0.25
+    )
+
+
+@pytest.mark.parametrize("labelled", [True, False])
+def test_master_partitions_rows_without_inflating_totals(monkeypatch, labelled):
+    from mailroom_reloaded.eval import cards
+
+    rows = _card_rows()
+    rows[1]["doc_type"] = "contract"
+    if not labelled:
+        for row in rows:
+            row["doc_type"] = None
+    monkeypatch.setattr(cards, "_load_rows", lambda *_: rows)
+    master, _ = build_master(["run"])
+    assert master["pooled"]["documents"] == 2
+    assert master["pooled"]["tokens"] == 8400
+    if labelled:
+        assert master["by_specialist"]["contract"]["n"] == 1
+        assert master["by_specialist"]["contract"]["score"] == 0.6
+        assert master["by_specialist"]["correspondence"]["score"] == 0.8
+    else:
+        assert master["by_specialist"]["None"]["n"] == 2

@@ -271,3 +271,36 @@ def test_reject_recovers_unreadable_state_and_stale_path(bins, parked):
     review.audit_log.append.assert_called_once_with(
         "doc", "review", "review_resolved", {"action": "reject", "reviewer": "alice"}
     )
+
+
+def test_drainer_does_not_recover_live_workers(bins, monkeypatch):
+    instance = watcher.Watcher(bins, "drainer")
+    resume = Mock()
+    monkeypatch.setattr(instance, "resume_processing", resume)
+    lock = watcher._acquire_watcher_lock(bins.base / watcher.WATCHER_LOCK_NAME)
+    assert lock is not None
+    try:
+        assert instance.drain_once() == 0
+        resume.assert_not_called()
+        assert not instance._startup_done
+        instance._lock = lock
+        instance.drain_once()
+        resume.assert_called_once()
+    finally:
+        instance._lock = None
+        watcher._release_lock(lock)
+
+
+@pytest.mark.parametrize("reviewer", ["../../escape", r"..\..\escape", "/", "..", "", "alice"])
+def test_reviewer_cannot_escape_processing_directory(bins, parked, monkeypatch, reviewer):
+    from pathlib import Path
+
+    run = Mock(return_value=MailroomState(status="archived"))
+    monkeypatch.setattr(review._flow, "run_document", run)
+    monkeypatch.setattr(review.audit_log, "append", Mock())
+    review.resolve_review("doc", "approve", reviewer=reviewer, bins=bins)
+    worker = run.call_args.kwargs["worker_id"]
+    assert worker.startswith("review-") and len(worker) > len("review-")
+    assert "/" not in worker and "\\" not in worker and ".." not in worker
+    assert bins.processing(worker).resolve().parent == (bins.base / "processing").resolve()
+    assert Path(worker).name == worker

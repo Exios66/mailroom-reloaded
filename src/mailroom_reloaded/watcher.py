@@ -162,7 +162,7 @@ class Watcher:
     # ------------------------------------------------------------- draining
     def drain_once(self) -> int:
         """Process the inbox once; return the number of documents claimed."""
-        if not self._startup_done:
+        if not self._startup_done and self._lock is not None:
             self.resume_processing()
         files = [f for f in sorted(self.bins.inbox.iterdir()) if _is_processable(f)]
         M.queue_depth.set(len(files), {"bin": "inbox"})

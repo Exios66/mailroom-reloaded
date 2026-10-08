@@ -184,14 +184,13 @@ def _write_doc(doc: BlindDoc) -> Path:
     return path
 
 
-def _state_doc_type(state: Any, gt: GroundTruth | None) -> str | None:
-    """Prefer sorter then extractor labels, falling back to ground truth."""
+def _state_doc_type(state: Any) -> str | None:
+    """Return the sorter or extractor prediction, or None when both are absent."""
     sort = getattr(state, "sort", None)
     extract = getattr(state, "extract", None)
     for candidate in (
         getattr(sort, "doc_type", None),
         getattr(extract, "doc_type", None),
-        gt.expected if gt is not None else None,
     ):
         if candidate:
             return str(candidate)
@@ -265,7 +264,7 @@ def _base_row(
         "doc_id": doc_id_for_sha(doc.content_sha256),
         "mode": mode,
         "status": "error",
-        "doc_type": gt.expected if gt is not None else None,
+        "doc_type": None,
         "doc_subclass": gt.expected_subclass if gt is not None else None,
         "sort_confidence": None,
         "sort_mode": None,
@@ -300,7 +299,7 @@ def _pipeline_row(
     sort = getattr(state, "sort", None)
     extract = getattr(state, "extract", None)
     usage = _usage(state)
-    doc_type = _state_doc_type(state, gt)
+    doc_type = _state_doc_type(state)
     row = _base_row(run_id, doc, gt, mode="pipeline", latency_s=latency_s, graded=graded)
     row.update(
         status=str(getattr(state, "status", "") or "unknown"),

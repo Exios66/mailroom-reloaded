@@ -534,9 +534,13 @@ class MailroomFlow(Flow[MailroomState]):
 
         doc_id = doc_id_for(work)
         content_sha256 = _sha256_file(work)
-        manifest = load_manifest(self._bins, doc_id) or Manifest(
-            doc_id=doc_id, filename=work.name, content_sha256=content_sha256
-        )
+        manifest = load_manifest(self._bins, doc_id)
+        if manifest is None or (
+            resume_from is None and manifest.status in {"archived", "failed"}
+        ):
+            manifest = Manifest(
+                doc_id=doc_id, filename=work.name, content_sha256=content_sha256
+            )
         manifest.doc_id = doc_id
         manifest.filename = work.name
         manifest.content_sha256 = content_sha256

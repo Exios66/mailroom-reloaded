@@ -35,11 +35,18 @@ extensions are accepted into `inbox/` but will fail ingest as unsupported.
 4. **Pub/Sub topic.** Create a topic, e.g. `projects/<project>/topics/gmail-push`.
    Grant the Gmail push service account `roles/pubsub.publisher` on it:
    `gmail-api-push@system.gserviceaccount.com`.
-5. **Subscription.** Create a **push** subscription on that topic whose endpoint
-   is your deployed API, e.g. `https://your-host/v1/intake/gmail`. The Gmail
-   notification is acknowledged by the HTTP 204 the route returns. If the API is
-   bound off loopback, set `MAILROOM_API_TOKEN` and configure the push
-   subscription to send an `Authorization: Bearer <token>` header.
+5. **Subscription.** Deploy an authenticated relay and create a **push**
+   subscription targeting its HTTPS endpoint. Configure Pub/Sub authentication
+   with a service account and the relay's expected audience. The relay must
+   validate Google's OIDC token (signature, issuer, audience and service-account
+   identity), then forward the unchanged JSON envelope to
+   `POST https://your-host/v1/intake/gmail`, replacing the Authorization header
+   with `Bearer <MAILROOM_API_TOKEN>`. Set that shared secret on the API and relay,
+   and have the relay acknowledge Pub/Sub only after the API returns HTTP 204.
+   Pub/Sub cannot send an arbitrary fixed bearer header; the API's `require_token`
+   guard accepts a static secret and does not validate Google OIDC tokens.
+   This relay is deployment infrastructure you must provide; use local polling
+   below if it is unavailable.
 6. **Register the mailbox watch.** Call `users.watch` once (and at least every
    7 days) with the topic:
 
@@ -105,8 +112,10 @@ All settings are read from the environment (optional; defaults derive from
 
 Processed Gmail message ids are persisted in a small JSON file at
 `<base_dir>/gmail_state.json` (`{"kind": "mailroom.gmail.state/v1",
-"processed": [...]}`), written with an atomic replace. A message is marked
-processed after its attachments are handled, so repeated polls and duplicate
+"processed": [...]}`), written with an atomic replace. Polling holds a
+process-wide thread lock and an exclusive file lock beside the state file across
+fetching, ingestion and state updates. A message is marked processed after its
+attachments are handled, so repeated polls and duplicate
 Pub/Sub deliveries never re-ingest the same mail. Deleting the file re-imports
 the messages the query still matches.
 
@@ -119,5 +128,5 @@ the messages the query still matches.
   read, applies labels, or modifies the mailbox.
 - Push notifications require a publicly reachable endpoint (or a tunnel) plus
   Cloud Pub/Sub setup; `mailroom gmail watch` (local polling) is the demo path.
-- The state file is per-mailroom-data-dir and not coordinated across replicas;
-  run the intake on one API instance or accept occasional duplicate inbox writes.
+- Coordination requires all callers to share the same state file on a filesystem
+  supporting `flock`. Replicas with separate state files can ingest duplicate mail.

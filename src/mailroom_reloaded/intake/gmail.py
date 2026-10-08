@@ -34,9 +34,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import fcntl
 import json
 import os
 import sys
+import tempfile
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +81,7 @@ DEFAULT_ALLOWED_EXTENSIONS: tuple[str, ...] = (
 DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 DEFAULT_FETCH_LIMIT = 25
 _STATE_KIND = "mailroom.gmail.state/v1"
+_POLL_LOCK = threading.Lock()
 
 _MISSING_EXTRA_MESSAGE = (
     "Gmail intake requires the optional 'gmail' extra: "
@@ -446,6 +450,18 @@ class GmailIntake:
     # ------------------------------------------------------------- poll loop
     def poll(self, limit: int | None = None) -> list[str]:
         """Fetch new messages and ingest their attachments; return created doc_ids."""
+        with _POLL_LOCK:
+            lock_path = self.state_path.with_name(f"{self.state_path.name}.lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with lock_path.open("a+") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    return self._poll_locked(limit)
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def _poll_locked(self, limit: int | None) -> list[str]:
+        """Poll while holding both the process and state-file locks."""
         doc_ids: list[str] = []
         for stub in self.fetch_new(limit=limit):
             message_id = str(stub.get("id") or "")
@@ -496,9 +512,17 @@ class GmailIntake:
     def _save_state(self, state: dict[str, Any]) -> None:
         path = self.state_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent,
+            prefix=f"{path.name}.", suffix=".tmp", delete=False,
+        ) as fh:
+            tmp = Path(fh.name)
+            try:
+                fh.write(json.dumps(state, indent=2))
+                fh.close()
+                os.replace(tmp, path)
+            finally:
+                tmp.unlink(missing_ok=True)
 
 
 def poll_and_ingest(limit: int | None = None) -> list[str]:
