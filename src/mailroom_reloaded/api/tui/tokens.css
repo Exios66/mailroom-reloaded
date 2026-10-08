@@ -1,0 +1,97 @@
+/* Mailroom terminal edition: vendored --term-* tokens.
+ * Source: Claude artifact "The Mailroom" (Design System),
+ * https://claude.ai/artifact/RDJg16TnNR4R1go6phL8pW, project/tokens.css, version 1791433356-cf55.
+ * Dark is the brand default. Light is "proposed" (not yet in the kit source). hc is the high-contrast theme.
+ * Terminal edition only: never mix console (unprefixed) or --obs-* tokens here.
+ */
+:root,
+:root[data-theme="dark"] {
+  --term-bg-deep: #050709; /* Terminal page ground behind everything. Light (proposed, not yet in the source): #efebe2. */
+  --term-bg: #0a0d11; /* Terminal ground under the output and the bottom of the status bar gradient. Light (proposed, not yet in the source): #f7f4ee. */
+  --term-bg-soft: #0e1217; /* Terminal code blocks, the prompt-line rule, and the top of the status bar gradient. Light (proposed, not yet in the source): #ece7dd. */
+  --term-bg-elev: #131820; /* Terminal raised ground (reserved in the source). Light (proposed, not yet in the source): #e4ded2. */
+  --term-fg: #d8d4ce; /* Terminal body text, echoed commands, and file names on `term-bg`/`term-bg-soft` (12:1+). Light (proposed, not yet in the source): #1f2328. */
+  --term-fg-dim: #6b7585; /* Terminal secondary text: status bar, boot lines, blockquotes, ghost completion, KV keys. FLAG (brand theme): 4.0–4.3:1 on the terminal grounds, under 4.5 as in the source. The `hc` theme fixes it at 10.9:1+. Light (proposed, not yet in the source): #4f5866. */
+  --term-fg-faint: #2a303c; /* Terminal ASCII divider rules, decorative only (1.4:1 brand, 4.8:1 hc). Light (proposed, not yet in the source): #a3aab5. */
+  --term-amber: #ffb86c; /* Terminal signature hue: headings, cursor, banner, links in the status bar, markdown file names, list markers, table heads. The terminal's `theme` command swaps this pair (`term-amber`, `term-amber-bright`) for `term-phosphor` + `term-phosphor-bright` (green) or `term-cyan` + `term-cyan-bright` (cyan). Light (proposed, not yet in the source): #8f4a00. */
+  --term-amber-bright: #ffd09b; /* Terminal emphasis: `strong`, h3, hovered sister links, selection text. Light (proposed, not yet in the source): #6f3900. */
+  --term-phosphor: #a3e635; /* Terminal inline code, and the terminal mark's envelope. Light (proposed, not yet in the source): #3d6311. */
+  --term-phosphor-bright: #d4f881; /* Terminal `theme green`: replaces `term-amber-bright`. Light (proposed, not yet in the source): #2f4f0c. */
+  --term-cyan: #67e8f9; /* Terminal info text, directories, the prompt path, and links. Light (proposed, not yet in the source): #0b6674. */
+  --term-cyan-bright: #a5f3fc; /* Terminal `theme cyan`: replaces `term-amber-bright`. Light (proposed, not yet in the source): #08515c. */
+  --term-magenta: #f472b6; /* Terminal compose-mode prompt and link hover. Light (proposed, not yet in the source): #9c2263. */
+  --term-red: #ef4444; /* Terminal error lines (5.4:1 on `term-bg` brand). Light (proposed, not yet in the source): #b02118. */
+  --term-green: #4ade80; /* Terminal prompt `mailroom@floor`, success lines, ok boot tags, the live status dot. Light (proposed, not yet in the source): #17703a. */
+  --term-yellow: #facc15; /* Terminal warning lines and warn boot tags. Light (proposed, not yet in the source): #6f5400. */
+  --term-border: #1d2530; /* Terminal hairlines: status bar rule, table cells, man pages, pre blocks. 1.2–1.3:1 in the brand theme (decorative). The `hc` theme raises it to 4.5:1+ on every terminal ground. Light (proposed, not yet in the source): #737c8a. */
+  --term-sky-1: #0c130f; /* Terminal ambient skyline, near (front) layer. Light (proposed, not yet in the source): #e2dccf. */
+  --term-sky-2: #0e1712; /* Terminal ambient skyline, far (back) layer, drawn at 55% opacity. Light (proposed, not yet in the source): #e9e4d9. */
+  --term-cursor-glow: 0 0 8px #ffb86c; /* Terminal block cursor glow (the `hc` theme drops glows). */
+  --term-man-inset: inset 0 0 30px rgba(255, 184, 108, 0.03); /* Terminal man page inner warmth. */
+  --term-pad-y: 14px; /* Terminal output padding, top and bottom (10px under 640px). */
+  --term-pad-x: 18px; /* Terminal output padding, sides. */
+  --term-list-gap: 22px; /* Column gap in `ls` listings. */
+  --term-radius-sm: 2px; /* Terminal inline code, man pages, motd. */
+  --term-radius-md: 3px; /* Terminal pre blocks and scrollbar thumb. */
+  --term-radius-round: 50%; /* Terminal status dot and conveyor particles (the only round shapes in the system). */
+}
+
+/* light: proposed, not yet in the kit source */
+:root[data-theme="light"] {
+  --term-bg-deep: #efebe2;
+  --term-bg: #f7f4ee;
+  --term-bg-soft: #ece7dd;
+  --term-bg-elev: #e4ded2;
+  --term-fg: #1f2328;
+  --term-fg-dim: #4f5866;
+  --term-fg-faint: #a3aab5;
+  --term-amber: #8f4a00;
+  --term-amber-bright: #6f3900;
+  --term-phosphor: #3d6311;
+  --term-phosphor-bright: #2f4f0c;
+  --term-cyan: #0b6674;
+  --term-cyan-bright: #08515c;
+  --term-magenta: #9c2263;
+  --term-red: #b02118;
+  --term-green: #17703a;
+  --term-yellow: #6f5400;
+  --term-border: #737c8a;
+  --term-sky-1: #e2dccf;
+  --term-sky-2: #e9e4d9;
+}
+
+:root[data-theme="hc"] {
+  --term-bg-deep: #000000;
+  --term-bg: #000000;
+  --term-bg-soft: #07090c;
+  --term-bg-elev: #0d1117;
+  --term-fg: #f4f1eb;
+  --term-fg-dim: #b7c0ce;
+  --term-fg-faint: #6f7a8c;
+  --term-amber: #ffc98f;
+  --term-amber-bright: #ffe0bd;
+  --term-phosphor: #c2f26b;
+  --term-phosphor-bright: #e2fbad;
+  --term-cyan: #9ef1fb;
+  --term-cyan-bright: #cff8fd;
+  --term-magenta: #f9a8d4;
+  --term-red: #ff8a8a;
+  --term-green: #86efac;
+  --term-yellow: #fde68a;
+  --term-border: #6a7a90;
+  --term-sky-1: #0c130f;
+  --term-sky-2: #0e1712;
+  --term-cursor-glow: none;
+  --term-man-inset: none;
+}
+
+/* phosphor variants: the `theme` command swaps the signature pair */
+:root[data-phosphor="green"] {
+  --term-amber: var(--term-phosphor);
+  --term-amber-bright: var(--term-phosphor-bright);
+}
+
+:root[data-phosphor="cyan"] {
+  --term-amber: var(--term-cyan);
+  --term-amber-bright: var(--term-cyan-bright);
+}

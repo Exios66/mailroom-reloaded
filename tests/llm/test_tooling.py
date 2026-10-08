@@ -220,3 +220,31 @@ def test_length_on_tool_call_round_raises(mock_provider):
     mock_provider._queue[-1]["finish_reason"] = "length"
     with pytest.raises(LengthFinishReasonError):
         _run()
+
+
+@pytest.mark.parametrize("completed_rounds", [0, 1])
+def test_tool_length_cap_records_accumulated_usage(mock_provider, monkeypatch, completed_rounds):
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.llm import client
+
+    metrics = Mock()
+    capped = Mock()
+    monkeypatch.setattr(client, "_record_usage_metrics", metrics)
+    monkeypatch.setattr(client.M, "length_capped", capped)
+    for _ in range(completed_rounds + 1):
+        mock_provider.tool_call("list_subclasses", {"doc_type": "contract"})
+    mock_provider._queue[-1]["finish_reason"] = "length"
+    with pytest.raises(LengthFinishReasonError) as raised:
+        _run()
+    usage = raised.value.usage
+    assert usage.calls == completed_rounds + 1
+    assert usage.prompt_tokens == 10 * usage.calls
+    assert usage.completion_tokens == 5 * usage.calls
+    metrics.assert_called_once()
+    assert metrics.call_args.args[0] == "sorter"
+    assert metrics.call_args.args[2] == usage
+    capped.add.assert_called_once()
+    assert capped.add.call_args.args[0] == 1
+    assert capped.add.call_args.args[1]["role"] == "sorter"
+    assert len(mock_provider.requests) == usage.calls

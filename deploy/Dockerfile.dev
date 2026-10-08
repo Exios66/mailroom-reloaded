@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# mailroom-reloaded DEV image (spec §9, deploy/docker-compose.dev.yml).
+#
+# Differs from deploy/Dockerfile on purpose:
+#   * no ModernBERT model stage and no `bert` extra (dev defaults to the `mock`
+#     provider, so no weights are needed and the build stays CPU-only)
+#   * installs the `dev` extra (pytest, ruff, respx) so the dev suite can run
+#     inside the container if wanted
+#   * expects the repository `src/` to be bind-mounted at /app/src with
+#     PYTHONPATH=/app/src, so `uvicorn --reload` picks up live edits
+#
+# Build context is the repository root.
+
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+
+FROM ${PYTHON_IMAGE}
+COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /usr/local/bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    MAILROOM_BASE_DIR=/data \
+    HF_HOME=/hf_cache \
+    CREWAI_DISABLE_TELEMETRY=true
+
+WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Dependencies first (cache-friendly), then the project itself.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --extra dev --no-install-project
+COPY src ./src
+RUN uv sync --frozen --extra dev
+
+ARG APP_UID=1000
+RUN test "$APP_UID" -gt 0 \
+    && useradd --create-home --uid "$APP_UID" app \
+    && mkdir -p /data /hf_cache \
+    && chown -R app:app /data /hf_cache /app
+USER app
+
+EXPOSE 8000
+CMD ["uvicorn", "mailroom_reloaded.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]

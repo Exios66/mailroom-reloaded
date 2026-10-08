@@ -1,0 +1,8 @@
+From: dave@example.com
+To: bob@example.com
+Date: 2026-01-07
+Subject: Thanks
+
+Bob, thank you for the quick turnaround on the paperwork. No action needed.
+
+Dave

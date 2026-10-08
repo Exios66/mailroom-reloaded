@@ -134,6 +134,34 @@ confidence:
       low: 0.85
       judge_band_high: 0.94
 
+# Jev (TypeSafe System One) decision model (issue #8) — an OPT-IN, calibrated
+# probabilistic route gate. When `provider` is not `off`, agents.gate.load_gate
+# prefers a JevGate over the band/learned gate. Every key here is only a fallback
+# for the matching `MAILROOM_JEV_*` / `JEV_*` environment variable; numeric
+# fields default in settings.jev_config when this block leaves them blank.
+jev:
+  # off | openrouter | typesafe | local. `off` keeps the existing gate behaviour.
+  provider: off
+  # Provider-specific model id; blank picks the provider default
+  # (openrouter -> typesafe/jev-1.13, typesafe -> jev-latest, local -> jevk5).
+  model: ""
+  # Provider-specific endpoint; blank picks the provider default
+  # (openrouter -> openrouter.ai/api/alpha/decisions, typesafe -> api.typesafe.ai,
+  #  local -> http://127.0.0.1:8090/v1/systemone).
+  base_url: ""
+  # Sampling temperature for the local JevK5 transport only; NOT sent to the
+  # hosted OpenRouter/TypeSafe requests (they expose no temperature field).
+  temperature: 1.0
+  # Upper edge of the uncertainty band: at/above this Jev's chosen action is
+  # trusted. Between the fitted verify_threshold (models/jev_calibration.json)
+  # and this the gate maps to `verify`; below verify (or when the noul
+  # "escalate?" answer says escalate) it maps to `human_review`.
+  accept_threshold: 0.8
+  # Per-request HTTP timeout in seconds.
+  timeout_s: 10.0
+  # Retries on 429/529/5xx with exponential backoff (never on other 4xx).
+  max_retries: 2
+
 bert:
   enabled: false
   defer_classes: [contract, merger_agreement]
@@ -352,6 +380,55 @@ doc_classes:
       subject_matter: free_text
       keywords: entity_list:name
       claim_checklist: entity_list:free_text
+
+# Required-field taxonomy for extraction-confidence coverage (spec §6):
+# `required_field_coverage` is the share of a class's required fields that the
+# extraction left non-empty. Derived from the ground-truth `gt_presence`
+# non-empty ("populated") rate on the TRAIN split of
+# `Lucius-Morningstar/mailroom-dataset` @ revision `ed7576b6`
+# (`ground_truth` config), selecting fields at presence >= 0.8. Entries are
+# extraction-schema field names (schemas/extraction.py) so `_coverage()` can
+# index the predicted payload directly.
+#
+# Presence rates on train (gt_fields key -> extraction schema field):
+#   contract          cuad_clause_labels 0.843 -> cuad_clauses
+#   merger_agreement  maud_clause_labels 1.000 -> maud_clauses
+#   corporate_record  intent / subject_matter / keywords         1.000
+#   correspondence    intent / subject_matter / keywords         1.000
+#   insurance_claim   listed fields 1.000 (supporting_documents 0.995)
+# Below the 0.8 cut (excluded): insurance_claim.adjuster 0.136,
+# insurance_claim.denial_reasons 0.034, and any schema field with no
+# ground-truth surface on train (e.g. contract.parties,
+# corporate_record.entity_name). Removing this block re-enables the
+# specialists.py fallback (all schema fields except reasoning/confidence).
+required_fields:
+  contract:
+    - cuad_clauses
+  merger_agreement:
+    - maud_clauses
+  corporate_record:
+    - intent
+    - subject_matter
+    - keywords
+  correspondence:
+    - intent
+    - subject_matter
+    - keywords
+  insurance_claim:
+    - claim_number
+    - policy_number
+    - insurer
+    - insured_party
+    - claim_type
+    - date_of_loss
+    - date_filed
+    - claimed_amount
+    - damages_description
+    - coverage_determination
+    - supporting_documents
+    - intent
+    - subject_matter
+    - keywords
 
 file_extensions:
   - .txt

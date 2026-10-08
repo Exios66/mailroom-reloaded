@@ -6,17 +6,88 @@ from helpers import assert_no_gt
 
 from mailroom_reloaded.agents.sorter import sort
 from mailroom_reloaded.agents.specialists import (
+    _coverage,
     extract,
     extraction_confidence,
     prepare_input,
 )
 from mailroom_reloaded.ingest.bert import Handoff, SortMode
 from mailroom_reloaded.prompts.loader import load_prompt
+from mailroom_reloaded.schemas.extraction import get_extraction_schema
 from mailroom_reloaded.settings import RunConditions, load_taxonomy
 
 
 def _dagger_cond():
     return RunConditions(54000, 6144, 0.7, 2, "dagger")
+
+
+# Derived from `mailroom-dataset` @ ed7576b6 ground_truth TRAIN split:
+# fields whose ground-truth presence rate is >= 0.8, mapped to extraction
+# schema field names. Pins the taxonomy `required_fields` block (spec §6).
+_DERIVED_REQUIRED_FIELDS = {
+    "contract": ["cuad_clauses"],
+    "merger_agreement": ["maud_clauses"],
+    "corporate_record": ["intent", "subject_matter", "keywords"],
+    "correspondence": ["intent", "subject_matter", "keywords"],
+    "insurance_claim": [
+        "claim_number",
+        "policy_number",
+        "insurer",
+        "insured_party",
+        "claim_type",
+        "date_of_loss",
+        "date_filed",
+        "claimed_amount",
+        "damages_description",
+        "coverage_determination",
+        "supporting_documents",
+        "intent",
+        "subject_matter",
+        "keywords",
+    ],
+}
+
+
+def test_required_fields_block_present_and_schema_aligned():
+    raw = load_taxonomy().raw
+    rf = raw["required_fields"]
+    assert set(rf) == set(_DERIVED_REQUIRED_FIELDS)
+    for doc_type, fields in _DERIVED_REQUIRED_FIELDS.items():
+        assert rf[doc_type] == fields
+        schema_fields = get_extraction_schema(doc_type).model_fields
+        for name in rf[doc_type]:
+            assert name in schema_fields, f"{doc_type}.{name} not an extraction field"
+
+
+def test_coverage_uses_configured_required_fields():
+    fields = load_taxonomy().raw["required_fields"]["insurance_claim"]
+    assert _coverage("insurance_claim", {}) == 0.0
+    full = {name: "x" for name in fields}
+    assert _coverage("insurance_claim", full) == pytest.approx(1.0)
+    # `adjuster` is populated on only 13.6% of train rows and is excluded from
+    # the block; a present-but-unrequired field must not move coverage.
+    assert "adjuster" not in fields
+    assert _coverage("insurance_claim", {**full, "adjuster": "A. Adjuster"}) == pytest.approx(1.0)
+    # A missing required field lowers coverage by exactly one slot.
+    partial = {k: v for k, v in full.items() if k != "claim_number"}
+    assert _coverage("insurance_claim", partial) == pytest.approx(
+        (len(fields) - 1) / len(fields)
+    )
+
+
+def test_coverage_falls_back_to_schema_fields_when_unconfigured(monkeypatch):
+    from mailroom_reloaded.agents import specialists
+
+    class _FakeTaxonomy:
+        def __init__(self, raw):
+            self.raw = raw
+
+    raw = {k: v for k, v in load_taxonomy().raw.items() if k != "required_fields"}
+    monkeypatch.setattr(specialists, "load_taxonomy", lambda: _FakeTaxonomy(raw))
+    # Fallback requires every contract schema field except `reasoning`;
+    # only `cuad_clauses` present -> 1/11, proving the block changes behavior.
+    n = len(get_extraction_schema("contract").model_fields) - 1
+    assert specialists._coverage("contract", {"cuad_clauses": ["x"]}) == pytest.approx(1 / n)
 
 
 def test_system_prompt_is_frozen_bytes(mock_provider):

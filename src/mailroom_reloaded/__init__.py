@@ -4,4 +4,8 @@ import os
 
 os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
 
-__version__ = "0.1.0"
+from mailroom_reloaded.obs.tracing import setup_tracing
+
+setup_tracing()
+
+__version__ = "0.2.0"

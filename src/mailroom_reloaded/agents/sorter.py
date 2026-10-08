@@ -30,6 +30,8 @@ _CONF_EPS = 1e-6
 
 @dataclass(frozen=True)
 class SortResult:
+    """One sorter verdict, with raw and calibrated confidence."""
+
     doc_type: str | None
     doc_subclass: str | None
     confidence: float
@@ -46,19 +48,23 @@ class SortResult:
 
 
 def _logit(p: float) -> float:
+    """Log-odds of ``p`` after clamping to ``[1e-6, 1 - 1e-6]``."""
     p = min(max(p, _CONF_EPS), 1.0 - _CONF_EPS)
     return math.log(p / (1.0 - p))
 
 
 def _sigmoid(x: float) -> float:
+    """Standard logistic function."""
     return 1.0 / (1.0 + math.exp(-x))
 
 
 def calibration_path() -> Path:
+    """Path of the sorter calibration file under the configured base dir."""
     return get_settings().base_dir / "models" / "calibration.json"
 
 
 def _as_temperature(value: Any) -> float | None:
+    """Coerce a leaf value (bare float or ``{"temperature": T}``) to a float."""
     if isinstance(value, dict):
         value = value.get("temperature")
     try:
@@ -111,6 +117,7 @@ def load_calibration(provider: str, model: str, doc_type: str) -> float | None:
 
 
 def _system_prompt(handoff: Handoff) -> str:
+    """`sorter_v14`, plus the scoped subclass block in ``SUBCLASS_ONLY`` mode."""
     system = load_prompt("sorter_v14")
     if handoff.mode is SortMode.SUBCLASS_ONLY:
         scope = load_prompt("sorter_subclass_scope")
@@ -121,6 +128,7 @@ def _system_prompt(handoff: Handoff) -> str:
 
 
 def _sorter_response_format(handoff: Handoff) -> dict[str, Any]:
+    """Strict JSON schema; the subclass enum is class-scoped in ``SUBCLASS_ONLY``."""
     if handoff.mode is SortMode.SUBCLASS_ONLY:
         properties: dict[str, Any] = {
             "doc_subclass": {
@@ -207,6 +215,7 @@ def sort(text: str, handoff: Handoff, *, attempt: int = 0) -> SortResult:
 
 
 def _user_message(capped: str, handoff: Handoff) -> str:
+    """Build the user turn; ``FULL`` mode appends the BERT handoff prior."""
     message = f"Classify this document:\n\n{capped}"
     if handoff.mode is SortMode.FULL and handoff.prior:
         message = f"{message}\n\nHandoff prior:\n{handoff.prior}"

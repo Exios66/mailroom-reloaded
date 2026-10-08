@@ -28,6 +28,8 @@ NUMERIC_FEATURES = (
 
 @dataclass(frozen=True)
 class GateFeatures:
+    """Immutable inputs to a route-gate decision (spec section 6)."""
+
     stage: Stage
     doc_type: str | None
     confidence: float
@@ -44,25 +46,34 @@ class GateFeatures:
 
 @dataclass(frozen=True)
 class GateDecision:
+    """The chosen action, a human-readable reason, and its origin."""
+
     action: Action
     reason: str
-    source: Literal["band", "model", "rule"]
+    source: Literal["band", "model", "rule", "jev"]
 
 
 class RouteGate(Protocol):
-    def decide(self, f: GateFeatures) -> GateDecision: ...
+    """Anything that turns ``GateFeatures`` into a deterministic ``GateDecision``."""
+
+    def decide(self, f: GateFeatures) -> GateDecision:
+        """Return the routing decision for ``f`` (no LLM calls)."""
+        ...
 
 
 class BandGate:
     """Threshold bands from the taxonomy (per class once doc_type is known)."""
 
     def __init__(self, taxonomy: Taxonomy | None = None) -> None:
+        """Bind to ``taxonomy`` (defaults to the loaded taxonomy)."""
         self.taxonomy = taxonomy or load_taxonomy()
 
     def thresholds(self, doc_type: str | None):
+        """Per-class thresholds, falling back to the global bands."""
         return self.taxonomy.confidence_for(doc_type)
 
     def decide(self, f: GateFeatures) -> GateDecision:
+        """Apply the classify/extract band rules in order."""
         t = self.thresholds(f.doc_type)
         if f.stage == "classify":
             if f.doc_type_disagree and not f.resorted:
@@ -118,6 +129,7 @@ class LearnedGate:
     """
 
     def __init__(self, band: BandGate, coef_path: Path) -> None:
+        """Load and validate the per-stage coefficients from ``coef_path``."""
         self.band = band
         self.models: dict = json.loads(Path(coef_path).read_text("utf-8"))
         for stage, m in self.models.items():
@@ -128,11 +140,13 @@ class LearnedGate:
                 raise ValueError(f"coef/features length mismatch in stage {stage!r}")
 
     def _p(self, m: dict, f: GateFeatures) -> float:
+        """Sigmoid of the linear model ``m`` evaluated at ``f``."""
         x = feature_vector(m["features"], f)
         z = float(x @ np.asarray(m["coef"], dtype=float) + float(m["intercept"]))
         return float(1.0 / (1.0 + np.exp(-np.clip(z, -500, 500))))
 
     def decide(self, f: GateFeatures) -> GateDecision:
+        """Override the band decision only inside the medium confidence band."""
         base = self.band.decide(f)
         m = self.models.get(f.stage)
         if m is None or base.source == "rule":
@@ -153,7 +167,13 @@ class LearnedGate:
 
 
 def load_gate() -> RouteGate:
+    """Gate selection: a calibrated Jev gate when enabled, else learned, else bands."""
+    from mailroom_reloaded.agents.jev import load_jev_gate
+
     band = BandGate(load_taxonomy())
+    jev = load_jev_gate(load_taxonomy())
+    if jev is not None:
+        return jev
     path = get_settings().base_dir / "models" / "route_gate.json"
     if path.exists():
         return LearnedGate(band, path)

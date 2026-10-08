@@ -24,18 +24,24 @@ ROLE = "judge"
 
 
 class FieldFinding(BaseModel):
+    """One field's grading verdict and the rationale behind it."""
+
     field: str
     verdict: Literal["correct", "partial", "wrong", "missing", "hallucinated", "gt_suspect"]
     rationale: str = ""
 
 
 class JudgeVerdict(BaseModel):
+    """Live-mode completeness verdict (no ground truth)."""
+
     label: Literal["complete", "partial", "incomplete"]
     score: float
     field_findings: list[FieldFinding] = Field(default_factory=list)
 
 
 class ClassificationFinding(BaseModel):
+    """The grading verdict for the sorter's classification."""
+
     verdict: Literal["correct", "incorrect", "gt_suspect"]
     rationale: str = ""
 
@@ -49,6 +55,8 @@ class _GradeOutput(BaseModel):
 
 
 class JudgeGrade(BaseModel):
+    """Eval-mode grading result: field findings, classification and usage."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     doc_id: str
@@ -67,10 +75,12 @@ def judge_same_model(taxonomy: Taxonomy | None = None) -> bool:
 
 
 def _json(value: Any) -> str:
+    """Render ``value`` as indented, non-ASCII-safe JSON for the task prompt."""
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
 def _usage(token_usage: Any) -> Usage:
+    """Convert a CrewAI ``token_usage`` object into a ``Usage`` total."""
     return Usage(
         prompt_tokens=int(getattr(token_usage, "prompt_tokens", 0) or 0),
         completion_tokens=int(getattr(token_usage, "completion_tokens", 0) or 0),
@@ -79,6 +89,7 @@ def _usage(token_usage: Any) -> Usage:
 
 
 def _run(goal: str, backstory: str, description: str, model: type[BaseModel], ctx: ToolContext, tools):
+    """Build and run the single-agent judge crew for one task."""
     agent = Agent(
         role=ROLE,
         goal=goal,
@@ -98,6 +109,7 @@ def _run(goal: str, backstory: str, description: str, model: type[BaseModel], ct
 
 
 def _extract(result: Any, model: type[BaseModel]) -> BaseModel:
+    """Coerce a CrewAI ``CrewOutput`` into ``model`` (pydantic, json_dict or raw)."""
     if isinstance(result.pydantic, model):
         return result.pydantic
     if result.json_dict:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mailroom-reloaded"
-version = "0.1.0"
+version = "0.2.0"
 description = "Compressed Digital Mailroom on CrewAI Flows"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -37,6 +37,12 @@ dependencies = [
 [project.optional-dependencies]
 bert = ["mailroom-ml[serve] @ git+https://github.com/LLM-Mailroom-Services/mailroom-ml.git"]
 eval = ["datasets", "pandas", "matplotlib"]
+gmail = [
+    "google-api-python-client",
+    "google-auth",
+    "google-auth-oauthlib",
+    "google-auth-httplib2",
+]
 embeddings = ["scipy", "sentence-transformers"]
 deploy = ["modal==1.5.5"]
 dev = ["pytest", "pytest-asyncio", "respx", "scikit-learn", "ruff"]
@@ -55,6 +61,10 @@ packages = ["src/mailroom_reloaded"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "--strict-markers -m 'not live'"
+markers = [
+    "live: end-to-end tests that need a running dev server or live provider (deselected by default)",
+]
 
 [tool.ruff]
 # Vendored verbatim from llm-dojo-scoring v0.21.0 (see scoring/PARITY.md); keep upstream bytes.
