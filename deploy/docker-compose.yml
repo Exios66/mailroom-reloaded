@@ -31,7 +31,7 @@ services:
     build: *app-build
     image: mailroom-reloaded:latest
     restart: unless-stopped
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     environment:
       <<: *app-env
       MAILROOM_EMBED_WATCHER: ${MAILROOM_EMBED_WATCHER:-1}
