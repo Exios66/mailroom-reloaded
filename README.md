@@ -79,6 +79,7 @@ scripts/smoke.sh       # drops a fixture in the inbox and waits for "archived"
 | Service | URL |
 | --- | --- |
 | API, `/ui` | http://localhost:8000 |
+| `/tui` browser terminal ([docs/TUI.md](docs/TUI.md)) | http://localhost:8000/tui |
 | Phoenix traces | http://localhost:6006 |
 | Prometheus | http://localhost:9090 |
 | Grafana (Pipeline, Serving & GPU, Quality) | http://localhost:3000 |

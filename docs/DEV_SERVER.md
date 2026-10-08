@@ -14,6 +14,8 @@ scripts/dev.sh logs
 scripts/dev.sh down        # or: make dev-down
 ```
 
+No Docker? `scripts/tui_dev.sh up` runs a host-only mock stack for the `/tui` browser terminal; see [TUI.md](TUI.md).
+
 ## What `scripts/dev.sh up` does, step by step
 
 1. Verifies `docker` and the `docker compose` plugin are on `PATH`; exits 127

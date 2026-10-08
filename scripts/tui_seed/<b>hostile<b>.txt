@@ -1,0 +1,6 @@
+From: mallory@example.com
+To: bob@example.com
+Date: 2026-01-09
+Subject: hostile filename fixture
+
+Please review the attached notice.

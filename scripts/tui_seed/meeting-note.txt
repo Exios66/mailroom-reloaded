@@ -1,0 +1,10 @@
+From: carol@example.com
+To: bob@example.com
+Date: 2026-01-05
+Subject: Meeting follow-up
+
+Hi Bob,
+
+Thanks for meeting today. Please send the revised schedule before Monday.
+
+Carol
