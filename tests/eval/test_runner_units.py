@@ -200,3 +200,17 @@ async def test_specialist_cells_extract_concurrently_off_event_loop(engine, docu
     assert len(worker_threads) == 2
     assert loop_thread not in worker_threads
     assert all(row["status"] == "ok" for row in rows(engine))
+
+
+def test_write_doc_creates_nested_parent_dirs(tmp_path, monkeypatch):
+    """Nested Enron-style filenames must not abort the eval run (parent dirs)."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(runner, "get_settings", lambda: SimpleNamespace(base_dir=tmp_path))
+    nested = BlindDoc("owner/folder/1234.", "nested body", sha256_text("nested body"))
+
+    path = runner._write_doc(nested)
+
+    assert path.exists()
+    assert path.parent.is_dir()
+    assert path.read_text(encoding="utf-8") == "nested body"

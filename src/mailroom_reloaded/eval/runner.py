@@ -178,8 +178,13 @@ def _json(value: Any) -> str:
 
 
 def _write_doc(doc: BlindDoc) -> Path:
-    """Write blind document text to the configured inbox and return its path."""
+    """Write blind document text to the configured inbox and return its path.
+
+    Some dataset filenames are nested paths (Enron ``owner/folder/n.``), so the
+    inbox parent directory is created before writing.
+    """
     path = Bins(get_settings().base_dir).inbox / doc.filename
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(doc.doc_text, encoding="utf-8")
     return path
 
