@@ -23,8 +23,12 @@ Engine flags follow the SAND-37 conditions: prefix caching, fp8 KV cache.
 ``modal`` package (the ``deploy`` extra) is importable, so tests need neither.
 """
 
+import json
 import os
 import subprocess
+import threading
+import time
+import urllib.request
 
 try:
     import modal
@@ -71,6 +75,20 @@ def deploy_config() -> dict:
     }
 
 
+CFG_ENV = "MAILROOM_VLLM_CFG"
+
+
+def baked_env(cfg: dict) -> dict[str, str]:
+    """Env baked into the image so the container sees the deploy-time config."""
+    return {CFG_ENV: json.dumps(cfg)}
+
+
+def resolved_config() -> dict:
+    """Container side: prefer the baked config, else read the environment."""
+    baked = os.environ.get(CFG_ENV, "").strip()
+    return json.loads(baked) if baked else deploy_config()
+
+
 def build_command(cfg: dict) -> list[str]:
     """Assemble the ``vllm serve`` argv for a config."""
     return [
@@ -93,7 +111,20 @@ if modal is not None:
     _hf_cache = modal.Volume.from_name("mailroom-hf-cache", create_if_missing=True)
     _image = modal.Image.debian_slim(python_version="3.12").uv_pip_install(
         f"vllm=={VLLM_VERSION}", "huggingface_hub"
-    )
+    ).env(baked_env(_cfg))
+
+    def _commit_when_healthy(port: int) -> None:
+        """Persist downloaded weights to the cache Volume once /health answers."""
+        url = f"http://127.0.0.1:{port}/health"
+        deadline = time.time() + STARTUP_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            try:
+                if urllib.request.urlopen(url, timeout=5).status == 200:
+                    _hf_cache.commit()
+                    return
+            except OSError:
+                pass
+            time.sleep(5)
 
     @app.function(
         image=_image,
@@ -109,4 +140,6 @@ if modal is not None:
     def serve() -> None:
         """Start vLLM; /v1/* and /metrics are both served on SERVER_PORT."""
         # VLLM_API_KEY from the secret is read natively by vLLM (401 without bearer).
-        subprocess.Popen(build_command(_cfg))
+        cfg = resolved_config()
+        subprocess.Popen(build_command(cfg))
+        threading.Thread(target=_commit_when_healthy, args=(cfg["port"],), daemon=True).start()

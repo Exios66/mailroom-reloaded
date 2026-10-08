@@ -23,7 +23,7 @@ modal secret create mailroom-vllm-api-key VLLM_API_KEY="$(openssl rand -hex 24)"
 MODAL_GPU=L4 MODAL_GPU_COUNT=1 modal deploy deploy/modal_vllm.py
 ```
 
-The URL is printed by `modal deploy`. Cold start takes a few minutes the first time (weights download); the app's retry backoff allows 90 s per attempt and transient errors do not consume the confidence retry budget.
+The URL is printed by `modal deploy`. Cold start takes a few minutes the first time (weights download); the app's cold-start allowance and backoff live in the llm retry module (`llm/retry.py`); transient errors do not consume the confidence retry budget.
 
 ## Point the app at it
 
@@ -34,7 +34,7 @@ VLLM_API_KEY=<the secret value>
 VLLM_METRICS_URLS=https://<workspace>--mailroom-vllm-serve.modal.run/metrics
 ```
 
-The Collector scrapes `/metrics` through `VLLM_METRICS_URLS`.
+The Collector scrapes `/metrics` through `VLLM_METRICS_URLS`. Note: vLLM's `--api-key` guards only `/v1/*`, so `/metrics` on the public Modal URL is unauthenticated. Treat the URL as semi-private and stop the app when idle.
 
 ## SAND-37-style posture run
 

@@ -75,3 +75,18 @@ def test_module_imports_without_modal(monkeypatch):
     assert module.modal is None
     assert module.app is None
     assert module.deploy_config()["model"] == "Qwen/Qwen3-8B-AWQ"
+
+
+def test_baked_config_survives_clean_container_env(monkeypatch):
+    monkeypatch.setenv("MODAL_GPU_COUNT", "2")
+    monkeypatch.setenv("VLLM_MODEL", "x")
+    module = _load()
+    baked = module.baked_env(module.deploy_config())
+    for key in ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(module.CFG_ENV, baked[module.CFG_ENV])
+    cfg = module.resolved_config()
+    cmd = module.build_command(cfg)
+    assert cfg["model"] == "x"
+    assert _flag_value(cmd, "--tensor-parallel-size") == "2"
+    assert "x" in cmd
