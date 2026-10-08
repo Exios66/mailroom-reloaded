@@ -131,7 +131,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLAMAFILE_BASE_URL", "MAILROOM_LLAMAFILE_BASE_URL"),
     )
     api_token: str | None = None
-    trace_mask: bool = True
+    trace_mask: bool = False
     gpu_usd_per_hour: float = 0.80
 
 

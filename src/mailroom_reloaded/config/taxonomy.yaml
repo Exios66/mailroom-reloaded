@@ -1,38 +1,75 @@
-# Mailroom taxonomy. Thresholds and per-class run conditions are edited here, not in code.
-# specialist_conditions: merger_agreement input_cap_chars is a head+tail cap.
+# Mailroom Document Taxonomy
+# Adding a new doc class: add an entry below + a matching schema in schemas/documents.py
+# Adjusting thresholds: edit the numbers below — no code changes needed.
+
 pipeline:
   bins:
-    inbox: '{base_dir}/pipeline/inbox'
-    processing: '{base_dir}/pipeline/processing'
-    classified: '{base_dir}/pipeline/classified'
-    review: '{base_dir}/pipeline/review'
-    failed: '{base_dir}/pipeline/failed'
-    archive: '{base_dir}/archive'
-    manifests: '{base_dir}/manifests'
+    inbox: "{base_dir}/pipeline/inbox"
+    processing: "{base_dir}/pipeline/processing"
+    classified: "{base_dir}/pipeline/classified"
+    review: "{base_dir}/pipeline/review"
+    failed: "{base_dir}/pipeline/failed"
+    archive: "{base_dir}/archive"
+    manifests: "{base_dir}/manifests"
+  # Text-based PDFs whose extraction yields at least this many chars/page are
+  # transcribed directly (no LLM reformat pass) — the LLM pass only runs for
+  # scanned/garbled PDFs. See agents/pdf_transcriber.py:_looks_clean_text_pdf.
   pdf_direct_chars_per_page: 800
+
 llm_retry:
   max_attempts: 5
   base_delay: 1.0
   rate_limit_base_delay: 8.0
   max_delay: 60.0
   jitter: 0.3
+  # Modal scale-to-zero cold start (DMR-052): a 503 from a *.modal.run
+  # endpoint means the container is warming, not overloaded — back off in
+  # minutes, not seconds, so the ladder survives a cold boot.
   modal_cold_start_delay: 90.0
   modal_cold_start_max_delay: 240.0
+
+# Self-hosted model-id remap (DMR-052): when DEFAULT_PROVIDER=vllm the agents'
+# taxonomy models are OpenRouter champion slugs; a vLLM serve exposes the HF id
+# (e.g. Qwen/Qwen3-8B). This map rewrites the champion to the served id before
+# any client exists. Keep it in sync with config/models.yaml (sandbox).
 vllm_model_map:
   qwen/qwen3.7-flash: Qwen/Qwen3-8B
   deepseek/deepseek-v4-flash: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
   deepseek/deepseek-v4-pro: deepseek-ai/DeepSeek-R1-Distill-Qwen-14B
   openrouter/free: Qwen/Qwen3-8B
+
+# Llamafile served-model remap (DMR-076): when DEFAULT_PROVIDER=llamafile the
+# champions collapse onto the single GGUF served by the sidecar
+# (deploy/docker-compose.llamafile.yml). The served id is the --alias value
+# (LLAMAFILE_ALIAS); the server answers /v1/models with exactly that id.
 llamafile_model_map:
   qwen/qwen3.7-flash: qwen3:7b
   deepseek/deepseek-v4-flash: qwen3:7b
   deepseek/deepseek-v4-pro: qwen3:14b
   openrouter/free: qwen3:7b
+
+# Chunked extraction (vendored v15+ pass, every live specialist): long
+# documents are split on paragraph boundaries into overlapping windows,
+# each window extracted in its own call, and merged deterministically (list
+# fields union with normalized dedupe, scalars keep the first non-null value,
+# confidence takes the max) — nothing is truncated. Window size is capped at
+# the specialist's ``max_input_chars`` so a chunk is never silently truncated
+# inside ``extract()``. Documents that fit in a single window take the plain
+# single-pass path, so small documents are unaffected. The per-run
+# deadline/token budget still bounds the extra calls.
 chunking:
   enabled: true
-  chunk_chars: 90000
-  overlap_chars: 8000
+  chunk_chars: 90000     # window size (chars); capped per-agent at max_input_chars
+  overlap_chars: 8000    # trailing overlap so clauses crossing a cut are seen twice
+
+# Approximate per-1M-token pricing used for estimated_cost_usd scoring and
+# synced to the Langfuse model registry via scripts/sync_models.py.
+# Update from the OpenRouter model page; unknown models estimate cost as 0.
 cost_models:
+  # HUB-037 Gmail triage lane: OpenRouter's Free Models Router ($0 — account
+  # key still required; rate-limited). Runs ONLY the single-document Gmail
+  # triage lane (never the paid pipeline); multi-document emails drop the
+  # triage approach and run the FULL paid pipeline instead.
   openrouter/free:
     input_per_million: 0.0
     output_per_million: 0.0
@@ -48,6 +85,8 @@ cost_models:
   deepseek/deepseek-v4-pro:
     input_per_million: 0.435
     output_per_million: 0.87
+  # Self-hosted Modal GPU tiers (gateway aliases): no per-token price — the
+  # cost is GPU time, billed by Modal per container-second.
   mailroom-fast:
     input_per_million: 0.0
     output_per_million: 0.0
@@ -57,29 +96,51 @@ cost_models:
   mailroom-vision:
     input_per_million: 0.0
     output_per_million: 0.0
+
 confidence:
+  # Global fallbacks (used before doc_type is known). Per-class overrides live under
+  # by_class and win once classification is set. low/high/retry_max here are the
+  # Global Constraints defaults; judge_band_high per class follows the Global Constraints.
   high: 0.95
-  low: 0.7
-  retry_max: 2
+  low: 0.70        # below this -> retry; still below after retry_max -> human review
+  retry_max: 2     # classify + extract confidence retries before review
+  # Lane B: low <= extraction_confidence < judge_band_high fires judge_verify.
   judge_band_high: 0.95
+  # Approval-inclusive arbiter fix-list re-extracts (after_arbiter).
+  arbiter_retry_max: 2
+  # One completeness judge pass per extraction attempt. Keep = 1 + arbiter_retry_max.
+  judge_max_passes: 3
+  # Unused routing knob (kept for config-file compatibility).
+  conflict_threshold: 0.3
   by_class:
     contract:
+      high: 0.98
+      low: 0.90
       judge_band_high: 0.97
     merger_agreement:
+      high: 0.98
+      low: 0.90
       judge_band_high: 0.97
+    insurance_claim:
+      high: 0.98
+      low: 0.90
+      judge_band_high: 0.92
     corporate_record:
+      high: 0.96
+      low: 0.86
       judge_band_high: 0.97
     correspondence:
+      high: 0.95
+      low: 0.85
       judge_band_high: 0.94
-    insurance_claim:
-      judge_band_high: 0.92
+
 bert:
   enabled: false
-  defer_classes:
-  - contract
-  - merger_agreement
+  defer_classes: [contract, merger_agreement]
   max_trusted_windows: 1
-  pass_subclass_hint: false
+  pass_subclass_hint: false   # BERT subclass hint reaches the sorter only when true (spec 5)
+
+# Specialist run conditions per class (merger_agreement input cap is head+tail).
 specialist_conditions:
   insurance_claim:
     input_cap_chars: 13500
@@ -87,198 +148,225 @@ specialist_conditions:
     temperature: 0.1
     retries: 2
     merger_mode: frozen
+
   contract:
     input_cap_chars: 24000
     output_cap_tokens: 8192
     temperature: 0.7
     retries: 2
     merger_mode: frozen
+
   corporate_record:
     input_cap_chars: 15000
     output_cap_tokens: 8192
     temperature: 0.1
     retries: 2
     merger_mode: frozen
+
   correspondence:
     input_cap_chars: 12000
     output_cap_tokens: 8192
     temperature: 0.1
     retries: 2
     merger_mode: frozen
+
   merger_agreement:
     input_cap_chars: 30000
     output_cap_tokens: 8192
     temperature: 0.7
     retries: 2
     merger_mode: frozen
+
+# Deterministic field-type-aware extraction scoring (issues #4/#5). The scorer
+# normalizes each field by its type (date/money/id exact-after-normalize, name
+# fuzzy match, free-text token F1, entity-list bipartite matching) and, for
+# ambiguous free-text/name fields, uses embedding cosine similarity
+# (sentence-transformers) as a second signal. `ambiguous_band` is the judge
+# escalation gate: fields scoring inside the band trigger the LLM judge; runs
+# scoring clearly above or below the band skip the judge entirely (2 evaluator
+# calls saved per run). `type_bands` overrides the band per field type —
+# calibrated by scripts/calibrate_field_scoring.py (issue #4): date/id/money/
+# free_text have a real deterministic cutoff, while name and entity_list
+# types are too lenient for a deterministic reject (Jaro-Winkler/token-set are
+# typo-tolerant by design), so every such field escalates to the judge
+# ("always"). See observability/field_scoring.py.
 field_scoring:
-  ambiguous_band:
-  - 0.5
-  - 0.85
+  ambiguous_band: [0.5, 0.85]
   type_bands:
-    date: never
-    id: never
-    money:
-    - 0.675
-    - 0.938
-    free_text:
-    - 0.6
-    - 0.95
-    name:
-    - 0.5
-    - 1.0
-    entity_list:
-    - 0.5
-    - 1.0
-  bipartite_match_threshold: 0.6
+    date: never              # exact-after-normalize: decisive both ways
+    id: never                # exact match: decisive both ways
+    money: [0.675, 0.938]    # numeric tolerance: calibrated cutoff
+    free_text: [0.6, 0.95]   # token F1: paraphrases legitimately score 0.6-0.88 — escalate them
+    name: [0.5, 1.0]         # trust only perfect matches; near-misses go to judge
+    entity_list: [0.5, 1.0]  # trust only perfect lists; partial matches go to judge
+  bipartite_match_threshold: 0.6  # minimum pairwise similarity for a list match
   embedding_enabled: true
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
-  embedding_rescue_below: 0.7
-  containment_fields:
-  - governing_law
-  - term_length
-  - renewal_terms
-  - subject_matter
-  partial_gt_fields:
-  - parties
-  - keywords
-  - cuad_clauses
-  - maud_clauses
-  - claim_checklist
-  - action_items
+  embedding_rescue_below: 0.7  # only consult embeddings when string score is below this
+  # Fields whose expected value is a containment match: share of the EXPECTED
+  # text's (stopword-filtered) tokens covered by the prediction. For verbatim-
+  # clause fields whose label is one sentence of a longer passage.
+  containment_fields: [governing_law, term_length, renewal_terms, subject_matter]
+  # Fields whose ground-truth label set is a PARTIAL sample (not exhaustive):
+  # the reported list score becomes ground-truth coverage (recall), not F1 —
+  # extra correct extractions don't cut the score.
+  partial_gt_fields: [parties, keywords, cuad_clauses, maud_clauses, claim_checklist, action_items]
+  # Factuality audit: every predicted list item / scalar value is verified
+  # against the source document (normalized token coverage; dates parsed from
+  # candidates in any format) — items that neither match a ground-truth label
+  # nor appear in the document are hallucinations, reported as
+  # verified_precision / hallucination_rate.
   factuality_verification:
     enabled: true
     token_coverage: 0.7
+
+# Vision-mode ingestion (issue: vision-capable models can read PDFs page-by-page
+# as images; text-only models still get the transcription). When a document's
+# input agent model is listed in `models` (substring match), the pipeline renders
+# the first `max_pages` PDF/scan pages to image data-URIs and sends them to the
+# classified/extraction prompt AS WELL AS (or instead of) the transcribed text.
+# `doc_text` is still transcribed and stored for text-only processes, the judge,
+# reports, and auditability — vision only changes the LLM prompt content, never
+# the downstream catalog/audit trail.
+# Environment variable overrides (useful for pilot sweeps without editing YAML):
+#   MAILROOM_VISION_ENABLED=true|false
+#   MAILROOM_VISION_MAX_PAGES=<int>  (0 = all pages)
+#   MAILROOM_VISION_DPI=<int>
 vision:
   enabled: true
-  max_pages: 10
-  dpi: 150
-  models:
-  - qwen/
-  - gpt-4o
-  - gpt-4.1
-  - claude
-  - gemini
-  - llava
-  - llama-3.2
-  - qwen-vl
-  - -vl-
-  - mailroom-vision
+  max_pages: 10          # cap the page-image budget per document (large PDFs)
+  dpi: 150               # render resolution for page images
+  models:                # model strings (substring match) that accept image input
+    - "qwen/"
+    - "gpt-4o"
+    - "gpt-4.1"
+    - "claude"
+    - "gemini"
+    - "llava"
+    - "llama-3.2"
+    - "qwen-vl"
+    - "-vl-"               # HF VL ids, e.g. Qwen/Qwen3-VL-8B-Instruct
+    - "mailroom-vision"    # gateway vision tier alias
+  # Text-only ids that a pattern above would otherwise match (checked first).
+  # Self-hosted served ids (vllm_model_map / gateway GPU tiers) are text-only
+  # Qwen3 checkpoints: sending them image_url parts is a hard 400.
   exclude:
-  - qwen/qwen3-8b
-  - qwen/qwen3-14b
-  - qwen/qwen3-32b
-  - qwen/qwen3-30b-a3b
-  - qwen/qwen3-4b
-  - mailroom-fast
-  - mailroom-extract
+    - "qwen/qwen3-8b"
+    - "qwen/qwen3-14b"
+    - "qwen/qwen3-32b"
+    - "qwen/qwen3-30b-a3b"
+    - "qwen/qwen3-4b"
+    - "mailroom-fast"
+    - "mailroom-extract"
+
 doc_classes:
-- key: contract
-  label: Contract / Agreement
-  schema: ContractExtraction
-  specialist: contracts_specialist
-  description: "CUAD commercial contracts and agreements (vendor, employment, NDA, license, etc.) \u2014\
-    \ not MAUD merger agreements"
-  field_types:
-    document_name: name
-    parties: entity_list:name
-    effective_date: date
-    term_length: free_text
-    governing_law: name
-    contract_value: money
-    renewal_terms: free_text
-    cuad_family: name
-    merger_consideration: name
-    cuad_clauses: entity_list:free_text
-    maud_clauses: entity_list:free_text
-- key: merger_agreement
-  label: Merger Agreement
-  schema: MergerAgreementExtraction
-  specialist: merger_agreement_specialist
-  description: "MAUD merger agreements (agreement and plan of merger) \u2014 a distinct class from CUAD\
-    \ commercial contracts. Subclass is consideration type (all_cash, all_stock, mixed, \u2026)."
-  field_types:
-    document_name: name
-    parties: entity_list:name
-    effective_date: date
-    effective_time: free_text
-    governing_law: name
-    merger_consideration: name
-    maud_clauses: entity_list:free_text
-    intent: name
-    subject_matter: free_text
-    keywords: entity_list:name
-- key: corporate_record
-  label: Corporate Record
-  schema: CorporateRecordExtraction
-  specialist: corporate_records_specialist
-  description: Bylaws, articles/certificates of incorporation, powers of attorney, stockholder rights
-    instruments, specimen stock (including those filed as SEC exhibits)
-  field_types:
-    entity_name: name
-    record_type: name
-    effective_date: date
-    signatories: entity_list:name
-    jurisdiction: name
-    filing_number: id
-    intent: label
-    subject_matter: free_text
-    keywords: entity_list:name
-- key: correspondence
-  label: Correspondence
-  schema: CorrespondenceExtraction
-  specialist: correspondence_specialist
-  description: Letters, emails, memos, notices, demand letters, press releases, meeting requests
-  field_types:
-    sender: name
-    recipient: name
-    additional_recipients: entity_list
-    communication_type: name
-    communication_date: date
-    demand_amount: money
-    action_items: entity_list
-    urgency: name
-    intent: label
-    subject_matter: free_text
-    keywords: entity_list:name
-- key: insurance_claim
-  label: Insurance Claim
-  schema: InsuranceClaimExtraction
-  specialist: insurance_claims_specialist
-  description: "Insurance claim documentation: FNOL forms, adjuster reports, demand packages, coverage\
-    \ determinations, denial letters, CMS/DE-SynPUF claim tables (inpatient, outpatient, PDE, carrier),\
-    \ and the v8 synthetic LOB lines \u2014 property FNOL bundles, auto decision letters"
-  field_types:
-    claim_number: id
-    policy_number: id
-    insurer: name
-    insured_party: name
-    claim_type: name
-    date_of_loss: date
-    date_filed: date
-    claimed_amount: money
-    adjuster: name
-    damages_description: free_text
-    coverage_determination: name
-    denial_reasons: entity_list:free_text
-    supporting_documents: entity_list
-    intent: label
-    subject_matter: free_text
-    keywords: entity_list:name
-    claim_checklist: entity_list:free_text
+  - key: contract
+    label: "Contract / Agreement"
+    schema: ContractExtraction
+    specialist: contracts_specialist
+    description: "CUAD commercial contracts and agreements (vendor, employment, NDA, license, etc.) — not MAUD merger agreements"
+    field_types:
+      document_name: name
+      parties: entity_list:name
+      effective_date: date
+      term_length: free_text
+      governing_law: name
+      contract_value: money
+      renewal_terms: free_text
+      cuad_family: name
+      merger_consideration: name
+      cuad_clauses: entity_list:free_text
+      maud_clauses: entity_list:free_text
+
+  - key: merger_agreement
+    label: "Merger Agreement"
+    schema: MergerAgreementExtraction
+    specialist: merger_agreement_specialist
+    description: "MAUD merger agreements (agreement and plan of merger) — a distinct class from CUAD commercial contracts. Subclass is consideration type (all_cash, all_stock, mixed, …)."
+    field_types:
+      document_name: name
+      parties: entity_list:name
+      effective_date: date
+      effective_time: free_text
+      governing_law: name
+      merger_consideration: name
+      maud_clauses: entity_list:free_text
+      intent: name
+      subject_matter: free_text
+      keywords: entity_list:name
+
+  - key: corporate_record
+    label: "Corporate Record"
+    schema: CorporateRecordExtraction
+    specialist: corporate_records_specialist
+    description: "Bylaws, articles/certificates of incorporation, powers of attorney, stockholder rights instruments, specimen stock (including those filed as SEC exhibits)"
+    field_types:
+      entity_name: name
+      record_type: name
+      effective_date: date
+      signatories: entity_list:name
+      jurisdiction: name
+      filing_number: id
+      intent: label
+      subject_matter: free_text
+      keywords: entity_list:name
+
+  - key: correspondence
+    label: "Correspondence"
+    schema: CorrespondenceExtraction
+    specialist: correspondence_specialist
+    description: "Letters, emails, memos, notices, demand letters, press releases, meeting requests"
+    field_types:
+      sender: name
+      recipient: name
+      additional_recipients: entity_list
+      communication_type: name
+      communication_date: date
+      demand_amount: money
+      action_items: entity_list
+      urgency: name
+      intent: label
+      subject_matter: free_text
+      keywords: entity_list:name
+
+  - key: insurance_claim
+    label: "Insurance Claim"
+    schema: InsuranceClaimExtraction
+    specialist: insurance_claims_specialist
+    description: "Insurance claim documentation: FNOL forms, adjuster reports, demand packages, coverage determinations, denial letters, CMS/DE-SynPUF claim tables (inpatient, outpatient, PDE, carrier), and the v8 synthetic LOB lines — property FNOL bundles, auto decision letters"
+    field_types:
+      claim_number: id
+      policy_number: id
+      insurer: name
+      insured_party: name
+      claim_type: name
+      date_of_loss: date
+      date_filed: date
+      claimed_amount: money
+      adjuster: name
+      damages_description: free_text
+      coverage_determination: name
+      denial_reasons: entity_list:free_text
+      supporting_documents: entity_list
+      intent: label
+      subject_matter: free_text
+      keywords: entity_list:name
+      claim_checklist: entity_list:free_text
+
 file_extensions:
-- .txt
-- .pdf
-- .docx
-- .md
-- .jpg
-- .jpeg
-- .png
-- .gif
-- .bmp
-- .webp
-- .tiff
-- .tif
+  - .txt
+  - .pdf
+  - .docx
+  - .md
+  - .jpg
+  - .jpeg
+  - .png
+  - .gif
+  - .bmp
+  - .webp
+  - .tiff
+  - .tif
+
 agents:
   sorter:
     provider: openrouter
@@ -287,7 +375,16 @@ agents:
     temperature: 0.1
     max_tokens: 2048
     max_input_chars: 12000
+    # none: reserve the completion budget for the JSON object. Medium/high
+    # reasoning on Qwen 3.7-Flash starved structured output
+    # (LengthFinishReasonError) on the production HF pilot.
     reasoning_effort: none
+
+  # HUB-038: LLM-assisted intake agent — triage + clean + prepare for the
+  # full pipeline. Fires ONLY when gated (messy text, or a document longer
+  # than the sorter's input budget); over-budget documents are processed in
+  # sliding windows — NEVER truncated. One fused call per window; cheapest
+  # paid model (the free tier stays the Gmail triage lane's privilege).
   intake:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -296,6 +393,9 @@ agents:
     max_tokens: 2048
     max_input_chars: 25000
     reasoning_effort: none
+
+  # KANBAN-063 (Lane B): judgment arbitration on failed judge verdicts.
+  # Sees the specialist extraction + judge findings; bounded decisions only.
   arbiter:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -304,6 +404,7 @@ agents:
     max_tokens: 4096
     max_input_chars: 100000
     reasoning_effort: none
+
   contracts_specialist:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -312,6 +413,7 @@ agents:
     max_tokens: 8192
     max_input_chars: 100000
     reasoning_effort: none
+
   merger_agreement_specialist:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -320,6 +422,7 @@ agents:
     max_tokens: 8192
     max_input_chars: 100000
     reasoning_effort: none
+
   corporate_records_specialist:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -328,6 +431,7 @@ agents:
     max_tokens: 8192
     max_input_chars: 60000
     reasoning_effort: none
+
   correspondence_specialist:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -336,6 +440,7 @@ agents:
     max_tokens: 8192
     max_input_chars: 40000
     reasoning_effort: none
+
   insurance_claims_specialist:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -344,6 +449,10 @@ agents:
     max_tokens: 8192
     max_input_chars: 60000
     reasoning_effort: none
+
+  # Reporter is procedural (no LLM): compile_report assembles a deterministic
+  # matter record from classification + extraction. Entry kept for cutover
+  # listings / prompt registry compatibility; get_llm("reporter") is unused.
   reporter:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -353,6 +462,7 @@ agents:
     max_input_chars: 40000
     reasoning_effort: none
     procedural: true
+
   boss:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -360,7 +470,10 @@ agents:
     temperature: 0.1
     max_tokens: 8192
     max_input_chars: 40000
+    # OpenRouter reasoning effort; "max" maps to ~95% of max_tokens as the
+    # thinking budget for Qwen thinking models.
     reasoning_effort: max
+
   pdf_transcriber:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -369,6 +482,8 @@ agents:
     max_tokens: 8192
     max_input_chars: 40000
     reasoning_effort: none
+
+  # Vision-based text extraction from image-only documents (jpg/png/...).
   image_extractor:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -377,6 +492,8 @@ agents:
     max_tokens: 4096
     max_input_chars: 20000
     reasoning_effort: none
+
+  # Offline LLM-as-a-judge used by scripts/run_quality_judges.py.
   judge:
     provider: openrouter
     model: qwen/qwen3.7-flash
