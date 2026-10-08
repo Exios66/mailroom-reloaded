@@ -23,6 +23,27 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Tasks 21/24 + Dev server + Docs] scorecards, conformance, dev server, docs — subagents + orchestrator
+- **Status:** done
+- **Files:** `eval/{metrics,cards,vllm_telemetry,cost,conformance}.py`, `cli.py`,
+  `tests/eval/*`, `tests/test_cli.py`; `deploy/{Dockerfile.dev,docker-compose.dev.yml}`,
+  `scripts/dev.sh`, `scripts/dev_test.sh`, `Makefile`, `docs/DEV_SERVER.md`,
+  `tests/deploy/test_dev_compose.py`; `README.md`,
+  `docs/{ARCHITECTURE,CONFIGURATION,EVALUATION,OPERATIONS,TESTING}.md`.
+- **Evidence:** `uv run pytest -q` → **488 passed, 1 skipped, 2 deselected**;
+  `uv run ruff check .` → clean; `docker compose -f deploy/docker-compose.dev.yml config -q`
+  → rc 0; `uv run pytest tests/eval/test_conformance.py -v` → 5 passed;
+  `uv run pytest tests/deploy -v` → 26 passed.
+- **Commits:** `4e78005` conformance + card CLI; `bb5cd43` dev server + live marker;
+  `816bebf` docs set. Earlier this session: `39448ef`/`f9e9592` Task 21 KPIs;
+  `6d6b9a8` Gmail intake (optional `gmail` extra).
+- **Notes:** `mailroom card` and `mailroom conformance` placeholders replaced with
+  real commands; pytest `live` marker + `addopts = "-m 'not live'"` added (plan
+  Task 1); eval package exports sorted. Dev server = `make dev` (`scripts/dev.sh up`):
+  app (reload) + split watcher + OTel/Phoenix/Prometheus/Grafana, mock provider, no GPU.
+
+---
+
 ### [Task 19 + HF audit] API/CLI/UI + ModernBERT & dataset verification — subagent + lucius
 - **Status:** done (with three HF-derived fixes queued)
 - **Files:** `src/mailroom_reloaded/api/*`, `cli.py`, `tests/api/*`;
