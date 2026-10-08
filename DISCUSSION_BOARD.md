@@ -23,6 +23,18 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Jev gate + docs + CodeRabbit sync] Opt-in Jev route gate landed on PR #5 — orchestrator
+- **Status:** done (Task 24 Step 4 live run still env-blocked)
+- **Files:** `agents/jev.py`, `eval/jev_calibration.py`, `agents/gate.py`, `cli.py` (`jev`),
+  `settings.py`, `config/taxonomy.yaml`, `docs/JEV.md`, README/ARCHITECTURE/CONFIGURATION/EVALUATION.
+- **Evidence:** `uv run pytest -q` → 582 passed, 1 skipped, 2 deselected; `uv run ruff check .` clean
+  (after rebasing onto CodeRabbit `2bdebcf`, `9f34df0`).
+- **Commits:** `24ae367` Jev scorer + gate; docs commit; pushed fast-forward to `origin`.
+- **Notes:** Jev is off by default and needs `models/jev_calibration.json`; `verify_threshold`
+  is fit but not yet consumed by `JevGate`; shipped calibration does not transfer (issue #8).
+
+---
+
 ### [Tasks 21/24 + Dev server + Docs] scorecards, conformance, dev server, docs — subagents + orchestrator
 - **Status:** done
 - **Files:** `eval/{metrics,cards,vllm_telemetry,cost,conformance}.py`, `cli.py`,
