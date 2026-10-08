@@ -46,6 +46,7 @@ class NodeFailed(Exception):
     """A node exceeded its deadline/token budget or the document is terminal."""
 
     def __init__(self, node: str, reason: str) -> None:
+        """Record the failing ``node`` and human-readable ``reason``."""
         super().__init__(f"{node}: {reason}")
         self.node = node
         self.reason = reason
@@ -57,8 +58,11 @@ def guarded(
     """Decorator factory described in the module docstring."""
 
     def decorator(fn: F) -> F:
+        """Wrap ``fn`` so each call goes through the flow's ``_guard_node``."""
+
         @functools.wraps(fn)
         def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+            """Delegate one node call to ``self._guard_node`` with the bound config."""
             return self._guard_node(
                 node_name, deadline_s, token_budget, fn, args, kwargs
             )

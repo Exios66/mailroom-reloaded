@@ -68,6 +68,8 @@ _OMITTED = "\n\n[... middle of the agreement omitted; head and tail shown ...]\n
 
 @dataclass(frozen=True)
 class ExtractResult:
+    """One specialist extraction: data, validity, confidence and usage."""
+
     doc_type: str
     data: dict | None
     schema_valid: bool
@@ -91,6 +93,7 @@ def extraction_confidence(
 
 
 def _dagger_windows(text: str) -> list[str]:
+    """Split ``text`` into 47,000-char windows overlapping by 6,500 chars."""
     if len(text) <= MERGER_DAGGER_WINDOW:
         return [text]
     step = MERGER_DAGGER_WINDOW - MERGER_DAGGER_OVERLAP
@@ -117,6 +120,7 @@ def prepare_input(text: str, doc_type: str, cond: RunConditions) -> list[str]:
 
 
 def _tools_enabled(role: str, prompt_set: str, tools: bool | None) -> bool:
+    """Resolve whether the specialist offers tools (sand37 forces off)."""
     if prompt_set == "sand37":
         return False
     if tools is not None:
@@ -126,6 +130,7 @@ def _tools_enabled(role: str, prompt_set: str, tools: bool | None) -> bool:
 
 
 def _sampling(cond: RunConditions, dagger: bool) -> dict[str, Any]:
+    """Per-call sampling params; dagger adds SAND-37 sampling and its 6,144 cap."""
     if dagger:
         return {
             "temperature": cond.temperature,
@@ -146,6 +151,7 @@ def _messages(
     index: int,
     total: int,
 ) -> list[dict[str, Any]]:
+    """Build the specialist messages for one chunk (adds a chunk header when split)."""
     label = _DOC_LABELS.get(doc_type, doc_type)
     header = ""
     if total > 1:
@@ -172,6 +178,7 @@ def _run_chunk(
     sampling: dict[str, Any],
     dagger: bool,
 ) -> tuple[dict | None, bool, str | None, str | None, int, Usage]:
+    """Run one chunk: one repair re-ask, plus one dagger length re-sample."""
     messages = _messages(system, doc_type, doc_subclass, chunk, index, total)
     calls = 0
     usage = Usage()
@@ -216,6 +223,7 @@ def _run_chunk(
 
 
 def _nonempty(value: Any) -> bool:
+    """True when ``value`` is present and non-blank/non-empty."""
     if value is None:
         return False
     if isinstance(value, str):
@@ -226,6 +234,7 @@ def _nonempty(value: Any) -> bool:
 
 
 def _coverage(doc_type: str, data: dict[str, Any]) -> float:
+    """Share of the class's required fields that are non-empty in ``data``."""
     model = get_extraction_schema(doc_type)
     raw = load_taxonomy().raw
     required = ((raw.get("required_fields") or {}).get(doc_type)) or [
@@ -310,10 +319,12 @@ def extract(
 
 
 def _norm(value: Any) -> str:
+    """Normalize a value for list-dedupe comparison (stripped, lowercased)."""
     return str(value).strip().lower()
 
 
 def _maud_question_key(clause: str) -> str:
+    """Canonical MAUD question key for a ``question: answer`` clause."""
     question = clause.split(":", 1)[0].strip()
     if not question:
         return ""

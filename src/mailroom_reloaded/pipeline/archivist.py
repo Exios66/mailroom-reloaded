@@ -25,6 +25,7 @@ _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _safe_doc_type(state) -> str:
+    """Archive folder name: the extraction (else sort) doc_type, filesystem-safe."""
     for source in (getattr(state, "extract", None), getattr(state, "sort", None)):
         doc_type = getattr(source, "doc_type", None)
         if doc_type:
@@ -33,6 +34,7 @@ def _safe_doc_type(state) -> str:
 
 
 def _sha256(path: Path) -> str:
+    """Streaming sha256 hex digest of the file at ``path``."""
     h = hashlib.sha256()
     with Path(path).open("rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -42,6 +44,8 @@ def _sha256(path: Path) -> str:
 
 @dataclass(frozen=True)
 class ArchiveResult:
+    """Where the file landed, its sha256, and its ``.report.json`` sidecar path."""
+
     path: Path
     file_sha256: str
     sidecar_path: Path

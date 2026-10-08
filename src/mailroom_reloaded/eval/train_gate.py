@@ -45,7 +45,7 @@ _GOLDEN = (math.sqrt(5.0) - 1.0) / 2.0
 
 
 def _check_train(rows: list[dict]) -> None:
-    """Raise ValueError for any ``split='test'`` row; allow all other splits."""
+    """Raise ValueError unless every row has ``split == 'train'``."""
     for row in rows:
         split = row.get("split")
         if split != "train":
@@ -126,11 +126,11 @@ def fit_calibration(rows, out: Path) -> dict:
     calibration (global over all rows), plus the fitted temperatures.
 
     ``rows`` must be reusable across iterations, with raw ``confidence``
-    probabilities and ``correct`` labels interpreted by truth value. All rows
-    are used except that any ``split='test'`` row raises ValueError; missing
-    or other splits are accepted. Groups with fewer than two rows or only
-    one label class use temperature 1.0. Empty input writes an empty mapping
-    and returns zero ECE values.
+    probabilities and ``correct`` labels interpreted by truth value. Every row
+    must have ``split == 'train'``; a missing or any other split raises
+    ValueError to prevent leakage. Groups with fewer than two rows or only one
+    label class use temperature 1.0. Empty input writes an empty mapping and
+    returns zero ECE values.
 
     Creates parent directories and overwrites ``out``. Missing confidence or
     correct keys raise KeyError; numeric conversion errors and filesystem
@@ -213,8 +213,8 @@ def train_gate(rows: list[dict], out: Path) -> dict:
     extract. Writes ``{stage: {features, coef, intercept, threshold}}`` (the
     ``LearnedGate`` layout) and returns per-stage train metrics.
 
-    Uses every supplied row, rejecting ``split='test'`` with ValueError but
-    accepting missing or other splits. Labels are interpreted by truth value.
+    Uses every supplied row, requiring ``split == 'train'`` on every row and
+    raising ValueError otherwise. Labels are interpreted by truth value.
     Missing or unknown stages, missing stage labels, or fewer than two label
     classes per stage also raise ValueError. Numeric conversion, taxonomy
     loading, and sklearn fitting errors propagate; sklearn must be installed.

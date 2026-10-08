@@ -16,6 +16,8 @@ ROLE = "boss"
 
 
 class BossDecision(BaseModel):
+    """One boss escalation action; class fields are set only when reassigning."""
+
     action: Literal["reassign_class", "accept", "human_review"]
     doc_type: str | None = None
     doc_subclass: str | None = None
@@ -23,6 +25,7 @@ class BossDecision(BaseModel):
 
 
 def _json(value: Any) -> str:
+    """Render ``value`` as indented, non-ASCII-safe JSON for the task prompt."""
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 

@@ -17,11 +17,14 @@ ROLE = "arbiter"
 
 
 class ArbiterDecision(BaseModel):
+    """One bounded arbiter action plus any acceptance caveats."""
+
     action: Literal["accept", "accept_with_caveats", "re_extract", "escalate"]
     caveats: list[str] = Field(default_factory=list)
 
 
 def _json(value: Any) -> str:
+    """Render ``value`` as indented, non-ASCII-safe JSON for the task prompt."""
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 

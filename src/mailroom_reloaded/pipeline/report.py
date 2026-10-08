@@ -18,6 +18,7 @@ __all__ = ["compile_report"]
 
 
 def _classification(state: MailroomState) -> dict[str, Any] | None:
+    """Report block for the sorter result (``None`` before classification)."""
     s = state.sort
     if s is None:
         return None
@@ -35,6 +36,7 @@ def _classification(state: MailroomState) -> dict[str, Any] | None:
 
 
 def _extraction(state: MailroomState) -> dict[str, Any] | None:
+    """Report block for the specialist extraction (``None`` before extraction)."""
     e = state.extract
     if e is None:
         return None

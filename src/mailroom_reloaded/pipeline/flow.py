@@ -79,6 +79,7 @@ _DEFAULT_PROMPT_SET = "frozen_v1"
 
 
 def _sha256_file(path: Path) -> str:
+    """Streaming sha256 hex digest of the file at ``path``."""
     h = hashlib.sha256()
     with Path(path).open("rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
@@ -96,47 +97,58 @@ class MailroomFlow(Flow[MailroomState]):
     # --------------------------------------------------------------- flow graph
     @start()
     def ingest(self) -> None:
+        """Entry node: ingest the claimed document into state."""
         self._node_ingest()
 
     @listen(ingest)
     def bert_primary(self) -> None:
+        """Run the local ModernBERT classifier and pick a sort handoff."""
         self._node_bert_primary()
 
     @listen(bert_primary)
     def sort(self) -> None:
+        """Run the standalone sorter (LLM call 1)."""
         self._node_sort()
 
     @router(sort)
     def gate_classify(self) -> str:
+        """Route the classify stage via the deterministic gate."""
         return self._classify_route()
 
     @listen("do_extract")
     def extract(self) -> None:
+        """Run the class specialist extraction (LLM call 2)."""
         self._node_extract()
 
     @router(extract)
     def gate_extract(self) -> str:
+        """Route the extract stage via the deterministic gate."""
         return self._extract_route()
 
     @listen("do_verify")
     def verify(self) -> None:
+        """Judge the extraction, then let the arbiter settle it."""
         self._node_verify()
 
     @listen("do_boss")
     def boss(self) -> None:
+        """Escalate to the boss for a class reassignment decision."""
         self._node_boss()
 
     @listen("report")
     def report_catalog_archive(self) -> None:
+        """Compile the report, catalog the record and archive the file."""
         self._node_report_catalog_archive()
 
     @listen("human_review")
     def park(self) -> MailroomState:
+        """Park the document in ``review/`` and return the parked state."""
         return self._park("flow_human_review")
 
     # --------------------------------------------------------------- guarded nodes
     @guarded("ingest", NODE_DEADLINES["ingest"], 0)
     def _node_ingest(self) -> None:
+        """Ingest the file; fail the document when the clerk reports an error."""
         state = self.state
         result = _ingest(Path(state.path))
         state.ingest = result
@@ -146,6 +158,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("bert_primary", NODE_DEADLINES["bert_primary"], 0)
     def _node_bert_primary(self) -> None:
+        """Classify with ModernBERT and derive the sorter handoff."""
         state = self.state
         verdict = classify_primary(state.text)
         state.bert = verdict
@@ -153,6 +166,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("sort", NODE_DEADLINES["sort"], 0)
     def _node_sort(self) -> None:
+        """Run the sorter and accumulate its usage."""
         state = self.state
         handoff = state.handoff or Handoff(SortMode.FULL, None, "", "no_handoff")
         state.handoff = handoff
@@ -163,6 +177,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("extract", NODE_DEADLINES["extract"], 0)
     def _node_extract(self) -> None:
+        """Run the class specialist with the current class/subclass and overrides."""
         state = self.state
         doc_type = self._effective_doc_type()
         doc_subclass = self._effective_subclass()
@@ -183,6 +198,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("verify", NODE_DEADLINES["verify"], 0)
     def _node_verify(self) -> None:
+        """Run judge_verify then arbitrate (live mode, no ground truth)."""
         state = self.state
         doc_type = self._effective_doc_type()
         data = state.extract.data if state.extract is not None else None
@@ -192,6 +208,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("boss", NODE_DEADLINES["boss"], 0)
     def _node_boss(self) -> None:
+        """Escalate to the boss with a summary of the failed classification."""
         state = self.state
         ctx = ToolContext(doc_text=state.text, doc_id=state.doc_id, eval_mode=False)
         summary = {
@@ -207,6 +224,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("report_catalog_archive", NODE_DEADLINES["report_catalog_archive"], 0)
     def _node_report_catalog_archive(self) -> None:
+        """Compile the report, archive the file and upsert the catalog record."""
         state = self.state
         report = compile_report(state)
         report["llm_calls"] = self._llm_calls
@@ -231,6 +249,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("grade", NODE_DEADLINES["grade"], 0)
     def _node_grade(self) -> None:
+        """Eval-only: grade the extraction against ground truth (never fails the doc)."""
         if self._eval_ctx is None:
             return
         state = self.state
@@ -258,6 +277,7 @@ class MailroomFlow(Flow[MailroomState]):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
+        """Run a node under resume-skip, manifest/audit, span and budget guards."""
         if node_name in self._resume_done:
             return None
         deadlines = self._overrides.get("deadlines", {})
@@ -288,6 +308,7 @@ class MailroomFlow(Flow[MailroomState]):
             return result
 
     def _record_node(self, node_name: str, elapsed: float) -> None:
+        """Mark ``node_name`` complete, snapshot state and append the audit entry."""
         manifest = self._manifest
         if node_name not in manifest.completed_nodes:
             manifest.completed_nodes.append(node_name)
@@ -298,6 +319,7 @@ class MailroomFlow(Flow[MailroomState]):
         )
 
     def _fail_node(self, node_name: str, reason: str, elapsed: float = 0.0) -> None:
+        """Fail the document: move to ``failed/``, update the manifest, audit, raise."""
         state = self.state
         state.status = "failed"
         manifest = self._manifest
@@ -320,6 +342,7 @@ class MailroomFlow(Flow[MailroomState]):
         raise NodeFailed(node_name, reason)
 
     def _park(self, reason: str) -> MailroomState:
+        """Park the document in ``review/`` with manifest/audit updates."""
         state = self.state
         state.route_trail.append("human_review")
         state.status = "parked"
@@ -339,6 +362,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     # --------------------------------------------------------------- routes
     def _classify_route(self) -> str:
+        """Map the classify-stage gate decision to a driver target."""
         state = self.state
         s = state.sort
         b = state.bert
@@ -362,6 +386,7 @@ class MailroomFlow(Flow[MailroomState]):
         }.get(action, "human_review")
 
     def _extract_route(self) -> str:
+        """Map the extract-stage gate decision to a driver target."""
         state = self.state
         e = state.extract
         length_capped = bool(
@@ -390,6 +415,7 @@ class MailroomFlow(Flow[MailroomState]):
         }.get(action, "human_review")
 
     def _arbiter_route(self) -> str:
+        """Map the arbiter decision to a driver target."""
         a = self.state.arbiter
         if a is None:
             return "report"
@@ -402,6 +428,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     # --------------------------------------------------------------- helpers
     def _effective_doc_type(self) -> str:
+        """Current doc_type: explicit override, boss reassignment, sort/handoff/BERT."""
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_type"),
@@ -421,6 +448,7 @@ class MailroomFlow(Flow[MailroomState]):
         return "unknown"
 
     def _effective_subclass(self) -> str | None:
+        """Current doc_subclass: explicit override, boss reassignment, else sort."""
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_subclass"),
@@ -435,13 +463,16 @@ class MailroomFlow(Flow[MailroomState]):
         return None
 
     def _reset_handoff_full(self) -> None:
+        """Switch the handoff to ``FULL`` for the single re-sort, keeping the prior."""
         prior = self.state.handoff.prior if self.state.handoff is not None else ""
         self.state.handoff = Handoff(SortMode.FULL, None, prior, "re_sort")
 
     def _ground_truth_fn(self):
+        """Build the ``get_ground_truth`` callable over the eval context's labels."""
         gt_map = getattr(self._eval_ctx, "ground_truth", None)
 
         def fetch(doc_id: str) -> dict:
+            """Return the ground-truth row for ``doc_id`` as a plain dict."""
             row = gt_map.get(doc_id) if isinstance(gt_map, dict) else None
             if row is None:
                 return {}
@@ -462,6 +493,7 @@ class MailroomFlow(Flow[MailroomState]):
         overrides: dict[str, Any] | None,
         eval_ctx: Any | None,
     ) -> None:
+        """Claim the file, load its manifest and restore state for this run."""
         self._bins = (overrides or {}).get("bins") or Bins(get_settings().base_dir)
         self._overrides = dict(overrides or {})
         self._eval_ctx = eval_ctx
@@ -500,12 +532,14 @@ class MailroomFlow(Flow[MailroomState]):
         base.eval_mode = eval_ctx is not None
 
     def _resume_start(self) -> str | None:
+        """First node to run: the explicit ``resume_from`` else the manifest's next."""
         if self._resume_from:
             self._resume_done = set()
             return self._resume_from
         return next_node(self._manifest, NODE_ORDER)
 
     def _drive(self) -> MailroomState:
+        """Deterministically walk the guarded nodes and gates to a terminal bin."""
         self._resume_done = set(self._manifest.completed_nodes)
         state = self.state
         node = self._resume_start()
@@ -604,10 +638,12 @@ class MailroomFlow(Flow[MailroomState]):
         return self._drive()
 
     async def kickoff_async(self, inputs: dict[str, Any] | None = None, input_files: Any = None, **kwargs: Any):
+        """Async wrapper around :meth:`kickoff` (the driver is synchronous)."""
         return self.kickoff(inputs, input_files, **kwargs)
 
 
 def _opt(value: float | None) -> float:
+    """``value`` as a float, or 0.0 when ``None`` (gate feature default)."""
     return float(value) if value is not None else 0.0
 
 
