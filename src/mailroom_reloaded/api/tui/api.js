@@ -2,11 +2,36 @@
 // never in localStorage) and is sent only as an Authorization header.
 
 const TOKEN_KEY = 'mailroom.tui.token';
+const TOKEN_RE = /^[\x21-\x7e]+$/;
+export const DEFAULT_TIMEOUT_MS = 15000;
+
+/** Combine the caller's signal with a timeout. Returns {signal, cleanup, timedOut()}. */
+function withTimeout(signal, ms) {
+  const ctl = new AbortController();
+  let timedOut = false;
+  const onAbort = () => ctl.abort();
+  if (signal) {
+    if (signal.aborted) ctl.abort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctl.abort();
+  }, ms);
+  return {
+    signal: ctl.signal,
+    timedOut: () => timedOut,
+    cleanup() {
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+    },
+  };
+}
 
 export class ApiError extends Error {
   /**
    * @param {string} message
-   * @param {{status?: number|null, kind: 'offline'|'unauthorized'|'http', detail?: string}} info
+   * @param {{status?: number|null, kind: 'offline'|'unauthorized'|'http'|'aborted', detail?: string}} info
    */
   constructor(message, { status = null, kind, detail } = {}) {
     super(message);
@@ -50,6 +75,18 @@ async function readDetail(res) {
   try {
     const body = await res.json();
     if (body && typeof body.detail === 'string') return body.detail;
+    if (body && Array.isArray(body.detail)) {
+      // FastAPI 422: keep only location and message; never echo submitted input.
+      return body.detail
+        .map((d) => {
+          if (!d || typeof d !== 'object') return '';
+          const loc = Array.isArray(d.loc) ? d.loc.join('.') : '';
+          const msg = typeof d.msg === 'string' ? d.msg : '';
+          return [loc, msg].filter(Boolean).join(': ');
+        })
+        .filter(Boolean)
+        .join('; ');
+    }
     if (body && body.detail !== undefined) return JSON.stringify(body.detail);
     return '';
   } catch {
@@ -71,7 +108,7 @@ export function createApi({
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
 
-  async function request(method, path, { query, json, form } = {}) {
+  async function request(method, path, { query, json, form, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     const headers = { Accept: 'application/json', ...authHeaders() };
     const init = { method, headers };
     if (form !== undefined) {
@@ -81,12 +118,22 @@ export function createApi({
       init.body = JSON.stringify(json);
     }
 
-    let res;
+    const guard = withTimeout(signal, timeoutMs);
+    init.signal = guard.signal;
     try {
-      res = await fetchImpl(`${base}${path}${buildQuery(query)}`, init);
-    } catch {
+      return await perform(path, query, init);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      if (signal && signal.aborted) throw new ApiError('aborted', { kind: 'aborted' });
+      if (guard.timedOut()) throw new ApiError('request timed out', { kind: 'offline' });
       throw new ApiError('no api connection', { kind: 'offline' });
+    } finally {
+      guard.cleanup();
     }
+  }
+
+  async function perform(path, query, init) {
+    const res = await fetchImpl(`${base}${path}${buildQuery(query)}`, init);
 
     if (res.status === 401) {
       throw new ApiError('api token required', { status: 401, kind: 'unauthorized' });
@@ -108,19 +155,28 @@ export function createApi({
   }
 
   return {
-    get(path, query) {
-      return request('GET', path, { query });
+    get(path, query, opts = {}) {
+      return request('GET', path, { query, signal: opts.signal });
     },
-    post(path, body) {
-      return request('POST', path, { json: body === undefined ? undefined : body });
+    post(path, body, opts = {}) {
+      return request('POST', path, {
+        json: body === undefined ? undefined : body,
+        signal: opts.signal,
+      });
     },
-    upload(file) {
+    upload(file, opts = {}) {
       const form = new FormData();
       form.append('file', file);
-      return request('POST', '/v1/documents', { form });
+      return request('POST', '/v1/documents', {
+        form,
+        signal: opts.signal,
+        timeoutMs: opts.timeoutMs ?? 60000,
+      });
     },
     setToken(value) {
-      token = String(value);
+      const t = String(value);
+      if (!TOKEN_RE.test(t)) throw new ApiError('token must be printable ASCII', { kind: 'http' });
+      token = t;
       writeStorage(storage, token);
     },
     clearToken() {

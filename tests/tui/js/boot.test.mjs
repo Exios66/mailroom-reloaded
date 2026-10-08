@@ -228,3 +228,31 @@ test('the signal aborting mid-run stops later delays', async () => {
   });
   assert.deepEqual(delays, [900]);
 });
+
+test('boot line reflects the real theme and crt state', async () => {
+  const f = fakeCtx();
+  await boot(f.ctx, { reducedMotion: true, theme: 'hc', crt: false });
+  assert.ok(f.texts().includes('boot: tty · crt off · theme hc'));
+});
+
+test('catalog prints N+ when the page is full', async () => {
+  const docs = Array.from({ length: 500 }, (_, i) => ({ doc_id: String(i) }));
+  const f = fakeCtx({ get: (p) => (p === '/v1/documents' ? { documents: docs } : { runs: [] }) });
+  await boot(f.ctx, { reducedMotion: true });
+  assert.ok(f.texts().includes('[ ok ] catalog · 500+ documents'));
+});
+
+test('boot prints a jev status line, non-fatal on failure', async () => {
+  const run = async (jev) => {
+    const f = fakeCtx({ get: (p, q) => (p === '/v1/jev' ? jev() : healthyGet(p, q)) });
+    const r = await boot(f.ctx, { reducedMotion: true, banner: BANNER });
+    return { r, t: f.texts() };
+  };
+  let x = await run(() => ({ enabled: true, provider: 'local', calibrated: true }));
+  assert.ok(x.t.includes('[ ok ] jev · local calibrated'));
+  x = await run(() => ({ enabled: false }));
+  assert.ok(x.t.includes('[ -- ] jev · off'));
+  x = await run(() => { throw new ApiError('no', { status: 401, kind: 'unauthorized' }); });
+  assert.equal(x.r.state, 'live');
+  assert.ok(!x.t.some((l) => l.includes('jev')));
+});

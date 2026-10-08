@@ -9,6 +9,7 @@ import {
   renderListing,
   renderPre,
   renderBanner,
+  createTerminal,
 } from '../../../src/mailroom_reloaded/api/tui/terminal.js';
 
 // Tiny DOM stub: node has no document. Only createElement/textContent/appendChild.
@@ -136,4 +137,209 @@ test('renderTable passes (rowIndex, colIndex) to cellClass', () => {
   assert.deepEqual(seen, [[0, 0], [0, 1], [1, 0], [1, 1]]);
   const tbody = table.children[1];
   assert.equal(tbody.children[1].children[1].className.includes('success'), true);
+});
+
+test('maskCommand masks quoted and obfuscated auth forms', () => {
+  assert.equal(maskCommand('"auth" tok'), 'auth ••••');
+  assert.equal(maskCommand('au""th tok'), 'auth ••••');
+  assert.equal(maskCommand("'auth' a b c"), 'auth ••••');
+  assert.equal(maskCommand('auth tok --x'), 'auth ••••');
+  assert.equal(maskCommand('auth --token=abc'), 'auth ••••');
+  assert.equal(maskCommand('auth "abc'), 'auth ••••');
+  assert.equal(maskCommand('"auth" --clear'), '"auth" --clear');
+});
+
+// ---- richer fake DOM for createTerminal ----
+function fakeEl(tag) {
+  const listeners = {};
+  const n = {
+    tagName: tag,
+    className: '',
+    children: [],
+    attrs: {},
+    style: {},
+    parent: null,
+    _text: '',
+    value: '',
+    readOnly: false,
+    selectionStart: 0,
+    selectionEnd: 0,
+    scrollTop: 0,
+    scrollHeight: 0,
+    appendChild(c) {
+      c.parent = n;
+      n.children.push(c);
+      return c;
+    },
+    removeChild(c) {
+      n.children = n.children.filter((x) => x !== c);
+    },
+    remove() {
+      if (n.parent) n.parent.removeChild(n);
+    },
+    get firstChild() {
+      return n.children[0] || null;
+    },
+    get childElementCount() {
+      return n.children.length;
+    },
+    setAttribute(k, v) {
+      n.attrs[k] = String(v);
+    },
+    setSelectionRange(a, b) {
+      n.selectionStart = a;
+      n.selectionEnd = b;
+    },
+    focus() {},
+    addEventListener(t, f) {
+      (listeners[t] ||= []).push(f);
+    },
+    fire(t, ev = {}) {
+      const e = { preventDefault() { e.defaultPrevented = true; }, defaultPrevented: false, ...ev };
+      for (const f of listeners[t] || []) f(e);
+      return e;
+    },
+    get textContent() {
+      return n._text + n.children.map((c) => c.textContent).join('');
+    },
+    set textContent(v) {
+      n.children = [];
+      n._text = String(v);
+    },
+  };
+  return n;
+}
+
+function fakeTerminalDoc() {
+  const nodes = { '#output': fakeEl('main'), '.prompt-line': fakeEl('div'), '.status-bar': null };
+  return {
+    nodes,
+    body: fakeEl('body'),
+    querySelector: (q) => nodes[q] || null,
+    createElement: fakeEl,
+    createTextNode: (t) => {
+      const n = fakeEl('#text');
+      n._text = t;
+      return n;
+    },
+  };
+}
+
+function mkTerm({ run } = {}) {
+  const doc = fakeTerminalDoc();
+  const log = [];
+  const history = {
+    items: [],
+    pos: 0,
+    push(l) { this.items.push(l); this.pos = this.items.length; },
+    prev() { if (!this.items.length) return undefined; if (this.pos > 0) this.pos--; return this.items[this.pos]; },
+    next() { if (this.pos >= this.items.length) return undefined; this.pos++; return this.pos === this.items.length ? undefined : this.items[this.pos]; },
+    reset() { this.pos = this.items.length; },
+  };
+  const registry = {
+    get: (name) =>
+      name === 'slow' ? { run: run || (() => new Promise(() => {})) } : name === 'echo' ? { run: (ctx) => ctx.out.line('ran', '') } : undefined,
+    complete: (v) => (v === 'ec' ? { matches: ['echo'], ghost: 'ho' } : { matches: [], ghost: '' }),
+  };
+  const term = createTerminal({ root: doc, registry, history, api: {} });
+  const input = doc.nodes['.prompt-line'].children[1].children[1];
+  const display = doc.nodes['.prompt-line'].children[1].children[0];
+  const out = doc.nodes['#output'];
+  const type = (v) => {
+    input.value = v;
+    input.selectionStart = input.selectionEnd = v.length;
+    input.fire('input');
+  };
+  const key = (k, extra = {}) => input.fire('keydown', { key: k, keyCode: 0, ...extra });
+  const texts = () => out.children.map((c) => c.textContent);
+  return { term, input, display, out, type, key, texts, history };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+test('multi-line paste inserts the first line, warns, and never runs', async () => {
+  const t = mkTerm();
+  t.type('ls ');
+  const e = t.input.fire('paste', { clipboardData: { getData: () => 'one\ntwo\nthree\n' } });
+  assert.equal(e.defaultPrevented, true);
+  assert.equal(t.input.value, 'ls one');
+  await tick();
+  const texts = t.texts();
+  assert.ok(texts.some((x) => /pasted 3 lines/.test(x)));
+  assert.ok(!texts.some((x) => x.includes('$')), 'nothing was echoed/run');
+});
+
+test('ArrowDown with no history navigation keeps typed text', () => {
+  const t = mkTerm();
+  t.history.push('ls');
+  t.history.reset();
+  t.type('half typed');
+  t.key('ArrowDown');
+  assert.equal(t.input.value, 'half typed');
+  t.key('ArrowUp');
+  assert.equal(t.input.value, 'ls');
+  t.key('ArrowDown');
+  assert.equal(t.input.value, 'half typed');
+});
+
+test('live display masks an auth line while typing', () => {
+  const t = mkTerm();
+  t.type('auth sekret123');
+  const shown = t.display.textContent;
+  assert.ok(!shown.includes('sekret123'));
+  assert.ok(shown.includes('••••'));
+  assert.equal(t.display.attrs['aria-hidden'], 'true');
+});
+
+test('Ctrl+C frees the prompt even when the command ignores its signal', async () => {
+  const t = mkTerm();
+  t.type('slow');
+  t.key('Enter');
+  await tick();
+  t.key('c', { ctrlKey: true });
+  await tick();
+  t.type('echo');
+  t.key('Enter');
+  await tick();
+  assert.ok(t.texts().includes('ran'), 'next command runs after ^C');
+});
+
+test('Tab only prevents default when there is a ghost to complete', () => {
+  const t = mkTerm();
+  t.type('zzz');
+  assert.equal(t.key('Tab').defaultPrevented, false);
+  t.type('ec');
+  assert.equal(t.key('Tab').defaultPrevented, true);
+  assert.equal(t.input.value, 'echo');
+});
+
+test('input can be made read-only until boot finishes', () => {
+  const t = mkTerm();
+  t.term.setInputEnabled(false);
+  assert.equal(t.input.readOnly, true);
+  t.term.setInputEnabled(true);
+  assert.equal(t.input.readOnly, false);
+});
+
+test('scrollback is capped with a while loop on childElementCount', () => {
+  const t = mkTerm();
+  for (let i = 0; i < 1105; i++) t.term.ctx.out.line(`l${i}`);
+  assert.equal(t.out.children.length, 1000);
+  assert.equal(t.out.children[0].textContent, 'l105');
+});
+
+test('man animation is abortable and does not re-announce', async () => {
+  const t = mkTerm();
+  globalThis.requestAnimationFrame = (f) => setTimeout(() => f(performance.now()), 1);
+  const p = t.term.ctx.out.man('x'.repeat(100000));
+  const box = t.out.children[0];
+  assert.equal(box.attrs['aria-live'], 'off');
+  t.input.fire('keydown', { key: 'c', ctrlKey: true, keyCode: 0 });
+  await Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('man hung')), 500))]);
+  delete globalThis.requestAnimationFrame;
+});
+
+test('banner and divider are aria-hidden', () => {
+  const doc = makeDoc();
+  assert.equal(renderBanner(doc, 'x').attrs['aria-hidden'], 'true');
 });

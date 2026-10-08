@@ -22,6 +22,7 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `ls` | `ls [--status S] [--limit N]` | Lists documents. |
 | `inspect` | `inspect <doc_id>` | Shows one document. |
 | `audit` | `audit <doc_id>` | Verifies the audit chain. |
+| `jev` | `jev` | Shows the Jev gate: provider, model, gate in use, calibration thresholds. |
 | `review` | `review` | Lists parked documents. |
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
 | `runs` | `runs` | Lists eval runs. |
@@ -35,6 +36,32 @@ Sources: `src/mailroom_reloaded/api/tui/commands/shell.js` and
 `commands/pipeline.js` (each command carries its man page). Keys: Tab ghost
 completion, Up/Down history, Ctrl+L clear, Ctrl+C stop `watch`, any key skips
 the boot animation.
+
+### `jev` and gate decisions
+
+```
+> jev
+provider     local
+model        jevk5
+base_url     http://127.0.0.1:8898/v1/systemone
+gate         jev
+calibrated   yes
+accept       0.844
+verify       0.733
+temperature  0.821
+ece          0.153 -> 0.152
+n            60
+
+> audit 03a9efe794321eb2
+5 audit entries
+chain: ok
+gate classify -> verify [jev] conf 0.88 — jev confidence 0.792 in verify band
+```
+
+With Jev disabled, `jev` prints `jev off (band gate)`. `audit` lists `gate_decision`
+entries (source `jev` is coloured by action), `inspect` adds a `gate` line with the
+last decision, and boot adds `[ ok ] jev · <provider> calibrated` or `[ -- ] jev · off`.
+API keys are never printed.
 
 ## Themes
 
@@ -115,3 +142,14 @@ light scheme beyond a selectable theme.
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |
 | `tests/api/test_tui_serving.py` | Serving tests. |
+
+## Local dev with Jev
+
+`JEV=1 scripts/tui_dev.sh up` also starts the mock Jev (`deploy/mock_jev.py`, port
+`TUI_JEV_PORT`, default 8898), fits a synthetic calibration into
+`data/tui-dev/base/models/jev_calibration.json`, enables the Jev gate for the API
+and seeds `scripts/tui_seed_jev/*.txt` (`[confidence:0.NN]` markers drive the
+mock LLM into the medium band): `jev-proceed` archives, `jev-verify` and
+`jev-parks` park for review. `down` and `status` handle the extra process. Check
+`GET /v1/jev` and each document's `/v1/audit/{id}` `gate_decision` entries
+(`source: "jev"`) to confirm Jev was consulted. See `docs/JEV.md`.

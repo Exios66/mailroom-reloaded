@@ -3,6 +3,7 @@
 // Shapes verified against src/mailroom_reloaded/api/app.py.
 
 export const ACCEPT = '.txt,.md,.pdf,.docx,.rtf,.html,.htm';
+const WATCH_LIMIT = 500;
 export const EMPTY_LS = "no documents — drop a file in the inbox or run 'upload'";
 
 const STATUS_CLASS = {
@@ -15,7 +16,22 @@ const STATUS_CLASS = {
 };
 
 export function statusClass(status) {
-  return STATUS_CLASS[status] || '';
+  return typeof status === 'string' && Object.hasOwn(STATUS_CLASS, status)
+    ? STATUS_CLASS[status]
+    : '';
+}
+
+const DOC_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+/** Doc ids are hex-ish tokens; run ids may also contain dots but never '.' or '..'. */
+export function validDocId(id) {
+  return typeof id === 'string' && DOC_ID_RE.test(id);
+}
+
+export function validRunId(id) {
+  return (
+    typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && /^[A-Za-z0-9._-]+$/.test(id)
+  );
 }
 
 function text(value) {
@@ -36,6 +52,7 @@ function text(value) {
  */
 function fail(ctx, cmd, err, { notFound } = {}) {
   const kind = err && err.kind;
+  if (kind === 'aborted') return;
   if (kind === 'offline') {
     ctx.out.line(`${cmd}: api unreachable — mailroom closed`, 'error');
   } else if (kind === 'unauthorized') {
@@ -50,6 +67,29 @@ function fail(ctx, cmd, err, { notFound } = {}) {
 }
 
 const enc = encodeURIComponent;
+
+const GATE_ACTION_CLASS = { proceed: 'success', verify: 'warn', park: 'warn', human_review: 'warn', reject: 'error' };
+
+function num(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? String(Math.round(v * 1000) / 1000) : null;
+}
+
+/** Format one gate_decision audit entry; never throws on odd payloads. */
+export function gateLine(entry) {
+  const p = entry && entry.payload && typeof entry.payload === 'object' ? entry.payload : {};
+  const stage = String(entry && entry.node ? entry.node : 'gate').replace(/^gate_/, 'gate ').replace(/_/g, ' ');
+  const source = typeof p.source === 'string' && p.source ? p.source : '—';
+  const conf = num(p.confidence);
+  let t = `${stage} -> ${text(p.action)} [${source}]`;
+  if (conf !== null) t += ` conf ${conf}`;
+  if (p.reason) t += ` — ${text(p.reason)}`;
+  const action = typeof p.action === 'string' && Object.hasOwn(GATE_ACTION_CLASS, p.action) ? GATE_ACTION_CLASS[p.action] : '';
+  return { t, cls: source === 'jev' ? action || 'info' : action || 'dim', source };
+}
+
+function gateEntries(entries) {
+  return (Array.isArray(entries) ? entries : []).filter((e) => e && e.event === 'gate_decision');
+}
 
 function flagText(flags, name) {
   const v = flags[name];
@@ -78,7 +118,7 @@ function docTable(ctx, docs) {
 async function listDocs(ctx, cmd, query) {
   let res;
   try {
-    res = await ctx.api.get('/v1/documents', query);
+    res = await ctx.api.get('/v1/documents', query, { signal: ctx.signal() });
   } catch (err) {
     fail(ctx, cmd, err);
     return;
@@ -89,17 +129,27 @@ async function listDocs(ctx, cmd, query) {
     return;
   }
   docTable(ctx, docs);
+  if (query && query.limit !== undefined && docs.length === query.limit) {
+    ctx.out.line(`showing first ${docs.length} — use --limit to see more`, 'dim');
+  }
 }
 
-function defaultPickFile(accept) {
+function defaultPickFile(accept, signal) {
   const doc = globalThis.document;
   if (!doc) return Promise.resolve(null);
   return new Promise((resolve) => {
+    if (signal && signal.aborted) return resolve(null);
     const input = doc.createElement('input');
     input.type = 'file';
     input.accept = accept;
-    input.addEventListener('change', () => resolve((input.files && input.files[0]) || null));
-    input.addEventListener('cancel', () => resolve(null));
+    const finish = (file) => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve(file);
+    };
+    const onAbort = () => finish(null);
+    input.addEventListener('change', () => finish((input.files && input.files[0]) || null));
+    input.addEventListener('cancel', () => finish(null));
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
     input.click();
   });
 }
@@ -209,8 +259,17 @@ SYNOPSIS
     watch [--interval 3]
 
 DESCRIPTION
-    Polls GET /v1/documents?limit=20 every N seconds (1-60) and prints one line
+    Polls GET /v1/documents?limit=500 every N seconds (1-60) and prints one line
     per new document or status change. Stops on Ctrl+C or when the tab is hidden.`,
+  jev: `NAME
+    jev — show the Jev gate status
+
+SYNOPSIS
+    jev
+
+DESCRIPTION
+    Reads GET /v1/jev: provider, model, which gate is active and, when calibrated,
+    the accept and verify thresholds. API keys are never shown.`,
   auth: `NAME
     auth — set or clear the api token
 
@@ -233,8 +292,7 @@ export function registerPipeline(registry) {
       const limit = parseIntFlag(flags, 'limit', 1, 500);
       if (limit.error) return ctx.out.line(`ls: ${limit.error}`, 'error');
       if (flags.status === true) return ctx.out.line('ls: --status needs a value', 'error');
-      const query = {};
-      if (limit.value !== undefined) query.limit = limit.value;
+      const query = { limit: limit.value ?? 50 };
       if (flagText(flags, 'status')) query.status = flags.status;
       return listDocs(ctx, 'ls', query);
     },
@@ -248,9 +306,10 @@ export function registerPipeline(registry) {
     async run(ctx, args) {
       const id = args[0];
       if (!id) return ctx.out.line('inspect: usage: inspect <doc_id>', 'error');
+      if (!validDocId(id)) return ctx.out.line('inspect: invalid doc_id', 'error');
       let res;
       try {
-        res = await ctx.api.get(`/v1/documents/${enc(id)}`);
+        res = await ctx.api.get(`/v1/documents/${enc(id)}`, undefined, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'inspect', err, { notFound: id });
       }
@@ -260,12 +319,25 @@ export function registerPipeline(registry) {
       const manifest = (res && res.manifest) || {};
       const trail =
         report.route_trail || (manifest.state && manifest.state.route_trail) || [];
+      let gate = '';
+      try {
+        let ents = gateEntries(res && res.audit && res.audit.entries);
+        if (ents.length === 0) {
+          const a = await ctx.api.get(`/v1/audit/${enc(id)}`, undefined, { signal: ctx.signal() });
+          ents = gateEntries(a && a.entries);
+        }
+        if (ents.length) gate = gateLine(ents[ents.length - 1]).t;
+      } catch {
+        // gate info is optional
+      }
+      if (ctx.signal().aborted) return;
       ctx.out.line(text(manifest.filename || cat.filename || res.doc_id), 'amber');
       ctx.out.kv([
         ['doc_id', text(res.doc_id)],
         ['status', text(res.status)],
         ['doc_type', text(cls.doc_type || cat.doc_type)],
         ['confidence', text(cls.confidence)],
+        ...(gate ? [['gate', gate]] : []),
       ]);
       if (trail.length === 0) {
         ctx.out.line('no route trail yet', 'dim');
@@ -282,20 +354,62 @@ export function registerPipeline(registry) {
     async run(ctx, args) {
       const id = args[0];
       if (!id) return ctx.out.line('audit: usage: audit <doc_id>', 'error');
+      if (!validDocId(id)) return ctx.out.line('audit: invalid doc_id', 'error');
       let res;
       try {
-        res = await ctx.api.get(`/v1/audit/${enc(id)}`);
+        res = await ctx.api.get(`/v1/audit/${enc(id)}`, undefined, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'audit', err, { notFound: id });
       }
       const entries = (res && res.entries) || [];
       const chain = (res && res.chain) || {};
+      if (entries.length === 0) {
+        return ctx.out.line('no audit entries (unknown document?)', 'warn');
+      }
       ctx.out.line(`${entries.length} audit entr${entries.length === 1 ? 'y' : 'ies'}`);
       if (chain.ok) {
         ctx.out.line('chain: ok', 'success');
       } else {
         ctx.out.line(`chain: broken at ${text(chain.broken_at)}`, 'error');
       }
+      gateEntries(entries).forEach((e) => {
+        const g = gateLine(e);
+        ctx.out.line(g.t, g.cls);
+      });
+    },
+  });
+
+  registry.register({
+    name: 'jev',
+    summary: 'show the Jev gate status',
+    usage: 'jev',
+    man: manPages.jev,
+    async run(ctx) {
+      let res;
+      try {
+        res = await ctx.api.get('/v1/jev', undefined, { signal: ctx.signal() });
+      } catch (err) {
+        return fail(ctx, 'jev', err);
+      }
+      if (!res || !res.enabled) return ctx.out.line('jev off (band gate)', 'dim');
+      const pairs = [
+        ['provider', text(res.provider)],
+        ['model', text(res.model)],
+        ['base_url', text(res.base_url)],
+        ['gate', text(res.gate)],
+        ['calibrated', res.calibrated ? 'yes' : 'no'],
+      ];
+      const c = res.calibrated && res.calibration;
+      if (c && typeof c === 'object') {
+        pairs.push(
+          ['accept', text(num(c.accept_threshold))],
+          ['verify', text(num(c.verify_threshold))],
+          ['temperature', text(num(c.temperature))],
+          ['ece', `${text(num(c.ece_before))} -> ${text(num(c.ece_after))}`],
+          ['n', text(c.n)],
+        );
+      }
+      ctx.out.kv(pairs);
     },
   });
 
@@ -318,6 +432,7 @@ export function registerPipeline(registry) {
       const [id, action] = args;
       const usage = 'resolve: usage: resolve <doc_id> <approve|correct|reject>';
       if (!id || !action) return ctx.out.line(usage, 'error');
+      if (!validDocId(id)) return ctx.out.line('resolve: invalid doc_id', 'error');
       if (!['approve', 'correct', 'reject'].includes(action)) {
         return ctx.out.line(usage, 'error');
       }
@@ -331,7 +446,7 @@ export function registerPipeline(registry) {
       if (flagText(flags, 'reviewer')) body.reviewer = flags.reviewer;
       let res;
       try {
-        res = await ctx.api.post(`/v1/review/${enc(id)}/resolve`, body);
+        res = await ctx.api.post(`/v1/review/${enc(id)}/resolve`, body, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'resolve', err, { notFound: id });
       }
@@ -349,7 +464,7 @@ export function registerPipeline(registry) {
     async run(ctx) {
       let res;
       try {
-        res = await ctx.api.get('/v1/runs');
+        res = await ctx.api.get('/v1/runs', undefined, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'runs', err);
       }
@@ -370,9 +485,10 @@ export function registerPipeline(registry) {
     async run(ctx, args) {
       const id = args[0];
       if (!id) return ctx.out.line('cards: usage: cards <run_id>', 'error');
+      if (!validRunId(id)) return ctx.out.line('cards: invalid run_id', 'error');
       let res;
       try {
-        res = await ctx.api.get(`/v1/runs/${enc(id)}/cards`);
+        res = await ctx.api.get(`/v1/runs/${enc(id)}/cards`, undefined, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'cards', err);
       }
@@ -397,7 +513,7 @@ export function registerPipeline(registry) {
     async run(ctx) {
       let res;
       try {
-        res = await ctx.api.get('/health');
+        res = await ctx.api.get('/health', undefined, { signal: ctx.signal() });
       } catch (err) {
         return fail(ctx, 'health', err);
       }
@@ -412,11 +528,13 @@ export function registerPipeline(registry) {
     man: manPages.upload,
     async run(ctx) {
       const pick = typeof ctx.pickFile === 'function' ? ctx.pickFile : defaultPickFile;
-      const file = await pick(ACCEPT);
+      const signal = ctx.signal();
+      const file = await pick(ACCEPT, signal);
+      if (signal.aborted) return;
       if (!file) return ctx.out.line('upload: no file chosen', 'dim');
       let res;
       try {
-        res = await ctx.api.upload(file);
+        res = await ctx.api.upload(file, { signal });
       } catch (err) {
         return fail(ctx, 'upload', err);
       }
@@ -437,14 +555,20 @@ export function registerPipeline(registry) {
       const signal = ctx.signal();
       const seen = new Map();
       let first = true;
+      let warnedFull = false;
       for (;;) {
         let res;
         try {
-          res = await ctx.api.get('/v1/documents', { limit: 20 });
+          res = await ctx.api.get('/v1/documents', { limit: WATCH_LIMIT }, { signal });
         } catch (err) {
           return fail(ctx, 'watch', err);
         }
+        if (signal.aborted) return ctx.out.line('watch: stopped', 'dim');
         const docs = (res && res.documents) || [];
+        if (docs.length >= WATCH_LIMIT && !warnedFull) {
+          warnedFull = true;
+          ctx.out.line(`watch: page full (${WATCH_LIMIT}) — older changes may be missed`, 'warn');
+        }
         if (first) {
           docs.forEach((d) => seen.set(d.doc_id, d.status));
           ctx.out.line(
@@ -480,11 +604,16 @@ export function registerPipeline(registry) {
       }
       const token = args[0];
       if (!token) return ctx.out.line('auth: usage: auth <token> | --clear', 'error');
-      ctx.api.setToken(token);
       try {
-        await ctx.api.get('/v1/documents', { limit: 1 });
+        ctx.api.setToken(token);
+      } catch {
+        return ctx.out.line('auth: token must be printable ASCII with no spaces', 'error');
+      }
+      try {
+        await ctx.api.get('/v1/documents', { limit: 1 }, { signal: ctx.signal() });
       } catch (err) {
         if (err && err.kind === 'unauthorized') {
+          ctx.api.clearToken();
           return ctx.out.line('auth: token rejected — 401', 'error');
         }
         return fail(ctx, 'auth', err);

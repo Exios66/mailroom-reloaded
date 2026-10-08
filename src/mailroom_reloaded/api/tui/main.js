@@ -33,6 +33,7 @@ export async function start() {
   document.body.classList.add('powering-on');
   setTimeout(() => document.body.classList.remove('powering-on'), 650);
   const term = createTerminal({ root: document, registry, history, api });
+  term.setInputEnabled(false); // read-only until boot resolves
   const [banner, bannerCompact] = await Promise.all([
     loadText('banner.txt'),
     loadText('banner-compact.txt'),
@@ -46,13 +47,28 @@ export async function start() {
   const onSkip = () => skip.abort();
   document.addEventListener('keydown', onSkip, { once: true });
   document.addEventListener('pointerdown', onSkip, { once: true });
-  await boot(term.ctx, { reducedMotion, signal: skip.signal, banner, bannerCompact, compact });
-  document.removeEventListener('keydown', onSkip);
-  document.removeEventListener('pointerdown', onSkip);
+  try {
+    await boot(term.ctx, {
+      reducedMotion,
+      signal: skip.signal,
+      banner,
+      bannerCompact,
+      compact,
+      theme: st.label,
+      crt: st.crt,
+    });
+  } finally {
+    document.removeEventListener('keydown', onSkip);
+    document.removeEventListener('pointerdown', onSkip);
+    term.setInputEnabled(true);
+  }
   term.focus();
   return term;
 }
 
 if (typeof document !== 'undefined') {
-  start();
+  start().catch((err) => {
+    // A failed start must not leave the page silently dead.
+    console.error('tui start failed', err);
+  });
 }

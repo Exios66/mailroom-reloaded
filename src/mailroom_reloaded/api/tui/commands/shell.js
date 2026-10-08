@@ -118,7 +118,11 @@ export function registerShell(registry, { ambient }) {
     usage: 'neofetch',
     man: manPage('neofetch', 'banner, edition and live counts', 'neofetch', 'Prints the banner with the api base and document and run counts read from the api.'),
     async run(ctx) {
-      if (ctx.banner) ctx.out.pre(String(ctx.banner).replace(/\s+$/, ''));
+      if (ctx.banner) {
+        const art = String(ctx.banner).replace(/\s+$/, '');
+        if (typeof ctx.out.banner === 'function') ctx.out.banner(art);
+        else ctx.out.pre(art);
+      }
       const [docs, runs] = await Promise.all([
         count(ctx, '/v1/documents', { limit: 500 }, (b) => (Array.isArray(b?.documents) ? b.documents.length : NaN)),
         count(ctx, '/v1/runs', undefined, (b) => (Array.isArray(b?.runs) ? b.runs.length : NaN)),
