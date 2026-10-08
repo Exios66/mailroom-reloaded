@@ -1,0 +1,200 @@
+{
+  "uid": "mailroom-quality",
+  "title": "Mailroom Quality",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "tags": [
+    "mailroom"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "run_id",
+        "label": "run_id",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values({__name__=~\"mailroom_eval_.*\"}, run_id)",
+          "refId": "v"
+        },
+        "definition": "label_values({__name__=~\"mailroom_eval_.*\"}, run_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "doc_type",
+        "label": "doc_type",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": {
+          "query": "label_values({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\"}, doc_type)",
+          "refId": "v"
+        },
+        "definition": "label_values({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\"}, doc_type)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Latest eval KPIs (all mailroom.eval.* gauges)",
+      "type": "table",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "last_over_time({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}[7d])",
+          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Eval KPIs over time",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "{__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}",
+          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Schema-valid rate (live)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(mailroom_schema_valid_total{run_id=~\"$run_id\"}[15m])) / sum(rate(mailroom_documents_total{run_id=~\"$run_id\"}[15m]))",
+          "legendFormat": "schema valid"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Length-capped outputs (live)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(mailroom_length_capped_total{run_id=~\"$run_id\"}[15m]))",
+          "legendFormat": "length capped"
+        }
+      ]
+    }
+  ],
+  "annotations": {
+    "list": []
+  }
+}

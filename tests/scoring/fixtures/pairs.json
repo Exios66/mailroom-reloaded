@@ -1,0 +1,270 @@
+[
+  {
+    "name": "contract_exact",
+    "doc_class": "contract",
+    "field_types": {
+      "contract_value": "money",
+      "effective_date": "date",
+      "governing_law": "name",
+      "parties": "entity_list:name"
+    },
+    "expected": {
+      "contract_value": "$1,000.00",
+      "effective_date": "2021-03-04",
+      "governing_law": "Delaware",
+      "parties": [
+        "Acme Corp",
+        "Beta LLC"
+      ]
+    },
+    "predicted": {
+      "contract_value": "1000",
+      "effective_date": "2021-03-04",
+      "governing_law": "Delaware",
+      "parties": [
+        "Beta LLC",
+        "Acme Corp"
+      ]
+    }
+  },
+  {
+    "name": "contract_partial",
+    "doc_class": "contract",
+    "field_types": {
+      "contract_value": "money",
+      "effective_date": "date",
+      "term_length": "free_text",
+      "parties": "entity_list:name"
+    },
+    "expected": {
+      "contract_value": "$25,000",
+      "effective_date": "2021-03-04",
+      "term_length": "three years from the effective date",
+      "parties": [
+        "Acme Corp",
+        "Beta LLC"
+      ]
+    },
+    "predicted": {
+      "contract_value": "$2,500",
+      "effective_date": "2021-03-19",
+      "term_length": "3 years",
+      "parties": [
+        "Acme Corporation"
+      ]
+    }
+  },
+  {
+    "name": "merger_exact",
+    "doc_class": "merger_agreement",
+    "field_types": {
+      "document_name": "name",
+      "effective_date": "date",
+      "governing_law": "name",
+      "parties": "entity_list:name"
+    },
+    "expected": {
+      "document_name": "Agreement and Plan of Merger",
+      "effective_date": "2020-07-01",
+      "governing_law": "Delaware",
+      "parties": [
+        "Alpha Inc",
+        "Omega Holdings"
+      ]
+    },
+    "predicted": {
+      "document_name": "Agreement and Plan of Merger",
+      "effective_date": "2020-07-01",
+      "governing_law": "Delaware",
+      "parties": [
+        "Alpha Inc",
+        "Omega Holdings"
+      ]
+    }
+  },
+  {
+    "name": "merger_wrong",
+    "doc_class": "merger_agreement",
+    "field_types": {
+      "document_name": "name",
+      "effective_date": "date",
+      "merger_consideration": "name",
+      "parties": "entity_list:name"
+    },
+    "expected": {
+      "document_name": "Agreement and Plan of Merger",
+      "effective_date": "2020-07-01",
+      "merger_consideration": "All Cash",
+      "parties": [
+        "Alpha Inc",
+        "Omega Holdings"
+      ]
+    },
+    "predicted": {
+      "document_name": "Merger Agreement",
+      "effective_date": "2019-01-01",
+      "merger_consideration": "All Stock",
+      "parties": [
+        "Zeta Co"
+      ]
+    }
+  },
+  {
+    "name": "corp_record_match",
+    "doc_class": "corporate_record",
+    "field_types": {
+      "entity_name": "name",
+      "filing_number": "id",
+      "jurisdiction": "name",
+      "record_type": "name",
+      "signatories": "entity_list:name"
+    },
+    "expected": {
+      "entity_name": "Acme Corp",
+      "filing_number": "DE-123456",
+      "jurisdiction": "Delaware",
+      "record_type": "bylaws",
+      "signatories": [
+        "Jane Doe"
+      ]
+    },
+    "predicted": {
+      "entity_name": "ACME Corp.",
+      "filing_number": "de-123456",
+      "jurisdiction": "Delaware",
+      "record_type": "bylaws",
+      "signatories": [
+        "Jane Doe"
+      ]
+    }
+  },
+  {
+    "name": "corp_record_miss",
+    "doc_class": "corporate_record",
+    "field_types": {
+      "entity_name": "name",
+      "effective_date": "date",
+      "filing_number": "id",
+      "record_type": "name"
+    },
+    "expected": {
+      "entity_name": "Acme Corp",
+      "effective_date": "2018-05-09",
+      "filing_number": "DE-123456",
+      "record_type": "bylaws"
+    },
+    "predicted": {
+      "entity_name": "Globex",
+      "effective_date": "2018-06-09",
+      "filing_number": "DE-999999",
+      "record_type": "indenture"
+    }
+  },
+  {
+    "name": "corresp_match",
+    "doc_class": "correspondence",
+    "field_types": {
+      "communication_date": "date",
+      "communication_type": "name",
+      "sender": "name",
+      "recipient": "name",
+      "demand_amount": "money"
+    },
+    "expected": {
+      "communication_date": "2002-10-01",
+      "communication_type": "email",
+      "sender": "Kay Mann",
+      "recipient": "Sara Shackleton",
+      "demand_amount": "$5,000"
+    },
+    "predicted": {
+      "communication_date": "2002-10-01",
+      "communication_type": "email",
+      "sender": "Kay Mann",
+      "recipient": "Sara Shackleton",
+      "demand_amount": "5000"
+    }
+  },
+  {
+    "name": "corresp_partial",
+    "doc_class": "correspondence",
+    "field_types": {
+      "communication_date": "date",
+      "sender": "name",
+      "subject_matter": "free_text",
+      "action_items": "entity_list"
+    },
+    "expected": {
+      "communication_date": "2002-10-01",
+      "sender": "Kay Mann",
+      "subject_matter": "Schedule review of the swap confirmation",
+      "action_items": [
+        "send draft",
+        "call counsel"
+      ]
+    },
+    "predicted": {
+      "communication_date": "2002-11-01",
+      "sender": "K. Mann",
+      "subject_matter": "Confirmation review",
+      "action_items": [
+        "send draft"
+      ]
+    }
+  },
+  {
+    "name": "claim_match",
+    "doc_class": "insurance_claim",
+    "field_types": {
+      "claim_number": "id",
+      "policy_number": "id",
+      "claimed_amount": "money",
+      "date_of_loss": "date",
+      "insured_party": "name"
+    },
+    "expected": {
+      "claim_number": "CLM-1001",
+      "policy_number": "POL-77",
+      "claimed_amount": "$12,500.50",
+      "date_of_loss": "2021-02-03",
+      "insured_party": "John Smith"
+    },
+    "predicted": {
+      "claim_number": "CLM-1001",
+      "policy_number": "POL-77",
+      "claimed_amount": "12500.50",
+      "date_of_loss": "2021-02-03",
+      "insured_party": "John Smith"
+    }
+  },
+  {
+    "name": "claim_mismatch",
+    "doc_class": "insurance_claim",
+    "field_types": {
+      "claim_number": "id",
+      "claimed_amount": "money",
+      "date_filed": "date",
+      "denial_reasons": "entity_list:free_text",
+      "insurer": "name"
+    },
+    "expected": {
+      "claim_number": "CLM-1001",
+      "claimed_amount": "$12,500",
+      "date_filed": "2021-02-10",
+      "denial_reasons": [
+        "late notice",
+        "excluded peril"
+      ],
+      "insurer": "Northwind Mutual"
+    },
+    "predicted": {
+      "claim_number": "CLM-2002",
+      "claimed_amount": "$1,250",
+      "date_filed": "2021-02-28",
+      "denial_reasons": [
+        "late notice"
+      ],
+      "insurer": "Northwind"
+    }
+  }
+]
