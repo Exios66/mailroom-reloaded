@@ -1,0 +1,204 @@
+# mailroom-reloaded topology (spec §9). Run from the repo root:
+#   docker compose -f deploy/docker-compose.yml up -d --build                     # app + observability
+#   docker compose -f deploy/docker-compose.yml --profile local-llm up -d --build  # + llamafile
+#   docker compose -f deploy/docker-compose.yml --profile gpu up -d                # + vLLM + DCGM
+#   docker compose -f deploy/docker-compose.yml --profile split-watcher up -d      # standalone watcher
+#       (set MAILROOM_EMBED_WATCHER=0 so `app` does not also run a watcher)
+# MAILROOM_API_TOKEN is required: the app binds 0.0.0.0 and refuses to start without it.
+
+x-app-env: &app-env
+  MAILROOM_BASE_DIR: /data
+  DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-mock}
+  VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8001/v1}
+  LLAMAFILE_BASE_URL: ${LLAMAFILE_BASE_URL:-http://llamafile:8080/v1}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  MAILROOM_API_TOKEN: ${MAILROOM_API_TOKEN:?Set MAILROOM_API_TOKEN to a non-empty API token}
+  MAILROOM_TRACE_MASK: ${MAILROOM_TRACE_MASK:-0}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_SERVICE_NAME: mailroom
+  HF_HOME: /hf_cache
+
+x-app-build: &app-build
+  context: ..
+  dockerfile: deploy/Dockerfile
+  args:
+    ML_BUILD_NONE: ${ML_BUILD_NONE:-0}
+    UV_EXTRAS: ${UV_EXTRAS---extra bert}
+
+services:
+  app:
+    build: *app-build
+    image: mailroom-reloaded:latest
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    environment:
+      <<: *app-env
+      MAILROOM_EMBED_WATCHER: ${MAILROOM_EMBED_WATCHER:-1}
+    volumes:
+      - mailroom_data:/data
+      - hf_cache:/hf_cache
+    depends_on: [otel-collector]
+
+  watcher:
+    profiles: ["split-watcher"]
+    build: *app-build
+    image: mailroom-reloaded:latest
+    restart: unless-stopped
+    command: ["mailroom", "watch"]
+    healthcheck:
+      disable: true
+    environment:
+      <<: *app-env
+      MAILROOM_EMBED_WATCHER: "0"
+    volumes:
+      - mailroom_data:/data
+      - hf_cache:/hf_cache
+    depends_on: [otel-collector]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    # docker_stats needs the Docker socket (read-only) and a matching group.
+    user: "0:0"
+    environment:
+      VLLM_METRICS_SCHEME: ${VLLM_METRICS_SCHEME:-http}
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:8889:8889"
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - otel_targets:/etc/otelcol/targets:ro
+    depends_on:
+      phoenix:
+        condition: service_started
+      vllm-targets:
+        condition: service_completed_successfully
+
+  # Splits comma-separated VLLM_METRICS_URLS (host:port each) into a Prometheus
+  # file_sd targets file that the Collector's prometheus receiver reads.
+  vllm-targets:
+    image: busybox:1.37.0
+    restart: "no"
+    environment:
+      VLLM_METRICS_URLS: ${VLLM_METRICS_URLS:-}
+    command:
+      - sh
+      - -c
+      - |
+        out="["; first=1; IFS=,
+        for u in $$VLLM_METRICS_URLS; do
+          u=$$(echo "$$u" | tr -d ' ')
+          [ -n "$$u" ] || continue
+          [ "$$first" = 1 ] || out="$$out,"
+          first=0
+          out="$$out\"$$u\""
+        done
+        echo "[{\"targets\":$$out]}]" > /targets/vllm.json
+    volumes:
+      - otel_targets:/targets
+
+  phoenix:
+    image: arizephoenix/phoenix:version-11.6.2
+    restart: unless-stopped
+    ports: ["127.0.0.1:6006:6006"]
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+    volumes:
+      - phoenix_data:/mnt/data
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:9090:9090"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on: [otel-collector]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on: [prometheus]
+
+  llamafile:
+    profiles: ["local-llm"]
+    build:
+      context: ./llamafile
+      args:
+        LLAMAFILE_VERSION: ${LLAMAFILE_VERSION:-0.10.4}
+    image: mailroom-llamafile:latest
+    restart: unless-stopped
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      LLAMAFILE_MODEL: ${LLAMAFILE_MODEL:-/models/model.gguf}
+      LLAMAFILE_ALIAS: ${LLAMAFILE_ALIAS:-qwen3:7b}
+      LLAMAFILE_CTX: ${LLAMAFILE_CTX:-16384}
+      LLAMAFILE_GPU: ${LLAMAFILE_GPU:-disable}
+    volumes:
+      - llamafile_models:/models:ro
+
+  vllm:
+    profiles: ["gpu"]
+    image: vllm/vllm-openai:v0.29.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:8001:8001"]
+    ipc: host
+    command: >-
+      --model ${VLLM_MODEL:-Qwen/Qwen3-8B-AWQ}
+      --port 8001
+      --tensor-parallel-size ${VLLM_TP:-1}
+      --data-parallel-size ${VLLM_DP:-1}
+      --enable-prefix-caching
+      --kv-cache-dtype fp8
+      --max-model-len ${VLLM_MAX_LEN:-32768}
+    environment:
+      HF_HOME: /hf_cache
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf_cache:/hf_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  dcgm-exporter:
+    profiles: ["gpu"]
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    restart: unless-stopped
+    ports: ["127.0.0.1:9400:9400"]
+    cap_add: [SYS_ADMIN]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  mailroom_data:
+  hf_cache:
+  llamafile_models:
+  phoenix_data:
+  prometheus_data:
+  grafana_data:
+  otel_targets:

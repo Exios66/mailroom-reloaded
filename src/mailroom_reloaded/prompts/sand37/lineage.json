@@ -1,0 +1,45 @@
+{
+  "lineage_id": "mailroom-dataset-v1",
+  "frozen_version": 1,
+  "source_repo": "LLM-Mailroom-Services/eval-environment",
+  "source_path": "prompts/manifest.json",
+  "frozen_at": "2026-09-26T05:09:29+00:00",
+  "notes": "eval-environment frozen v1 specialist stems (issues #4–#8). Sandbox Modal/vLLM specialist evals must inject these exact bytes. source_key is the sandbox stem at commit 303e7f0.",
+  "specialists": {
+    "contracts_specialist": {
+      "eval_environment_key": "contracts_specialist_v1",
+      "sandbox_stem": "contracts_specialist_v33_simplified",
+      "sha256": "d91de3967cc3b12cbd222cc5a4ae167b39578125abc83be7422498dc5024fd24",
+      "chars": 9882,
+      "opening": "You are the contracts specialist."
+    },
+    "corporate_records_specialist": {
+      "eval_environment_key": "corporate_records_specialist_v1",
+      "sandbox_stem": "corporate_records_specialist_simplified",
+      "sha256": "484e64dd847b7bb35afebca74edc1fb6c381f0f7d5e9367ad8673bec0b8af45c",
+      "chars": 5801,
+      "opening": "You are the corporate-records specialist."
+    },
+    "correspondence_specialist": {
+      "eval_environment_key": "correspondence_specialist_v1",
+      "sandbox_stem": "correspondence_specialist_simplified",
+      "sha256": "eab63b5afd29906b1ad3aca2d7698bf5c15d4b7f4ce9ade3b744be535d18d4f3",
+      "chars": 6061,
+      "opening": "You are the correspondence specialist."
+    },
+    "insurance_claims_specialist": {
+      "eval_environment_key": "insurance_claims_specialist_v1",
+      "sandbox_stem": "insurance_claims_specialist_simplified",
+      "sha256": "6c2776bcbe00091200aecbcfd21c99f197398d929143dd0c7c722811fa100034",
+      "chars": 6277,
+      "opening": "You are the insurance-claims specialist."
+    },
+    "merger_agreement_specialist": {
+      "eval_environment_key": "merger_agreement_specialist_v1",
+      "sandbox_stem": "merger_agreement_specialist_simplified",
+      "sha256": "003232584d6890054d956398135f439b86692a1123683f58914c0393b5e1a00b",
+      "chars": 6116,
+      "opening": "You are the merger-agreement specialist."
+    }
+  }
+}
