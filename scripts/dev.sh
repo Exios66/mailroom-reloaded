@@ -27,14 +27,24 @@ fi
 
 cd "$ROOT"
 
+GRAFANA_PASSWORD_LABEL="${GRAFANA_ADMIN_PASSWORD:+<configured>}"
+GRAFANA_PASSWORD_LABEL="${GRAFANA_PASSWORD_LABEL:-admin (default)}"
 COMPOSE=(docker compose -f "$COMPOSE_FILE")
 if [[ -f "$ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "$ROOT/.env"
-  set +a
+  settings_file="$(mktemp)"
+  if ! python3 "$ROOT/scripts/dev_env.py" "$ROOT/.env" > "$settings_file"; then
+    rm -f "$settings_file"
+    exit 1
+  fi
+  while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+    export "$key=$value"
+  done < "$settings_file"
+  rm -f "$settings_file"
   COMPOSE+=(--env-file "$ROOT/.env")
 fi
+
+# Match the image user to the host owner of the bind-mounted source and state.
+export APP_UID="$(id -u)"
 
 API="${MAILROOM_API_URL:-http://localhost:8000}"
 PHOENIX="${PHOENIX_URL:-http://localhost:6006}"
@@ -66,6 +76,7 @@ shift || true
 
 case "$cmd" in
   up)
+    [[ "$APP_UID" -gt 0 ]] || fail "run dev.sh as a non-root host user"
     mkdir -p "$ROOT/data"
     "${COMPOSE[@]}" up -d --build "$@"
     echo
@@ -73,7 +84,7 @@ case "$cmd" in
     echo "  API /ui    ${API}"
     echo "  Phoenix    ${PHOENIX}"
     echo "  Prometheus ${PROMETHEUS}"
-    echo "  Grafana    ${GRAFANA}  (admin / ${GRAFANA_ADMIN_PASSWORD:-admin})"
+    echo "  Grafana    ${GRAFANA}  (admin / ${GRAFANA_PASSWORD_LABEL})"
     echo "  data       ${ROOT}/data"
     echo "Run 'scripts/dev.sh status' once healthy."
     ;;
@@ -128,7 +139,8 @@ print(json.load(sys.stdin).get("doc_id", ""))
 ')"
     echo "accepted doc_id=${doc_id} name=${name}"
 
-    deadline=$((SECONDS + TIMEOUT))
+    [[ "$TIMEOUT" =~ ^[0-9]+$ ]] || fail "SMOKE_TIMEOUT must be a number of seconds"
+    deadline=$((SECONDS + 10#$TIMEOUT))
     status=""
     while (( SECONDS < deadline )); do
       body="$(curl -fsS ${AUTH[@]+"${AUTH[@]}"} "$API/v1/documents" || true)"

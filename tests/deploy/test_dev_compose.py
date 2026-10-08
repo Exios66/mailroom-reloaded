@@ -54,6 +54,8 @@ def test_dev_compose_services_and_profiles():
     svc = _dev()["services"]
     assert set(svc) == {
         "app",
+        "mock",
+        "data-init",
         "watcher",
         "otel-collector",
         "otel-targets",
@@ -140,7 +142,7 @@ def test_dev_observability_wiring_and_healthchecks():
     )
     collector = svc["otel-collector"]
     assert any(
-        v.startswith("./otel-collector.yaml:") for v in collector["volumes"]
+        v.startswith("./otel-collector.dev.yaml:") for v in collector["volumes"]
     )
     assert (
         collector["depends_on"]["otel-targets"]["condition"]
@@ -175,3 +177,27 @@ def test_dev_compose_config_valid(profiles):
     if res.returncode != 0 and "unknown shorthand flag" in res.stderr + res.stdout:
         pytest.skip("docker compose plugin not available")
     assert res.returncode == 0, res.stderr
+
+
+def test_dev_mock_and_state_ready_before_writers():
+    services = _dev()["services"]
+    assert "profiles" not in services["mock"]
+    assert services["mock"]["healthcheck"]
+    for name in ("app", "watcher"):
+        svc = services[name]
+        assert svc["environment"]["MOCK_BASE_URL"] == "${MOCK_BASE_URL:-http://mock:8000/v1}"
+        assert svc["build"]["args"]["APP_UID"] == "${APP_UID:-1000}"
+        assert svc["depends_on"]["mock"]["condition"] == "service_healthy"
+        assert svc["depends_on"]["data-init"]["condition"] == "service_completed_successfully"
+    assert services["data-init"]["volumes"] == ["../data:/data"]
+
+
+def test_dev_collector_isolated_from_docker_metrics():
+    collector = _dev()["services"]["otel-collector"]
+    assert all("docker.sock" not in v for v in collector["volumes"])
+    dev = yaml.safe_load((DEPLOY / "otel-collector.dev.yaml").read_text())
+    base = yaml.safe_load((DEPLOY / "otel-collector.yaml").read_text())
+    assert "docker_stats" not in dev["receivers"]
+    assert "docker_stats" not in dev["service"]["pipelines"]["metrics"]["receivers"]
+    assert "docker_stats" in base["receivers"]
+    assert "docker_stats" in base["service"]["pipelines"]["metrics"]["receivers"]

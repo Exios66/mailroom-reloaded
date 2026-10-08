@@ -20,6 +20,7 @@ name: mailroom-dev
 
 x-dev-app-env: &dev-app-env
   MAILROOM_BASE_DIR: /data
+  MOCK_BASE_URL: ${MOCK_BASE_URL:-http://mock:8000/v1}
   DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-mock}
   VLLM_BASE_URL: ${VLLM_BASE_URL:-http://vllm:8001/v1}
   LLAMAFILE_BASE_URL: ${LLAMAFILE_BASE_URL:-http://llamafile:8080/v1}
@@ -36,6 +37,8 @@ x-dev-app-env: &dev-app-env
 x-dev-build: &dev-build
   context: ..
   dockerfile: deploy/Dockerfile.dev
+  args:
+    APP_UID: ${APP_UID:-1000}
 
 # Live code + dev state, shared by `app` and `watcher`.
 x-dev-app-volumes: &dev-app-volumes
@@ -44,6 +47,27 @@ x-dev-app-volumes: &dev-app-volumes
   - ../tests:/app/tests:ro
 
 services:
+  # Repairs state from earlier root-run images before either writer starts.
+  data-init:
+    image: busybox:1.37.0
+    user: "0:0"
+    restart: "no"
+    command: ["sh", "-c", "chown -hR ${APP_UID:-1000} /data && chmod -R u+rwX /data"]
+    volumes: ["../data:/data"]
+
+  # Deterministic synthetic correspondence responses for local smoke runs.
+  mock:
+    build: *dev-build
+    image: mailroom-reloaded-dev:latest
+    restart: unless-stopped
+    command: ["uvicorn", "mock_openai:app", "--app-dir", "/mock", "--host", "0.0.0.0", "--port", "8000"]
+    volumes: ["./mock_openai.py:/mock/mock_openai.py:ro"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     build: *dev-build
     image: mailroom-reloaded-dev:latest
@@ -62,6 +86,10 @@ services:
     environment: *dev-app-env
     volumes: *dev-app-volumes
     depends_on:
+      data-init:
+        condition: service_completed_successfully
+      mock:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       otel-targets:
@@ -85,7 +113,13 @@ services:
     command: ["mailroom", "watch"]
     environment: *dev-app-env
     volumes: *dev-app-volumes
-    depends_on: [otel-collector]
+    depends_on:
+      data-init:
+        condition: service_completed_successfully
+      mock:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       disable: true
 
@@ -93,8 +127,6 @@ services:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
-    # docker_stats needs the Docker socket (read-only) and a matching group.
-    user: "0:0"
     environment:
       VLLM_METRICS_SCHEME: ${VLLM_METRICS_SCHEME:-http}
     ports:
@@ -102,8 +134,7 @@ services:
       - "127.0.0.1:4318:4318"
       - "127.0.0.1:8889:8889"
     volumes:
-      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./otel-collector.dev.yaml:/etc/otelcol/config.yaml:ro
       - otel_targets:/etc/otelcol/targets:ro
     depends_on:
       phoenix:

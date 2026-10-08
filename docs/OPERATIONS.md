@@ -133,7 +133,7 @@ Observability and engine ports bind to `127.0.0.1` only in the prod compose
 | Ingest error / unsupported / empty document | `ingest` calls `_fail_node` with `ingest_failed:<error>`; file moves to `failed/`, manifest `failed`, audit `node_failed` (`ingest/clerk.py:139-141`, `pipeline/flow.py:341-363`). |
 | Output hits the length cap | `LengthFinishReasonError`; the merge dagger mode re-samples once, otherwise `error_kind=LengthFinishReasonError` and the gate counts it as length-capped (`agents/specialists.py:185-222`, `pipeline/flow.py:415-417`). |
 | Malformed JSON | One repair re-ask, then `parse_error` and retry/human-review per the gate (`agents/specialists.py:200-221`). |
-| Node wall-clock/token budget exceeded | `_fail_node("deadline_exceeded"|"token_budget_exceeded")` → `failed/` + audit (`pipeline/guards.py:29-42`, `pipeline/flow.py:311-316`). Deadlines are cooperative: checked after the node returns. |
+| Node wall-clock/token budget exceeded | `_fail_node("deadline_exceeded"\|"token_budget_exceeded")` → `failed/` + audit (`pipeline/guards.py:29-42`, `pipeline/flow.py:311-316`). Deadlines are cooperative: checked after the node returns. |
 | BERT missing / error / oversize / flag off | Fail-open to a `FULL` sort (`ingest/bert.py:44-111`, `ingest/bert.py:138-149`). |
 | Transient endpoint errors (429, 5xx, timeout, cold 503) | `llm/retry.py` exponential backoff; Modal cold start backs off in minutes; transport retries do **not** consume the confidence retry budget (`llm/retry.py:1-9`, `llm/retry.py:58-106`). |
 | Upload too large / unsupported type | HTTP 413 / 400 from `POST /v1/documents` (`api/app.py:142-154`). |

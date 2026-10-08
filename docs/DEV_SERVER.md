@@ -18,9 +18,15 @@ scripts/dev.sh down        # or: make dev-down
 
 1. Verifies `docker` and the `docker compose` plugin are on `PATH`; exits 127
    with an install hint if either is missing.
-2. Changes to the repository root and, if a `.env` file exists, loads it (values
-   become both the shell environment and the `--env-file` for compose).
-3. Creates the host state directory `./data/` if absent.
+2. Changes to the repository root and, if a `.env` file exists, reads helper URL overrides, `SMOKE_TIMEOUT`, and `MAILROOM_API_TOKEN` as
+   dotenv data without executing shell code or expanding `$`. Existing exported
+   values take precedence. Compose still receives the complete `--env-file`.
+   Python 3 is required for this parser.
+3. Creates `./data/` if absent and passes the host UID as `APP_UID` to the
+   image build. The one-shot `data-init` service fixes ownership and owner write
+   permissions on existing state before app/watcher start as that non-root UID.
+   Run the helper as your normal host user. For direct Compose commands, export
+   `APP_UID=$(id -u)` first (the Compose fallback is UID 1000).
 4. Runs `docker compose -f deploy/docker-compose.dev.yml up -d --build`, which:
    - builds `mailroom-reloaded-dev:latest` from `deploy/Dockerfile.dev`
      (`uv sync --extra dev`, no ModernBERT stage, no `bert` extra);
@@ -28,6 +34,7 @@ scripts/dev.sh down        # or: make dev-down
      with `./src` bind-mounted at `/app/src`, so code edits reload live;
    - starts a **separate** `watcher` container (`mailroom watch`) that shares the
      same `./data` bind mount and drains `inbox/` into the pipeline;
+   - starts the `mock` OpenAI-compatible endpoint at `http://mock:8000/v1`;
    - starts `otel-collector`, `phoenix`, `prometheus`, and `grafana`;
    - runs the `otel-targets` one-shot that writes an empty Prometheus file-SD
      targets file (dev has no vLLM to scrape).
@@ -39,6 +46,8 @@ scripts/dev.sh down        # or: make dev-down
 | Service | Profile | Host port | Role |
 | --- | --- | --- | --- |
 | `app` | default | 127.0.0.1:8000 | FastAPI `/v1`, `/health`, `/ui` (`--reload`, src bind-mounted) |
+| `mock` | default | — | fixed synthetic correspondence responses for smoke runs |
+| `data-init` | default | — | one-shot ownership repair for `./data` |
 | `watcher` | default | — | split watcher `mailroom watch`, shares `./data` |
 | `otel-collector` | default | 4317/4318, 8889 | OTLP in; traces → Phoenix; metrics → Prometheus |
 | `phoenix` | default | 127.0.0.1:6006 | trace UI |
@@ -49,7 +58,12 @@ scripts/dev.sh down        # or: make dev-down
 All published ports are bound to loopback. `app` and `watcher` share
 `../data:/data`; `otel-targets` seeds the collector's `vllm.json` targets file,
 so the collector starts cleanly with no vLLM/DCGM present. No service requests
-a GPU.
+a GPU. The dev Collector uses `otel-collector.dev.yaml` without Docker socket
+access or Docker metrics; the base stack keeps Docker metrics.
+
+The mock always returns synthetic correspondence data, regardless of input;
+use a real provider for meaningful classification or extraction. Override
+`MOCK_BASE_URL` to use another OpenAI-compatible mock.
 
 State lives in the repo at `./data/` (bins, SQLite, manifests, `watcher.lock`)
 and in the named volumes `phoenix_data`, `prometheus_data`, `grafana_data`,
