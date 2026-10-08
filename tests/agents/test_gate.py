@@ -297,13 +297,24 @@ def test_train_gate_writes_json(tmp_path):
     assert set(metrics) == {"classify", "extract"}
 
 
-def test_fit_refuses_test_split(tmp_path):
-    gate_row = _gate_row("classify", 1)
-    gate_row["split"] = "test"
-    with pytest.raises(ValueError):
-        train_gate([gate_row], tmp_path / "route_gate.json")
-    with pytest.raises(ValueError):
-        fit_calibration([_cal_row(split="test")], tmp_path / "calibration.json")
+@pytest.mark.parametrize("fit,row_factory", [
+    (train_gate, lambda: _gate_row("classify", 1)),
+    (fit_calibration, _cal_row),
+])
+@pytest.mark.parametrize("split_fields", [
+    {}, {"split": None}, {"split": "test"}, {"split": "validation"},
+    {"split": ""}, {"split": "Train"}, {"split": "train "}, {"split": 0},
+])
+def test_fit_refuses_non_train_split(tmp_path, fit, row_factory, split_fields):
+    row = row_factory()
+    del row["split"]
+    row.update(split_fields)
+    out = tmp_path / "model.json"
+    with pytest.raises(ValueError) as exc:
+        fit([row_factory(), row], out)
+    assert f"split={split_fields.get('split')!r}" in str(exc.value)
+    assert "split='train' only" in str(exc.value)
+    assert not out.exists()
 
 
 def test_fit_calibration_reduces_ece(tmp_path):

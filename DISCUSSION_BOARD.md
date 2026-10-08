@@ -23,6 +23,13 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Board] Discussion board created — orchestrator
+- **Status:** done
+- **Files:** `DISCUSSION_BOARD.md`
+- **Commit:** `545922bc5ae6cb7eb960d800b97e423b750ef686` docs: discussion board for agent work log and commit SHAs
+
+---
+
 ### [Tasks 11, 12, 14] Sorter, specialists, CrewAI judge/arbiter/boss — implementer subagents
 - **Status:** done
 - **Files:**
@@ -55,10 +62,3 @@ this is a ledger, not a governance board.
 - **CodeRabbit:** 3 review comments fixed in `1f44201` (compose `:?` token,
   `field_is_ambiguous` type bands, bin filename-collision guard). Docstring PR #3
   (`921e33f`) was orphaned by the PR #4 rebuild — re-integration pending.
-
----
-
-### [Board] Discussion board created — orchestrator
-- **Status:** done
-- **Files:** `DISCUSSION_BOARD.md`
-- **Commit:** <pending>

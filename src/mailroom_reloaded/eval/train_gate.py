@@ -1,8 +1,8 @@
 """Fit the route gate's calibration and learned logistic models (Task 13).
 
-Fitting is restricted to ``split="train"`` rows; any ``split="test"`` row is a
-leakage error and raises ``ValueError`` (spec section 6, "No leakage"). KPIs are
-reported separately on the ``test`` split only.
+Fitting is restricted to ``split="train"`` rows; missing or other split values
+raise ``ValueError`` to prevent leakage (spec section 6, "No leakage"). KPIs
+are reported separately on the ``test`` split only.
 
 Row schemas (plain dicts):
 
@@ -46,9 +46,10 @@ _GOLDEN = (math.sqrt(5.0) - 1.0) / 2.0
 
 def _check_train(rows: list[dict]) -> None:
     for row in rows:
-        if row.get("split") == "test":
+        split = row.get("split")
+        if split != "train":
             raise ValueError(
-                "refusing to fit on split='test' rows; the gate and calibration "
+                f"refusing to fit on split={split!r} rows; the gate and calibration "
                 "are fitted on split='train' only"
             )
 
