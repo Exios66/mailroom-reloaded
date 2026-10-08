@@ -2,6 +2,8 @@ import hashlib
 import json
 import threading
 
+import pytest
+
 from mailroom_reloaded.schemas.manifest import Manifest, next_node
 from mailroom_reloaded.storage.bins import (
     Bins,
@@ -57,10 +59,29 @@ def test_move_and_bins(tmp_path):
     f = bins.inbox / "a.txt"
     f.write_text("x")
     claimed = bins.claim(f, "w1")
-    assert claimed == bins.processing("w1") / "a.txt"
+    assert claimed.parent == bins.processing("w1")
+    assert claimed.name.endswith("_a.txt")
     dest = bins.move(claimed, "review")
-    assert dest == bins.review / "a.txt" and dest.exists()
+    assert dest.parent == bins.review and dest.read_text() == "x"
+    assert not claimed.exists()
     assert bins.claim(f, "w2") is None
+
+
+@pytest.mark.parametrize("operation", ["claim", "move"])
+@pytest.mark.parametrize("contents", [("first", "second"), ("same", "same")])
+def test_same_filename_preserves_both_documents(tmp_path, operation, contents):
+    bins = Bins(tmp_path)
+    source = bins.inbox / "document.txt"
+    destinations = []
+    for content in contents:
+        source.write_text(content)
+        dest = (bins.claim(source, "worker") if operation == "claim"
+                else bins.move(source, "review"))
+        destinations.append(dest)
+        assert not source.exists()
+
+    assert destinations[0] != destinations[1]
+    assert tuple(dest.read_text() for dest in destinations) == contents
 
 
 def test_resume_point():

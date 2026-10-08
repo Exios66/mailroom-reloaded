@@ -60,7 +60,7 @@ class Bins:
     def claim(self, path: Path, worker_id: str) -> Path | None:
         """Atomically move ``path`` into processing/<worker_id>/; None if another worker won."""
         path = Path(path)
-        dest = self.processing(worker_id) / path.name
+        dest = self.processing(worker_id) / f"{uuid.uuid4().hex}_{path.name}"
         try:
             os.rename(path, dest)
         except FileNotFoundError:
@@ -71,7 +71,7 @@ class Bins:
         if bin_name not in _BIN_NAMES:
             raise ValueError(f"unknown bin: {bin_name}")
         path = Path(path)
-        dest = getattr(self, bin_name) / path.name
+        dest = getattr(self, bin_name) / f"{uuid.uuid4().hex}_{path.name}"
         os.replace(path, dest)
         return dest
 

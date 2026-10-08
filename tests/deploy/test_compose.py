@@ -34,11 +34,27 @@ def test_compose_config_valid(profiles):
         text=True,
         cwd=ROOT,
         check=False,
-        env={**os.environ, "GRAFANA_ADMIN_PASSWORD": "test"},
+        env={**os.environ, "GRAFANA_ADMIN_PASSWORD": "test", "MAILROOM_API_TOKEN": "test"},
     )
     if res.returncode != 0 and "unknown shorthand flag" in res.stderr + res.stdout:
         pytest.skip("docker compose plugin not available")
     assert res.returncode == 0, res.stderr
+
+
+@pytest.mark.parametrize("token", [None, ""])
+def test_compose_rejects_missing_api_token(token):
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI not available")
+    env = {**os.environ, "GRAFANA_ADMIN_PASSWORD": "test"}
+    env.pop("MAILROOM_API_TOKEN", None)
+    if token is not None:
+        env["MAILROOM_API_TOKEN"] = token
+    res = subprocess.run(
+        ["docker", "compose", "--env-file", os.devnull, "-f", str(COMPOSE), "config", "-q"],
+        capture_output=True, text=True, cwd=ROOT, check=False, env=env,
+    )
+    assert res.returncode != 0
+    assert "Set MAILROOM_API_TOKEN to a non-empty API token" in res.stderr
 
 
 def test_compose_services_profiles_and_volumes():

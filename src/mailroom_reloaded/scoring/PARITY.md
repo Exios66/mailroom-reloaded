@@ -13,7 +13,7 @@ Modules are copied from `llm_dojo_scoring/`. Sha256 columns: upstream file, vend
 | intents.py | 8f762c02785b7bfecf3c73864c756c7f64a442edcfd954c50d556a2c38d95411 | 8f762c02785b7bfecf3c73864c756c7f64a442edcfd954c50d556a2c38d95411 | verbatim |
 | equivalences.py | 3a8dabc75fce5eba791feb836b8143d813405d7c218c88949b03f85bbd5a5ad3 | 3a8dabc75fce5eba791feb836b8143d813405d7c218c88949b03f85bbd5a5ad3 | verbatim |
 | corpus.py | b5ec80a51e63a33db6e1dd9cb3e543ea92ce6d2b42589cecb7d704c427474479 | b5ec80a51e63a33db6e1dd9cb3e543ea92ce6d2b42589cecb7d704c427474479 | verbatim |
-| field_scoring.py | 439998e1f38254be42acb64066b484122b6a266f9ed152e656534eb89135e426 | 2e54b1a7c48372f0ec5c930a95fbc55ea219883734b6fa5f70abf4e5f2e9cbbd | lazy `from .mailroom import EXTRACT_CLASS_ALIASES` replaced by module-level empty dict (upstream value is `{}`) |
+| field_scoring.py | 439998e1f38254be42acb64066b484122b6a266f9ed152e656534eb89135e426 | dcc5a4b4794227e2a8be0781d4e15a1087683b29a6b01992139f432df3562a9a | lazy `from .mailroom import EXTRACT_CLASS_ALIASES` replaced by module-level empty dict (upstream value is `{}`); ambiguity uses `field_is_ambiguous` with the original field type before containment override |
 | extraction_metrics.py | 3a7287881cc79cf5efdedc0deacf4d65c2de548d57e9416aa311efef80e8288e | 3a7287881cc79cf5efdedc0deacf4d65c2de548d57e9416aa311efef80e8288e | verbatim |
 | classification.py | afa755de5abf0c644f6e5d89f10bb483204dea89470c0f4c81ec6e400b46bbf6 | 1f1ef8914313a9f324b686ca2bb7d5bba1be07a02951e2da2785716e15e7e4de | `from llm_dojo_scoring.config` -> `from .config` |
 | maud.py | 80df2b212da16820c5aa9b1315a6a7c3f3572906b33fb1c9381095220d05e3dd | 80df2b212da16820c5aa9b1315a6a7c3f3572906b33fb1c9381095220d05e3dd | verbatim |

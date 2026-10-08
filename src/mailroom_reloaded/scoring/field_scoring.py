@@ -1269,7 +1269,6 @@ def score_extraction(
     """
     predicted = predicted or {}
     expected = expected or {}
-    band_low, band_high = get_ambiguous_band()
     partial_gt_fields = get_partial_gt_fields()
     containment_fields = get_containment_fields()
     needs_embedding = any(
@@ -1292,6 +1291,7 @@ def score_extraction(
         if is_empty_value(exp_value):
             continue
         field_type = field_types.get(key) or _heuristic_field_type(key, exp_value)
+        original_field_type = field_type
         pred_value = predicted.get(key)
         if pred_value is not None:
             pred_value = parse_json_container(pred_value)
@@ -1321,7 +1321,7 @@ def score_extraction(
                 score = result
         score = round(score, 4)
         field_scores[key] = score
-        if band_low <= score <= band_high:
+        if field_is_ambiguous(original_field_type, score):
             ambiguous.append(key)
 
     if verification_enabled() and doc_text:
