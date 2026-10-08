@@ -48,9 +48,73 @@ def test_overlay_example_validates():
 
 def test_invalid_scenario_rejected():
     bad = yml("scenario_A1.yaml")
-    bad["id"] = "not a valid id"
-    with pytest.raises(jsonschema.ValidationError):
+    bad["name"] = "not a valid name"
+    with pytest.raises(jsonschema.ValidationError) as exc:
         validator("scenario.v2.json").validate(bad)
+    assert list(exc.value.path) == ["name"]
+    assert exc.value.validator == "pattern"
+
+
+def test_gen_spec_requires_forbidden():
+    bad = yml("gen_spec.yaml")
+    del bad["constraints"]["forbidden"]
+    with pytest.raises(jsonschema.ValidationError):
+        validator("gen_spec.v1.json").validate(bad)
+
+
+@pytest.mark.parametrize("missing", [
+    "real_brands", "real_urls", "working_links", "phone_numbers_outside_555_01xx",
+])
+def test_gen_spec_requires_each_forbidden_value(missing):
+    bad = yml("gen_spec.yaml")
+    bad["constraints"]["forbidden"].remove(missing)
+    with pytest.raises(jsonschema.ValidationError):
+        validator("gen_spec.v1.json").validate(bad)
+
+
+@pytest.mark.parametrize("extra,valid", [("other_restriction", True), (1, False)])
+def test_gen_spec_forbidden_extra_values(extra, valid):
+    spec = yml("gen_spec.yaml")
+    spec["constraints"]["forbidden"].reverse()
+    spec["constraints"]["forbidden"].append(extra)
+    assert validator("gen_spec.v1.json").is_valid(spec) is valid
+
+
+@pytest.mark.parametrize("delay,valid", [(-1, False), (0, True), (0.5, True), ("0", False)])
+def test_persona_escalation_step_delay(delay, valid):
+    persona = yml("persona_behavior.yaml")
+    persona["escalation"]["steps"][0]["after_sim_min"] = delay
+    assert validator("persona_behavior.v1.json").is_valid(persona) is valid
+
+
+@pytest.mark.parametrize("path", [
+    (), ("attachment_habits",), ("escalation",), ("escalation", "steps", 0),
+])
+def test_persona_rejects_unknown_fields(path):
+    bad = yml("persona_behavior.yaml")
+    obj = bad
+    for key in path:
+        obj = obj[key]
+    obj["unknown_field"] = True
+    with pytest.raises(jsonschema.ValidationError) as exc:
+        validator("persona_behavior.v1.json").validate(bad)
+    assert list(exc.value.path) == list(path)
+    assert exc.value.validator == "additionalProperties"
+
+
+def test_scenario_relation_kinds_match_shared_enum():
+    kinds = load("relation_kinds.v1.json")["enum"]
+    scenario_kinds = load("scenario.v2.json")["properties"]["expect"]["properties"][
+        "relations"
+    ]["items"]["properties"]["kind"]["enum"]
+    assert set(scenario_kinds) == set(kinds)
+    scenario = yml("scenario_A1.yaml")
+    for kind in kinds:
+        scenario["expect"]["relations"] = [{"a": "doc_a", "b": "doc_b", "kind": kind}]
+        validator("scenario.v2.json").validate(scenario)
+    scenario["expect"]["relations"][0]["kind"] = "unknown"
+    with pytest.raises(jsonschema.ValidationError):
+        validator("scenario.v2.json").validate(scenario)
 
 
 def test_enums():
