@@ -9,6 +9,7 @@ from mailroom_reloaded.agents.gate import (
     ece,
     load_gate,
 )
+from mailroom_reloaded.eval.train_gate import fit_calibration, train_gate
 from mailroom_reloaded.settings import load_taxonomy
 
 
@@ -237,3 +238,81 @@ def test_ece_edges():
     assert ece([1.0], [0]) == pytest.approx(1.0)  # conf 1.0 lands in last bin
     # 0.1 sits on a bin edge -> bin 1 (equal-width, lower-inclusive)
     assert ece([0.1], [1]) == pytest.approx(0.9)
+
+
+def _gate_row(stage, label, doc_type="correspondence", confidence=0.8, **kw):
+    row = {
+        "split": "train",
+        "stage": stage,
+        "doc_type": doc_type,
+        "confidence": confidence,
+        "attempts": 0,
+        "bert_confidence": 0.9,
+        "bert_margin": 0.5,
+        "bert_window_agreement": 1.0,
+        "schema_valid": True,
+        "field_coverage": 1.0,
+        "length_capped": False,
+    }
+    row["retry_expected" if stage == "classify" else "review_expected"] = int(label)
+    row.update(kw)
+    return row
+
+
+def _cal_row(
+    confidence=0.95,
+    correct=0,
+    split="train",
+    provider="mock",
+    model="qwen/qwen3.7-flash",
+    doc_type="correspondence",
+):
+    return {
+        "split": split,
+        "provider": provider,
+        "model": model,
+        "doc_type": doc_type,
+        "confidence": confidence,
+        "correct": int(correct),
+    }
+
+
+def test_train_gate_writes_json(tmp_path):
+    rows = []
+    for i in range(40):
+        stage = "classify" if i % 2 == 0 else "extract"
+        label = 1 if i % 4 < 2 else 0
+        rows.append(
+            _gate_row(stage, label, confidence=0.6 + 0.01 * i, attempts=i % 3)
+        )
+    out = tmp_path / "route_gate.json"
+    metrics = train_gate(rows, out)
+    data = json.loads(out.read_text("utf-8"))
+    assert set(data) == {"classify", "extract"}
+    for stage, model in data.items():
+        assert set(model) == {"features", "coef", "intercept", "threshold"}
+        assert len(model["features"]) == len(model["coef"])
+        assert isinstance(model["intercept"], float)
+        assert isinstance(model["threshold"], float)
+    assert set(metrics) == {"classify", "extract"}
+
+
+def test_fit_refuses_test_split(tmp_path):
+    gate_row = _gate_row("classify", 1)
+    gate_row["split"] = "test"
+    with pytest.raises(ValueError):
+        train_gate([gate_row], tmp_path / "route_gate.json")
+    with pytest.raises(ValueError):
+        fit_calibration([_cal_row(split="test")], tmp_path / "calibration.json")
+
+
+def test_fit_calibration_reduces_ece(tmp_path):
+    rows = [
+        _cal_row(confidence=0.80 + 0.0019 * i, correct=i % 2 == 0)
+        for i in range(100)
+    ]
+    out = tmp_path / "calibration.json"
+    result = fit_calibration(rows, out)
+    assert result["ece_after"] < result["ece_before"]
+    data = json.loads(out.read_text("utf-8"))
+    assert "correspondence" in data["mock"]["qwen/qwen3.7-flash"]
