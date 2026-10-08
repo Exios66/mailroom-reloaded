@@ -18,6 +18,9 @@ class Manifest(BaseModel):
     status: Literal["processing", "parked", "failed", "archived"] = "processing"
     completed_nodes: list[str] = Field(default_factory=list)
     state: dict[str, Any] = Field(default_factory=dict)
+    #: CatalogRecord (as a dict) whose upsert failed after archival; retried at
+    #: watcher startup and cleared on success. ``None`` when nothing is pending.
+    catalog_pending: dict[str, Any] | None = None
     updated_at: datetime = Field(default_factory=_now)
 
 

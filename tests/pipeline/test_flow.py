@@ -433,3 +433,79 @@ async def test_kickoff_async_runs_document(env, mock_provider, monkeypatch):
     assert state.status == "archived"
     assert state.route_trail == FAST_TRAIL
     assert list((bins.archive / "correspondence").glob("*.txt"))
+
+
+def test_gate_retry_after_crash_resume_reexecutes_extract(env, mock_provider, monkeypatch):
+    """Finding 10: a gate-driven retry of an already-completed node must re-run it."""
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    calls = {"n": 0}
+
+    def extract(text, doc_type, doc_subclass, **kwargs):
+        calls["n"] += 1
+        return _fake_extract(confidence=0.1 if calls["n"] == 1 else 1.0)(
+            text, doc_type, doc_subclass, **kwargs
+        )
+
+    monkeypatch.setattr(flow_mod, "_extract", extract)
+    real_route = flow_mod.MailroomFlow._extract_route
+    crashed = {"done": False}
+
+    def crash_once(self):
+        if not crashed["done"]:
+            crashed["done"] = True
+            raise RuntimeError("crash after first extract")
+        return real_route(self)
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "_extract_route", crash_once)
+    bins, path = _write_inbox(env)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    processing = list(bins.processing("w1").glob("*.txt"))
+    assert calls["n"] == 1
+
+    state = flow_mod.run_document(processing[0], worker_id="w1")
+
+    assert calls["n"] == 2  # the gate-requested retry really re-executed extract
+    assert state.extract_attempts == 1
+    assert state.status == "archived"
+
+
+def test_gate_retry_after_crash_resume_reexecutes_sort(env, mock_provider, monkeypatch):
+    """Finding 10: resume replays the gate; its retry must run sort, not burn an attempt."""
+    from mailroom_reloaded.agents.sorter import SortResult
+
+    _patch_handoff(monkeypatch)
+    calls = {"n": 0}
+
+    def sort(text, handoff, attempt=0, **kwargs):
+        calls["n"] += 1
+        conf = 0.1 if calls["n"] == 1 else 0.99
+        return SortResult(
+            "correspondence", "email", conf, 0.9, False, handoff.mode,
+            "self_report", False, None,
+            Usage(prompt_tokens=1, completion_tokens=1, calls=1),
+        )
+
+    monkeypatch.setattr(flow_mod, "_sort", sort)
+    monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
+    real_route = flow_mod.MailroomFlow._classify_route
+    crashed = {"done": False}
+
+    def crash_once(self):
+        if not crashed["done"]:
+            crashed["done"] = True
+            raise RuntimeError("crash after first sort")
+        return real_route(self)
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "_classify_route", crash_once)
+    bins, path = _write_inbox(env)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    processing = list(bins.processing("w1").glob("*.txt"))
+
+    state = flow_mod.run_document(processing[0], worker_id="w1")
+
+    assert calls["n"] == 2
+    assert state.classify_attempts == 1  # one retry, not a skipped one plus a real one
+    assert state.status == "archived"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 import pytest
 from fakes.openai_server import FakeOpenAI
@@ -19,7 +20,7 @@ from mailroom_reloaded.ingest.bert import BertVerdict, Handoff, SortMode
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.review import resolve_review
-from mailroom_reloaded.storage import audit_log
+from mailroom_reloaded.storage import audit_log, catalog
 from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
 from mailroom_reloaded.watcher import Watcher, _acquire_watcher_lock, _release_lock
 
@@ -336,3 +337,98 @@ def test_review_reject_moves_failed(env, mock_provider, monkeypatch):
     entries = audit_log.entries(doc_id)
     assert any(e.event == "review_resolved" for e in entries)
     assert audit_log.verify_chain(entries).ok
+
+
+# ---- findings 6 and 7: reconcile at startup ----
+
+
+def _run_and_get(env, mock_provider, monkeypatch):
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
+    return _write_inbox(env)
+
+
+def test_crash_between_archive_and_snapshot_is_reconciled(
+    env, mock_provider, monkeypatch
+):
+    """Finding 6: archived audit entry + archived file but manifest still processing."""
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+
+    def boom(self, node_name, elapsed):
+        if node_name == "report_catalog_archive":
+            raise RuntimeError("crash after archive_document")
+        return real_record(self, node_name, elapsed)
+
+    real_record = flow_mod.MailroomFlow._record_node
+    monkeypatch.setattr(flow_mod.MailroomFlow, "_record_node", boom)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    monkeypatch.setattr(flow_mod.MailroomFlow, "_record_node", real_record)
+
+    archived = list((bins.archive / "correspondence").glob("*.txt"))
+    assert len(archived) == 1
+    doc_id = next(bins.manifests.glob("*.json")).stem
+    stale = load_manifest(bins, doc_id)
+    assert stale.status == "processing"
+    assert not Path(stale.state["path"]).exists()
+
+    assert Watcher(bins, "w2").resume_processing() == 0
+
+    manifest = load_manifest(bins, doc_id)
+    assert manifest.status == "archived"
+    assert manifest.state["status"] == "archived"
+    assert manifest.state["path"] == str(archived[0])
+    rec = catalog.get(doc_id)
+    assert rec is not None and rec.archive_path == str(archived[0])
+    assert audit_log.verify_chain(audit_log.entries(doc_id)).ok
+
+
+def test_missing_source_without_archive_is_left_and_warned(env, caplog):
+    """Finding 6: no archived audit entry -> leave the manifest alone."""
+    from mailroom_reloaded.schemas.manifest import Manifest
+    from mailroom_reloaded.storage.bins import save_manifest
+
+    bins = Bins(env)
+    save_manifest(
+        bins,
+        Manifest(
+            doc_id="gone",
+            filename="x.txt",
+            content_sha256="h",
+            state={"path": str(env / "nope.txt")},
+        ),
+    )
+    Watcher(bins, "w").resume_processing()
+    assert load_manifest(bins, "gone").status == "processing"
+    assert catalog.get("gone") is None
+
+
+def test_catalog_failure_sets_pending_and_startup_reconciles(
+    env, mock_provider, monkeypatch
+):
+    """Finding 7: upsert raises once -> marker -> startup retry -> record present."""
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    real_upsert = catalog.upsert
+    calls = {"n": 0}
+
+    def flaky(record, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("catalog down")
+        return real_upsert(record, **kw)
+
+    monkeypatch.setattr(flow_mod.catalog, "upsert", flaky)
+    state = flow_mod.run_document(path, worker_id="w1")
+    doc_id = state.doc_id
+    assert state.status == "archived"
+    assert catalog.get(doc_id) is None
+    manifest = load_manifest(bins, doc_id)
+    assert manifest.status == "archived"
+    assert manifest.catalog_pending is not None
+
+    Watcher(bins, "w2").resume_processing()
+
+    rec = catalog.get(doc_id)
+    assert rec is not None and rec.status == "archived"
+    assert load_manifest(bins, doc_id).catalog_pending is None

@@ -145,10 +145,21 @@ class Watcher:
             except Exception:  # noqa: BLE001 - a torn manifest must not stop startup
                 logger.warning("manifest_unreadable", path=str(manifest_path))
                 continue
+            if manifest.status == "archived" and manifest.catalog_pending:
+                _flow.reconcile_catalog(self.bins, manifest)
+                continue
             if manifest.status != "processing":
                 continue
             path = self._manifest_file(manifest)
             if path is None:
+                logger.warning("resume_source_missing", doc_id=manifest.doc_id)
+                try:
+                    reconciled = _flow.reconcile_archived(self.bins, manifest)
+                except Exception:
+                    logger.exception("reconcile_failed", doc_id=manifest.doc_id)
+                    reconciled = False
+                if reconciled:
+                    logger.info("reconciled_archived_manifest", doc_id=manifest.doc_id)
                 continue
             try:
                 _flow.run_document(path, worker_id=self.worker_id)

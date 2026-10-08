@@ -64,7 +64,13 @@ from mailroom_reloaded.storage.bins import (
 )
 from mailroom_reloaded.tools import ToolContext
 
-__all__ = ["NODE_ORDER", "MailroomFlow", "run_document"]
+__all__ = [
+    "NODE_ORDER",
+    "MailroomFlow",
+    "reconcile_archived",
+    "reconcile_catalog",
+    "run_document",
+]
 
 logger = structlog.get_logger(__name__)
 
@@ -240,20 +246,20 @@ class MailroomFlow(Flow[MailroomState]):
         report["llm_calls"] = self._llm_calls
         state.report = report
         result = archive_document(self._bins, self._manifest, state)
+        record = CatalogRecord(
+            doc_id=state.doc_id,
+            filename=self._manifest.filename,
+            doc_type=self._effective_doc_type(),
+            doc_subclass=self._effective_subclass(),
+            status="archived",
+            archive_path=str(result.path),
+            file_sha256=result.file_sha256,
+        )
         try:
-            catalog.upsert(
-                CatalogRecord(
-                    doc_id=state.doc_id,
-                    filename=self._manifest.filename,
-                    doc_type=self._effective_doc_type(),
-                    doc_subclass=self._effective_subclass(),
-                    status="archived",
-                    archive_path=str(result.path),
-                    file_sha256=result.file_sha256,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001 - catalog is best-effort durability
+            catalog.upsert(record)
+        except Exception as exc:  # noqa: BLE001 - recorded for startup reconcile
             logger.warning("catalog_upsert_failed", doc_id=state.doc_id, error=str(exc))
+            self._manifest.catalog_pending = record.model_dump(mode="json")
         state.status = "archived"
         self._manifest.status = "archived"
 
@@ -587,10 +593,12 @@ class MailroomFlow(Flow[MailroomState]):
                     node = "extract"
                 elif route == "retry_sort":
                     state.classify_attempts += 1
+                    self._resume_done.discard("sort")
                     node = "sort"
                 elif route == "re_sort":
                     state.resorted = True
                     self._reset_handoff_full()
+                    self._resume_done.discard("sort")
                     node = "sort"
                 else:
                     return self._park("classify_human_review")
@@ -601,6 +609,7 @@ class MailroomFlow(Flow[MailroomState]):
                     node = "report_catalog_archive"
                 elif route == "retry_extract":
                     state.extract_attempts += 1
+                    self._resume_done.discard("extract")
                     node = "extract"
                 elif route == "do_verify":
                     state.route_trail.append("verify")
@@ -611,6 +620,7 @@ class MailroomFlow(Flow[MailroomState]):
                     arbiter_route = self._arbiter_route()
                     if arbiter_route == "retry_extract":
                         state.extract_attempts += 1
+                        self._resume_done.discard("extract")
                         node = "extract"
                     elif arbiter_route == "do_boss":
                         node = "boss"
@@ -628,6 +638,7 @@ class MailroomFlow(Flow[MailroomState]):
                     return state
                 action = state.boss.action if state.boss is not None else "accept"
                 if action == "reassign_class":
+                    self._resume_done.discard("extract")
                     node = "extract"
                 elif action == "human_review":
                     return self._park("boss_human_review")
@@ -681,6 +692,69 @@ class MailroomFlow(Flow[MailroomState]):
 def _opt(value: float | None) -> float:
     """``value`` as a float, or 0.0 when ``None`` (gate feature default)."""
     return float(value) if value is not None else 0.0
+
+
+def reconcile_catalog(bins: Bins, manifest: Manifest) -> bool:
+    """Retry a ``catalog_pending`` upsert; clear the marker on success."""
+    if not manifest.catalog_pending:
+        return False
+    try:
+        catalog.upsert(CatalogRecord.model_validate(manifest.catalog_pending))
+    except Exception as exc:  # noqa: BLE001 - stays pending for the next startup
+        logger.warning(
+            "catalog_reconcile_failed", doc_id=manifest.doc_id, error=str(exc)
+        )
+        return False
+    manifest.catalog_pending = None
+    save_manifest(bins, manifest)
+    logger.info("catalog_reconciled", doc_id=manifest.doc_id)
+    return True
+
+
+def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
+    """Finish a document that was archived but crashed before its manifest snapshot.
+
+    ``archive_document`` moves the file and appends the ``archived`` audit entry
+    before ``_record_node`` checkpoints the manifest. When the audit log holds that
+    entry and the archived file exists, mark manifest + state ``archived`` and
+    upsert the catalog (a failed upsert is left pending). Returns whether the
+    manifest was reconciled.
+    """
+    archived = [
+        e for e in audit_log.entries(manifest.doc_id) if e.event == "archived"
+    ]
+    if not archived:
+        return False
+    payload = archived[-1].payload
+    archive_path = payload.get("path")
+    if not archive_path or not Path(archive_path).is_file():
+        return False
+    state = dict(manifest.state or {})
+    state["status"] = "archived"
+    state["path"] = str(archive_path)
+    manifest.state = state
+    manifest.status = "archived"
+    if "report_catalog_archive" not in manifest.completed_nodes:
+        manifest.completed_nodes.append("report_catalog_archive")
+    sort = state.get("sort") or {}
+    manifest.catalog_pending = CatalogRecord(
+        doc_id=manifest.doc_id,
+        filename=manifest.filename,
+        doc_type=str(payload.get("doc_type") or sort.get("doc_type") or "unknown"),
+        doc_subclass=sort.get("doc_subclass"),
+        status="archived",
+        archive_path=str(archive_path),
+        file_sha256=str(payload.get("file_sha256", "")),
+    ).model_dump(mode="json")
+    save_manifest(bins, manifest)
+    audit_log.append(
+        manifest.doc_id,
+        "report_catalog_archive",
+        "completed",
+        {"elapsed_s": 0.0, "reconciled": True},
+    )
+    reconcile_catalog(bins, manifest)
+    return True
 
 
 def run_document(
