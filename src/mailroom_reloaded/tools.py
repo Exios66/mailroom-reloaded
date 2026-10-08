@@ -76,6 +76,7 @@ class ToolDef:
             )
 
         def call(**kwargs: Any) -> str:
+            """Validate arguments and call the bound tool, returning errors as strings."""
             try:
                 params = self.params_model.model_validate(kwargs)
             except ValidationError as exc:
@@ -93,10 +94,12 @@ class ToolDef:
 
 
 def _dumps(obj: Any) -> str:
+    """Serialize as JSON, preserving Unicode and stringifying unsupported values."""
     return json.dumps(obj, ensure_ascii=False, default=str)
 
 
 def _get_taxonomy(ctx: ToolContext) -> str:
+    """Return JSON describing document classes and global confidence thresholds."""
     tax = load_taxonomy()
     return _dumps(
         {
@@ -112,6 +115,7 @@ def _get_taxonomy(ctx: ToolContext) -> str:
 
 
 def _check_doc_type(doc_type: str) -> str | None:
+    """Return an error string for an unknown taxonomy class, otherwise ``None``."""
     known = list(load_taxonomy().classes)
     if doc_type not in known:
         return f"error: unknown doc_type {doc_type!r}; expected one of {known}"
@@ -119,12 +123,17 @@ def _check_doc_type(doc_type: str) -> str | None:
 
 
 def _list_subclasses(ctx: ToolContext, doc_type: str) -> str:
+    """Return subclass keys as JSON, or an error string for an unknown class."""
     return _check_doc_type(doc_type) or _dumps(
         {"doc_type": doc_type, "subclasses": subclass_vocab(doc_type)}
     )
 
 
 def _get_extraction_schema(ctx: ToolContext, doc_type: str) -> str:
+    """Return field names and JSON schema, or an error for an unknown class.
+
+    A taxonomy class missing from the schema registry raises ``KeyError``.
+    """
     if (err := _check_doc_type(doc_type)) or (model := _get_schema(doc_type)) is None:
         return err or f"error: no schema for {doc_type!r}"
     return _dumps(
@@ -137,6 +146,7 @@ def _get_extraction_schema(ctx: ToolContext, doc_type: str) -> str:
 
 
 def _get_field_types(ctx: ToolContext, doc_type: str) -> str:
+    """Return scoring field types as JSON, or an error for an unknown class."""
     return _check_doc_type(doc_type) or _dumps(
         {
             "doc_type": doc_type,
@@ -146,6 +156,12 @@ def _get_field_types(ctx: ToolContext, doc_type: str) -> str:
 
 
 def _search_source(ctx: ToolContext, query: str) -> str:
+    """Return JSON with up to three non-overlapping source snippets of at most 400 characters.
+
+    Search is case-insensitive and trims the query. A blank query returns an
+    error string; no matches yield an empty snippet list. Queries longer than
+    400 characters can be truncated in the returned snippets.
+    """
     text, q = ctx.doc_text, query.strip()
     if not q:
         return "error: empty query"
@@ -165,6 +181,10 @@ def _search_source(ctx: ToolContext, query: str) -> str:
 
 
 def _get_ground_truth(ctx: ToolContext) -> str:
+    """Return the callback result for ``ctx.doc_id`` as JSON.
+
+    A missing callback returns an error string; callback exceptions propagate.
+    """
     if ctx.ground_truth is None:
         return "error: ground truth unavailable"
     return _dumps(ctx.ground_truth(ctx.doc_id))
@@ -228,6 +248,7 @@ _ROLE_TOOLS: dict[str, tuple[str, ...]] = {
 
 
 def _role_names(role: str) -> tuple[str, ...]:
+    """Return the tool names allowed for a role, or an empty tuple if unknown."""
     if role in _ROLE_TOOLS:
         return _ROLE_TOOLS[role]
     if role in {c.specialist for c in load_taxonomy().classes.values()}:
@@ -274,6 +295,7 @@ def crewai_tool(td: ToolDef, *, context: ToolContext):
         _bound: Any = PrivateAttr(default=None)
 
         def _run(self, **kwargs: Any) -> str:
+            """Return the bound tool result for the supplied arguments."""
             return self._bound.fn(**kwargs)
 
     tool = MailroomTool(

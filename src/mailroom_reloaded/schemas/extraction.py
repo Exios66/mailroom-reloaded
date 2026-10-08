@@ -180,6 +180,7 @@ EXTRACTION_SCHEMAS: dict[str, type[BaseModel]] = {
 
 
 def get_extraction_schema(doc_type: str) -> type[BaseModel]:
+    """Return the extraction model for ``doc_type``; raise ``KeyError`` if unknown."""
     try:
         return EXTRACTION_SCHEMAS[doc_type]
     except KeyError:
@@ -189,6 +190,7 @@ def get_extraction_schema(doc_type: str) -> type[BaseModel]:
 # --------------------------------------------------------------------------- strict schema
 
 def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
+    """Return a schema allowing null, preserving one that already allows it."""
     if "anyOf" in prop:
         if any(b.get("type") == "null" for b in prop["anyOf"]):
             return prop
@@ -208,6 +210,10 @@ def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
 
 
 def _strictify(node: Any) -> None:
+    """Make object properties required and nullable in place, recursively.
+
+    Remove defaults and forbid additional properties on every object schema.
+    """
     if isinstance(node, dict):
         node.pop("default", None)
         if node.get("type") == "object" or "properties" in node:
@@ -224,6 +230,11 @@ def _strictify(node: Any) -> None:
 
 
 def response_format(doc_type: str) -> dict[str, Any]:
+    """Return an OpenAI strict JSON response format for the extraction class.
+
+    All object properties are required and nullable, with extra properties
+    forbidden and defaults removed. Unknown classes raise ``KeyError``.
+    """
     model = get_extraction_schema(doc_type)
     schema = copy.deepcopy(model.model_json_schema())
     _strictify(schema)
@@ -247,6 +258,10 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _parse_object_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Return a parsed object and format label, or ``(None, None)`` on failure.
+
+    Accept JSON or Python literals, including objects wrapped in other text.
+    """
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
@@ -272,7 +287,12 @@ def _parse_object_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def coerce_predicted_payload(predicted: Any) -> tuple[dict[str, Any] | None, str | None]:
-    """Turn a prediction into a dict, or return (None, reason)."""
+    """Return a prediction dict and optional parse-error reason.
+
+    Accept dicts, UTF-8 bytes, JSON, and Python object literals, including
+    wrapped text. Unrecoverable input returns ``(None, reason)``; an existing
+    ``_parse_error`` flag remains a reason even if ``_raw`` is recovered.
+    """
     if predicted is None:
         return None, "null_payload"
     if isinstance(predicted, dict):
@@ -308,6 +328,7 @@ def _pydantic_valid(doc_type: str, payload: dict[str, Any]) -> tuple[bool, list[
     except ValidationError:
         return False, []
     def _changed(k: str, v: Any) -> bool:
+        """Report whether validation changed the supplied field value."""
         got = getattr(validated, k)
         if isinstance(got, BaseModel):
             return got.model_dump(exclude_unset=True) != v
@@ -318,6 +339,13 @@ def _pydantic_valid(doc_type: str, payload: dict[str, Any]) -> tuple[bool, list[
 
 
 def assess_payload(doc_type: str, raw: str | dict) -> SchemaAssessment:
+    """Parse and validate an extraction, retaining the payload before model coercion.
+
+    Parse failures and flagged parse errors return an invalid assessment;
+    Pydantic validation failures set ``schema_valid=False``. On success,
+    ``coerced_fields`` names changed input fields. Unknown classes raise
+    ``KeyError``.
+    """
     get_extraction_schema(doc_type)  # KeyError on unknown class
     payload, reason = coerce_predicted_payload(raw)
     if payload is None or reason is not None:

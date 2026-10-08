@@ -54,6 +54,7 @@ _lock = threading.Lock()
 
 
 def _pragmas(dbapi_conn, _record) -> None:
+    """Enable WAL, a 5000 ms busy timeout, and explicit transaction control."""
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
     cur.execute("PRAGMA busy_timeout=5000")

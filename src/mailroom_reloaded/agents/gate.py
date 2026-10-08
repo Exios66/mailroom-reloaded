@@ -50,19 +50,29 @@ class GateDecision:
 
 
 class RouteGate(Protocol):
-    def decide(self, f: GateFeatures) -> GateDecision: ...
+    def decide(self, f: GateFeatures) -> GateDecision:
+        """Return the routing decision for the supplied pipeline features."""
+        ...
 
 
 class BandGate:
     """Threshold bands from the taxonomy (per class once doc_type is known)."""
 
     def __init__(self, taxonomy: Taxonomy | None = None) -> None:
+        """Use the supplied taxonomy, or load the packaged taxonomy when omitted."""
         self.taxonomy = taxonomy or load_taxonomy()
 
     def thresholds(self, doc_type: str | None):
+        """Return class thresholds, falling back to global defaults for unknown classes."""
         return self.taxonomy.confidence_for(doc_type)
 
     def decide(self, f: GateFeatures) -> GateDecision:
+        """Choose an action from confidence bands, retry counts, and hard rules.
+
+        Classification disagreements trigger one re-sort. Length-capped or invalid
+        extractions retry before human review. Threshold equality belongs to the
+        upper band, and retries stop when ``attempts >= retry_max``.
+        """
         t = self.thresholds(f.doc_type)
         if f.stage == "classify":
             if f.doc_type_disagree and not f.resorted:
@@ -118,6 +128,11 @@ class LearnedGate:
     """
 
     def __init__(self, band: BandGate, coef_path: Path) -> None:
+        """Load stage models from a JSON coefficient file with ``band`` as fallback.
+
+        Unknown features or mismatched coefficient counts raise ``ValueError``.
+        File errors, JSON decoding errors, and missing model keys propagate.
+        """
         self.band = band
         self.models: dict = json.loads(Path(coef_path).read_text("utf-8"))
         for stage, m in self.models.items():
@@ -128,11 +143,18 @@ class LearnedGate:
                 raise ValueError(f"coef/features length mismatch in stage {stage!r}")
 
     def _p(self, m: dict, f: GateFeatures) -> float:
+        """Return the logistic escalation probability for a stage model and features."""
         x = feature_vector(m["features"], f)
         z = float(x @ np.asarray(m["coef"], dtype=float) + float(m["intercept"]))
         return float(1.0 / (1.0 + np.exp(-np.clip(z, -500, 500))))
 
     def decide(self, f: GateFeatures) -> GateDecision:
+        """Apply the learned escalation threshold inside the stage's medium band.
+
+        Preserve hard-rule decisions and use band decisions outside the medium
+        band or when no model exists for the stage. Equality with the model
+        threshold escalates.
+        """
         base = self.band.decide(f)
         m = self.models.get(f.stage)
         if m is None or base.source == "rule":
@@ -153,6 +175,10 @@ class LearnedGate:
 
 
 def load_gate() -> RouteGate:
+    """Load ``<base_dir>/models/route_gate.json`` if present, otherwise use bands.
+
+    Errors loading or validating an existing model file propagate.
+    """
     band = BandGate(load_taxonomy())
     path = get_settings().base_dir / "models" / "route_gate.json"
     if path.exists():

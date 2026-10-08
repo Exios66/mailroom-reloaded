@@ -18,6 +18,7 @@ from mailroom_reloaded.storage.db import get_engine
 
 
 def _row_to_entry(r) -> AuditLogEntry:
+    """Decode a database row into an entry; JSON and model validation errors propagate."""
     return AuditLogEntry(
         doc_id=r.doc_id,
         seq=r.seq,
@@ -92,6 +93,11 @@ def append(
 
 
 def entries(doc_id: str, *, engine: Engine | None = None) -> list[AuditLogEntry]:
+    """Return a document's audit entries in sequence order, or [] if absent.
+
+    Use the default database when ``engine`` is omitted. Database and stored
+    payload decoding or validation errors propagate.
+    """
     engine = engine or get_engine()
     with engine.connect() as conn:
         rows = conn.execute(
@@ -101,7 +107,12 @@ def entries(doc_id: str, *, engine: Engine | None = None) -> list[AuditLogEntry]
 
 
 def verify_chain(chain: Sequence[AuditLogEntry]) -> ChainResult:
-    """Return the seq of the first entry whose hash or link fails verification."""
+    """Return a ``ChainResult`` identifying the first failing entry's sequence.
+
+    Check consecutive sequences starting at one, hash links, and entry hashes.
+    An empty or intact chain returns ``ok=True`` with no ``broken_at`` value;
+    tail truncation cannot be detected without an external anchor.
+    """
     prev = ""
     expected_seq = 1
     for e in chain:

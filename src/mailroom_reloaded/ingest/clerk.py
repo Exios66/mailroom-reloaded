@@ -79,8 +79,10 @@ def validate_triage(raw: dict) -> dict:
 def validate_intake(result: dict, text: str) -> dict:
     """Clamp an intake answer to the live contracts.
 
-    Sections are kept only with integer in-bounds offsets, monotonic and
-    non-overlapping, catalog roles, at most 40. Invalid sections are dropped.
+    Section offsets are converted to integers and checked against ``text``
+    (start inclusive, end exclusive, in characters). Keep at most 40 sections
+    in start order, dropping invalid or overlapping spans and mapping unknown
+    roles to ``other``.
     """
     text = text or ""
     raw_triage = result.get("triage")
@@ -137,12 +139,19 @@ def validate_intake(result: dict, text: str) -> dict:
 
 
 def _fail(method: str, error: str, stats: dict | None = None, pages: int = 0) -> IngestResult:
+    """Return an ingest failure with empty text and clerk data."""
     logger.warning("ingest_failed", error=error)
     return IngestResult("", method, pages, stats or {}, {}, error)  # type: ignore[arg-type]
 
 
 def ingest(path: Path) -> IngestResult:
-    """Read ``path`` to clerk-normalised text. Never raises; failures set ``error``."""
+    """Read a text file or PDF into clerk-normalized text with page counts and stats.
+
+    PDFs without extracted text use vision transcription. Read, extraction,
+    and transcription failures, unsupported suffixes, and empty cleaned text
+    set ``error`` on the result. Path conversion and clerk normalization errors
+    propagate to the caller.
+    """
     path = Path(path)
     suffix = path.suffix.lower()
     try:

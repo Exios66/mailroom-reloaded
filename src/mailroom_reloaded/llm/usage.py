@@ -13,6 +13,11 @@ class Usage:
     calls: int = 0  # successful calls only
 
     def __add__(self, other: object) -> Usage:
+        """Return summed usage counters without modifying either operand.
+
+        Integer zero returns this instance for ``sum()``; other unsupported
+        operands return ``NotImplemented``.
+        """
         if isinstance(other, int) and other == 0:  # sum() start value
             return self
         if not isinstance(other, Usage):
@@ -28,4 +33,5 @@ class Usage:
 
     @property
     def total_tokens(self) -> int:
+        """Return prompt tokens plus completion tokens."""
         return self.prompt_tokens + self.completion_tokens

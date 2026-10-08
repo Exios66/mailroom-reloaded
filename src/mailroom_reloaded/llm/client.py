@@ -127,6 +127,10 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def _parse_json(content: str) -> dict | None:
+    """Parse a JSON object from plain, fenced, or prefixed response text.
+
+    Return ``None`` when parsing fails or the parsed value is not an object.
+    """
     text = content.strip()
     fenced = _FENCE.search(text)
     if fenced:
@@ -173,6 +177,11 @@ def _label_logprob(logprobs: Any) -> float | None:
 def _build_request(
     r: ResolvedModel, role: str, messages: list[dict[str, Any]], sampling: dict[str, Any]
 ) -> dict[str, Any]:
+    """Build completion arguments using role defaults and sampling overrides.
+
+    Server-specific options go in ``extra_body``; vLLM thinking is disabled,
+    and OpenRouter receives any configured reasoning effort.
+    """
     cfg = load_taxonomy().agent(role)
     params: dict[str, Any] = {"temperature": cfg.temperature}
     if cfg.max_tokens is not None:
@@ -211,9 +220,16 @@ def call_structured(
     """One structured completion, with up to three tool rounds first.
 
     Two-phase protocol: tool rounds never carry ``response_format``; the final
-    turn carries the strict ``response_format`` (from ``response_format`` or the
-    extraction schema of ``schema_doc_type``) and, when tools were offered,
-    ``tool_choice="none"``. Raises ``LengthFinishReasonError`` on a length cap.
+    turn carries ``response_format`` when supplied, otherwise the extraction
+    schema of ``schema_doc_type`` when given. With native tools in play, only
+    vLLM receives ``tool_choice="none"`` on the final turn.
+
+    ``timeout`` is the SDK request timeout in seconds; sampling options override
+    role defaults. Return raw content, a parsed JSON object or ``None`` (without
+    local schema validation), and usage for successful calls across both phases.
+    Raise ``LengthFinishReasonError`` for a capped final answer or tool call;
+    length caps on discarded drafts are ignored. Role/schema lookup errors,
+    provider configuration errors, and API errors after retries propagate.
     """
     if response_format is None and schema_doc_type is not None:
         from mailroom_reloaded.schemas.extraction import response_format as _rf

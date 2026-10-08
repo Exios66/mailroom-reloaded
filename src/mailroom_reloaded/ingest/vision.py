@@ -30,12 +30,20 @@ PRODUCTION DOCTRINE (mailroom pipeline):
 
 
 def _vision_cfg() -> tuple[int, int]:
+    """Return the vision page cap and dots per inch, defaulting to 10 and 150.
+
+    Taxonomy loading and integer conversion errors propagate.
+    """
     cfg = load_taxonomy().raw.get("vision") or {}
     return int(cfg.get("max_pages", 10)), int(cfg.get("dpi", 150))
 
 
 def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None) -> list[str]:
-    """Render PDF pages to PNG data URIs. ``cap`` of 0/None renders every page."""
+    """Render PDF pages in order as PNG data URIs at ``dpi`` dots per inch.
+
+    ``None`` or a nonpositive ``cap`` renders every page. Omitted ``dpi`` uses
+    the taxonomy setting. PDF opening and rendering errors propagate.
+    """
     import fitz
 
     if dpi is None:
@@ -51,10 +59,11 @@ def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None)
 
 
 def transcribe_pages(pdf_path: Path) -> str:
-    """Transcribe every rendered page (up to ``vision.max_pages``; 0 = all) of a scanned PDF.
+    """Transcribe every rendered page (up to ``vision.max_pages``; nonpositive = all).
 
-    One ``pdf_transcriber`` call per page, joined in page order. Raises on render
-    failure or when no page yields text, so the caller can record an error.
+    One ``pdf_transcriber`` call per page, with nonblank results joined in page
+    order. Rendering and LLM errors propagate. Raise ``RuntimeError`` when no
+    pages are rendered or no page yields text.
     """
     pdf_path = Path(pdf_path)
     cap, dpi = _vision_cfg()
