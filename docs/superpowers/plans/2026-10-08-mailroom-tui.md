@@ -78,7 +78,7 @@ docs/TUI.md
   - `createHistory(max = 200): {push(line), prev(): string|undefined, next(): string|undefined, reset(), all(): string[]}`; skips empty lines and consecutive duplicates; `push` is never called for masked commands (caller's job).
   - `dispatch(registry, ctx, line): Promise<'ok'|'unknown'|'error'>` — unknown prints `<cmd>: command not found — try help` via `ctx.out.line(text, 'error')`; a throwing `run` prints `<cmd>: <message>` as error and returns `'error'`.
 - [ ] **Step 1: Write failing node tests** (`node:test`): `parseLine('ls --status parked "a b"')` → cmd `ls`, flags `{status:'parked'}`, args `['a b']`; `parseLine('x "oops')` has `error`; `--k=v` form; history dedupe and `prev`/`next` walk; `complete('he')` → matches `['help']`, ghost `'lp'`; `complete('')` → no ghost; duplicate `register` throws; `dispatch` unknown message exact text; `dispatch` of a throwing command returns `'error'` and prints once.
-- [ ] **Step 2: Wire pytest.** `tests/tui/test_engine_js.py::test_engine_js_suite` runs `node --test tests/tui/js` via `subprocess.run`, asserts returncode 0; `pytest.skip` when `shutil.which("node")` is None. Run it. Expected: FAIL (module missing).
+- [ ] **Step 2: Wire pytest.** `tests/tui/test_engine_js.py::test_engine_js_suite` runs `node --test tests/tui/js/*.test.mjs` via `subprocess.run`, asserts returncode 0; `pytest.skip` when `shutil.which("node")` is None. Run it. Expected: FAIL (module missing).
 - [ ] **Step 3: Implement `engine.js`** (no DOM, no imports).
 - [ ] **Step 4: Run** `uv run pytest tests/tui -v`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(tui): pure command engine with node tests`.
