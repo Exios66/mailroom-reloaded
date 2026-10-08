@@ -33,7 +33,7 @@ scripts/tui_dev.sh status         # all three should say "running", health: ok
 | Browser terminal | http://127.0.0.1:8000/tui |
 | Web UI | http://127.0.0.1:8000/ui |
 | API docs | http://127.0.0.1:8000/docs |
-| Jev gate state | http://127.0.0.1:8000/v1/jev |
+| Jev gate state | `http://127.0.0.1:8000/v1/jev` — API request; requires `Authorization: Bearer <token>` when `MAILROOM_API_TOKEN` is set |
 
 Try it in `/tui`: `help`, `ls`, `inspect <doc_id>`, `audit <doc_id>`, `jev`, `review`, `upload` (or drop a `.txt` into `data/tui-dev/base/inbox/`). Quick pipeline check: `cp tests/ingest/fixtures/letter.txt data/tui-dev/base/inbox/` and the document reaches `archived` within ~15 s. Seeded Jev documents land in `review` (parked) so you can resolve them.
 
@@ -69,7 +69,7 @@ Run on the host that will serve traffic.
 
    Edit `.env`:
 
-   - `MAILROOM_API_TOKEN=$(openssl rand -hex 24)` (required: the app binds `0.0.0.0` in compose)
+   - Run `openssl rand -hex 24` in your shell, then paste the output into `.env` as `MAILROOM_API_TOKEN=<generated value>` (required: the app binds `0.0.0.0` inside the container). Compose does not execute shell commands in `.env`.
    - `GRAFANA_ADMIN_PASSWORD=<strong password>`
    - `DEFAULT_PROVIDER=openrouter` with `OPENROUTER_API_KEY=...`, or `vllm` with `VLLM_BASE_URL`/`VLLM_API_KEY` (Modal: [deploy/README.md](../deploy/README.md)), or `llamafile` with `LLAMAFILE_BASE_URL`
    - Optional Jev: `MAILROOM_JEV_PROVIDER=openrouter|typesafe|local` and a calibration file at `<base_dir>/models/jev_calibration.json` ([JEV.md](JEV.md))
@@ -91,7 +91,7 @@ Run on the host that will serve traffic.
    curl -fsS -H "Authorization: Bearer $MAILROOM_API_TOKEN" http://localhost:8000/v1/jev
    ```
 
-4. **Expose safely.** `/ui`, `/tui` and `/health` are public; `/v1` needs the bearer token. Put TLS in front (Caddy or nginx reverse proxy to `127.0.0.1:8000`) and do not publish Phoenix (:6006), Prometheus (:9090) or Grafana (:3000); they bind to loopback by design. The Gmail Pub/Sub push route needs an auth proxy: see [gmail-intake.md](gmail-intake.md).
+4. **Expose safely.** `/ui`, `/tui` and `/health` are public; `/v1` needs the bearer token. Compose publishes the app only on `127.0.0.1:8000` so remote clients cannot bypass the TLS proxy. Put TLS in front (Caddy or nginx reverse proxy to `127.0.0.1:8000`) and do not publish Phoenix (:6006), Prometheus (:9090) or Grafana (:3000); they bind to loopback by design. The Gmail Pub/Sub push route needs an auth proxy: see [gmail-intake.md](gmail-intake.md).
 
 5. **Use it.** Open `/tui`, run `auth <token>`, then `ls`. Or drop files into `data/inbox/`, or `POST /v1/documents`.
 
