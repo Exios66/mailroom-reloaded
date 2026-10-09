@@ -16,6 +16,7 @@ from typing import Any
 
 import openai
 import structlog
+from opentelemetry import trace
 
 os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
 
@@ -282,6 +283,74 @@ def record_crew_usage(
 
 
 def call_structured(
+    role: str,
+    messages: list[dict[str, Any]],
+    *,
+    schema_doc_type: str | None = None,
+    response_format: dict | None = None,
+    tools: list[ToolLike] | tuple[ToolLike, ...] = (),
+    logprobs: bool = False,
+    timeout: float = 600.0,
+    **sampling: Any,
+) -> LLMResult:
+    """One structured completion (see :func:`_call_structured`), recorded as a ``mailroom.llm.<role>`` span.
+
+    The span carries the role, model, token counts and cost for the replay's generations
+    list and never message content. It is kind ``SPAN`` and uses ``mailroom.*`` attribute
+    names (not ``llm.token_count.*``) so a backend that sums LLM spans does not count a
+    call twice next to the instrumentor's own span.
+    """
+    tracer = trace.get_tracer("mailroom.llm")
+    with tracer.start_as_current_span(f"mailroom.llm.{role}") as span:
+        span.set_attribute("openinference.span.kind", "SPAN")
+        span.set_attribute("mailroom.role", role)
+        try:
+            result = _call_structured(
+                role,
+                messages,
+                schema_doc_type=schema_doc_type,
+                response_format=response_format,
+                tools=tools,
+                logprobs=logprobs,
+                timeout=timeout,
+                **sampling,
+            )
+        except LengthFinishReasonError:
+            span.set_attribute("mailroom.length_capped", True)
+            _annotate_llm_span(span, role, None)
+            raise
+        except BaseException:
+            _annotate_llm_span(span, role, None)
+            raise
+        _annotate_llm_span(span, role, result)
+        return result
+
+
+def _annotate_llm_span(span: Any, role: str, result: LLMResult | None) -> None:
+    """Model, token and cost attributes for a ``mailroom.llm.<role>`` span (best effort)."""
+    try:
+        r = resolve(role)
+        span.set_attribute("mailroom.model", r.model)
+        span.set_attribute("mailroom.provider", r.provider)
+        if result is None:
+            return
+        usage = result.usage
+        span.set_attribute("mailroom.tokens.prompt", usage.prompt_tokens)
+        span.set_attribute("mailroom.tokens.completion", usage.completion_tokens)
+        span.set_attribute("mailroom.tokens.total", usage.total_tokens)
+        prompt_cost = _token_cost(r.model, usage.prompt_tokens, 0)
+        completion_cost = _token_cost(r.model, 0, usage.completion_tokens)
+        span.set_attribute("mailroom.cost.prompt", prompt_cost)
+        span.set_attribute("mailroom.cost.completion", completion_cost)
+        span.set_attribute("mailroom.cost.total", prompt_cost + completion_cost)
+        span.set_attribute("mailroom.tool_rounds", result.tool_rounds)
+        span.set_attribute("mailroom.parsed", result.parsed is not None)
+        span.set_attribute("mailroom.length_capped", False)
+    except Exception:
+        logger.debug("llm_span_annotation_failed", role=role, exc_info=True)
+
+
+def _call_structured(
     role: str,
     messages: list[dict[str, Any]],
     *,

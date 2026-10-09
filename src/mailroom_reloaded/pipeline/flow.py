@@ -45,7 +45,7 @@ from mailroom_reloaded.ingest.clerk import ingest as _ingest
 from mailroom_reloaded.llm.usage import Usage, add_role_usage
 from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.obs.run_context import ensure_run_scope
-from mailroom_reloaded.pipeline import run_ledger
+from mailroom_reloaded.pipeline import run_ledger, trace_capture
 from mailroom_reloaded.pipeline.archivist import archive_document
 from mailroom_reloaded.pipeline.guards import (
     NODE_DEADLINES,
@@ -279,6 +279,7 @@ class MailroomFlow(Flow[MailroomState]):
             self._manifest.catalog_pending = record.model_dump(mode="json")
         state.status = "archived"
         self._manifest.status = "archived"
+        trace_capture.emit_event("archived", doc_type=self._effective_doc_type())
 
     @guarded("grade", NODE_DEADLINES["grade"], 0)
     def _node_grade(self) -> None:
@@ -303,6 +304,7 @@ class MailroomFlow(Flow[MailroomState]):
         else:
             # grading spend is kept apart: it never inflates the pipeline's usage_total
             add_role_usage(state.usage_by_role, "grader", state.grade.usage)
+            trace_capture.grade_scores(trace.get_current_span(), self)
 
     # --------------------------------------------------------------- usage plumbing
     def _add_usage(self, role: str, usage: Usage) -> None:
@@ -352,29 +354,42 @@ class MailroomFlow(Flow[MailroomState]):
 
         start = time.monotonic()
         before_tokens = self.state.usage_total.total_tokens
+        before_usage = self.state.usage_total
+        before_cost = trace_capture.pipeline_cost(self.state)
         with self._tracer.start_as_current_span(f"mailroom.node.{node_name}") as span:
             span.set_attribute("mailroom.doc_id", self.state.doc_id)
+            trace_capture.node_start(span, self, node_name, deadline, budget)
             try:
-                result = fn(self, *args, **kwargs)
-            except NodeFailed:
+                try:
+                    result = fn(self, *args, **kwargs)
+                except NodeFailed:
+                    self._drain_usage_sink()
+                    raise
+                except Exception as exc:  # persist the completed prefix, then surface
+                    self._drain_usage_sink()
+                    self._mark_usage_partial(node_name)
+                    self._manifest.state = self.state.model_dump(mode="json")
+                    save_manifest(self._bins, self._manifest)
+                    span.record_exception(exc)
+                    trace_capture.node_end(
+                        span, self, node_name, before_usage, before_cost, error=exc
+                    )
+                    raise
                 self._drain_usage_sink()
+                elapsed = time.monotonic() - start
+                used_tokens = self.state.usage_total.total_tokens - before_tokens
+                if deadline and deadline > 0 and elapsed > deadline:
+                    self._fail_node(node_name, "deadline_exceeded", elapsed)
+                if budget and budget > 0 and used_tokens > budget:
+                    self._fail_node(node_name, "token_budget_exceeded", elapsed)
+                self._record_node(node_name, elapsed)
+                trace_capture.node_end(span, self, node_name, before_usage, before_cost)
+                return result
+            except NodeFailed as failure:
+                trace_capture.node_end(
+                    span, self, node_name, before_usage, before_cost, fail_reason=failure.reason
+                )
                 raise
-            except Exception as exc:  # persist the completed prefix, then surface
-                self._drain_usage_sink()
-                self._mark_usage_partial(node_name)
-                self._manifest.state = self.state.model_dump(mode="json")
-                save_manifest(self._bins, self._manifest)
-                span.record_exception(exc)
-                raise
-            self._drain_usage_sink()
-            elapsed = time.monotonic() - start
-            used_tokens = self.state.usage_total.total_tokens - before_tokens
-            if deadline and deadline > 0 and elapsed > deadline:
-                self._fail_node(node_name, "deadline_exceeded", elapsed)
-            if budget and budget > 0 and used_tokens > budget:
-                self._fail_node(node_name, "token_budget_exceeded", elapsed)
-            self._record_node(node_name, elapsed)
-            return result
 
     def _record_node(self, node_name: str, elapsed: float) -> None:
         """Mark ``node_name`` complete, snapshot state and append the audit entry."""
@@ -440,6 +455,7 @@ class MailroomFlow(Flow[MailroomState]):
         manifest.state = state.model_dump(mode="json")
         save_manifest(self._bins, manifest)
         audit_log.append(state.doc_id, "human_review", "parked", {"reason": reason})
+        trace_capture.emit_event("parked", reason=reason)
         try:
             catalog.upsert(
                 CatalogRecord(
@@ -523,6 +539,38 @@ class MailroomFlow(Flow[MailroomState]):
             "confidence": round(float(conf), 4) if isinstance(conf, (int, float)) else None,
         }
         audit_log.append(self.state.doc_id, f"gate_{stage}", "gate_decision", payload)
+        trace_capture.emit_event("gate_decision", stage=stage, **payload)
+
+    def _route_event(self, frm: str, to: str, reason: str) -> None:
+        """Record a routing transition as a ``mailroom.route`` span event."""
+        trace_capture.emit_event("route", **{"from": frm, "to": to, "reason": reason})
+
+    def _retry_event(self, kind: str, attempt: int, result: Any) -> None:
+        """Record a gate retry and tag the next node span with its ``retry_kind``."""
+        self._retry_kind = kind
+        try:
+            max_attempts = load_taxonomy().confidence_for(self._effective_doc_type()).retry_max
+        except Exception:  # noqa: BLE001
+            max_attempts = None
+        trace_capture.emit_event(
+            "retry",
+            kind=kind,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            confidence=getattr(result, "confidence", None),
+        )
+
+    def _arbiter_events(self) -> None:
+        """Record the judge gate and the arbiter's decision after ``verify``."""
+        state = self.state
+        confidence = state.extract.confidence if state.extract is not None else None
+        trace_capture.emit_event("judge_gate", engaged=True, extraction_confidence=confidence)
+        if state.arbiter is not None:
+            trace_capture.emit_event(
+                "arbiter",
+                decision=state.arbiter.action,
+                retry_count=state.extract_attempts,
+            )
 
     def _arbiter_route(self) -> str:
         """Map the arbiter decision to a driver target."""
@@ -609,6 +657,10 @@ class MailroomFlow(Flow[MailroomState]):
         self._eval_ctx = eval_ctx
         self._resume_from = resume_from
         self._llm_calls = 0
+        self._worker_id = worker_id
+        self._extraction_overall: float | None = None
+        self._retry_kind: str | None = None
+        self._node_retry = False
         self._failure_reason: str | None = None
         self._usage_sink: list[tuple[str, Usage]] = []
         self._gate = load_gate()
@@ -667,7 +719,15 @@ class MailroomFlow(Flow[MailroomState]):
             try:
                 with self._tracer.start_as_current_span("mailroom.document") as span:
                     span.set_attribute("mailroom.doc_id", state.doc_id)
-                    return self._drive_nodes()
+                    trace_capture.root_start(span, self)
+                    started = time.monotonic()
+                    try:
+                        return self._drive_nodes()
+                    except BaseException as exc:
+                        error = exc
+                        raise
+                    finally:
+                        trace_capture.root_end(span, self, error, time.monotonic() - started)
             except BaseException as exc:
                 error = exc
                 raise
@@ -713,45 +773,57 @@ class MailroomFlow(Flow[MailroomState]):
                 state.route_trail.append("gate_classify")
                 route = self._classify_route()
                 if route == "do_extract":
+                    self._route_event("gate_classify", "extract", route)
                     node = "extract"
                 elif route == "retry_sort":
                     state.classify_attempts += 1
+                    self._retry_event("retry_sort", state.classify_attempts, state.sort)
                     self._resume_done.discard("sort")
                     node = "sort"
                 elif route == "re_sort":
                     state.resorted = True
+                    self._retry_event("re_sort", state.classify_attempts + 1, state.sort)
                     self._reset_handoff_full()
                     self._resume_done.discard("sort")
                     node = "sort"
                 else:
+                    trace_capture.emit_event("escalation", to="human_review", reason="classify_human_review")
                     return self._park("classify_human_review")
             elif node == "gate_extract":
                 state.route_trail.append("gate_extract")
                 route = self._extract_route()
                 if route == "report":
+                    self._route_event("gate_extract", "report_catalog_archive", route)
                     node = "report_catalog_archive"
                 elif route == "retry_extract":
                     state.extract_attempts += 1
+                    self._retry_event("retry_extract", state.extract_attempts, state.extract)
                     self._resume_done.discard("extract")
                     node = "extract"
                 elif route == "do_verify":
                     state.route_trail.append("verify")
+                    self._route_event("gate_extract", "verify", route)
                     try:
                         self._node_verify()
                     except NodeFailed:
                         return state
+                    self._arbiter_events()
                     arbiter_route = self._arbiter_route()
                     if arbiter_route == "retry_extract":
                         state.extract_attempts += 1
+                        self._retry_event("retry_extract", state.extract_attempts, state.extract)
                         self._resume_done.discard("extract")
                         node = "extract"
                     elif arbiter_route == "do_boss":
+                        trace_capture.emit_event("escalation", to="boss", reason="arbiter_escalate")
                         node = "boss"
                     else:
                         node = "report_catalog_archive"
                 elif route == "do_boss":
+                    trace_capture.emit_event("escalation", to="boss", reason="extract_gate")
                     node = "boss"
                 else:
+                    trace_capture.emit_event("escalation", to="human_review", reason="extract_human_review")
                     return self._park("extract_human_review")
             elif node == "boss":
                 state.route_trail.append("boss")
@@ -760,10 +832,13 @@ class MailroomFlow(Flow[MailroomState]):
                 except NodeFailed:
                     return state
                 action = state.boss.action if state.boss is not None else "accept"
+                trace_capture.emit_event("boss", action=action)
                 if action == "reassign_class":
+                    self._retry_kind = "retry_extract"
                     self._resume_done.discard("extract")
                     node = "extract"
                 elif action == "human_review":
+                    trace_capture.emit_event("escalation", to="human_review", reason="boss_human_review")
                     return self._park("boss_human_review")
                 else:
                     node = "report_catalog_archive"

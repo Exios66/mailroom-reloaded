@@ -23,6 +23,7 @@ from openai import (
     BadRequestError,
     RateLimitError,
 )
+from opentelemetry import trace
 
 from mailroom_reloaded.settings import load_taxonomy
 
@@ -84,6 +85,25 @@ def retry_sleep_seconds(exc: Exception, attempt: int, cold_start_s: float = 90.0
     return max(0.0, delay * (1 + random.uniform(-jitter, jitter)))
 
 
+def _record_retry_event(exc: Exception, attempt: int, max_attempts: int, delay: float) -> None:
+    """Add a ``mailroom.llm_retry`` event (no message text) to the current span."""
+    try:
+        span = trace.get_current_span()
+        if span.is_recording():
+            attrs = {
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "error_type": type(exc).__name__,
+                "retry_in_s": round(delay, 2),
+            }
+            code = _status_code(exc)
+            if code is not None:
+                attrs["status_code"] = code
+            span.add_event("mailroom.llm_retry", attrs)
+    except Exception:
+        logger.debug("llm_retry_event_failed", exc_info=True)
+
+
 def with_retry(fn: Callable[[], T], *, cold_start_s: float = 90, max_attempts: int = 4) -> T:
     """Call ``fn()``; retry transient failures with exponential backoff, re-raise the last error."""
     attempt = 0
@@ -95,6 +115,7 @@ def with_retry(fn: Callable[[], T], *, cold_start_s: float = 90, max_attempts: i
             if not is_transient_error(exc) or attempt >= max_attempts:
                 raise
             delay = retry_sleep_seconds(exc, attempt, cold_start_s)
+            _record_retry_event(exc, attempt, max_attempts, delay)
             logger.warning(
                 "llm_retry",
                 attempt=attempt,
