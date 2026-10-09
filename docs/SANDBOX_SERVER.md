@@ -232,37 +232,60 @@ Remaining gaps (counts are failing scenarios in the full pack):
 Two rules read attachment text for screening (hidden injection); quarantine-listed
 extensions are never read.
 
-## Hostile mail and the Boss (user-requested addition, beyond Addendum v2)
+## Boss mailbox: Correspondent <-> Boss channel (user-requested addition, beyond Addendum v2)
 
-This section is a user-requested addition. It is not part of Addendum v2 and the pack
-does not define it. The pack and protocol define no dedicated Boss mailbox or queue:
-the Correspondent reports through typed signals (`comm_signals`, `pending` until the
-Boss Desk picks them up), so that is the channel used.
+This is a user-requested addition. It is not part of Addendum v2 and the content pack
+does not define it (the pack and protocol define only typed signals, `comm_signals`).
 
-Flow: the Correspondent emits a `possible_attack` signal (with `attack_class` and
-`priority`) -> the Boss Desk reads that signal from its inbox and opens a review case
-(`StandInBossDesk.consume_signals` looks at the signals only, not at message text) ->
-the message and its attachments stay held (quarantine or soft hold), nothing goes to
-the pipeline and the sender gets no reply -> the Boss decides:
+`boss_mailbox` is a named, durable, two-way queue in a sandbox-only SQLite file
+(`<data-dir>/sandbox/boss_mailbox.sqlite`, never `./data`). Every Correspondent <-> Boss
+exchange goes through it; neither role calls the other or reads the other's internal state.
 
-* `legitimate`: attachments are released, resolved ones go through the pipeline, and
-  the Correspondent drafts a reply (a draft; sending still needs approval and the
-  outbox checks). The reply is the only thing that can reach the sender.
-* `quarantine`: attachments stay quarantined; reason and category (`phishing`,
-  `malware`, `other`; default derived from the attack class) are recorded.
+* Entry: `id`, `thread_id`, `message_id`, `direction` (`correspondent->boss` |
+  `boss->correspondent`), `sender_role`, `recipient_role`, `kind`, `payload` (JSON),
+  `created_at`, `status` (`new|read|acted|expired`), `in_reply_to`.
+* Append-only: SQL triggers reject UPDATE and DELETE of entries. Status changes go to a
+  separate append-only log and are mirrored as `mailbox.entry` / `mailbox.status` events
+  (so they appear in `/events` and in the per-message trace and event timeline). The sandbox
+  event log is the audit record; the pipeline's per-document audit chain is unchanged.
+* Kinds: `hostile_forward`, `escalation`, `question`, `draft_for_approval`
+  (correspondent -> boss); `decision`, `instruction`, `approval`, `rejection`
+  (boss -> correspondent).
 
-Unattended default: `--autonomy human` leaves the case pending, `--autonomy sandbox`
-auto-quarantines (the previous behaviour for hostile mail).
+Hostile mail: the Correspondent writes a `hostile_forward` entry at the moment of
+detection (message, attachment lanes, attack classes, signals, trust and its reasoning)
+and still emits the typed pack signals (`possible_attack` with `attack_class` and
+`priority`), so `expect.signals` scoring is unchanged. The Boss Desk is handed that
+mailbox entry (`StandInBossDesk.read_forward`) and nothing else, in the same processing
+step. The message and attachments stay held; the sender gets no reply and nothing reaches
+the pipeline until the Boss decides. A decision is a `boss->correspondent` entry:
 
-API: `GET /api/sandbox/v1/boss/pending`, `GET /api/sandbox/v1/boss/decisions`,
-`POST /api/sandbox/v1/boss/decisions` with `{message_id, decision, reason, category?}`.
-UI: tab "Pending boss review" with Release and Quarantine buttons, plus a Boss review
-block in the trace. Events `boss.review.pending|released|quarantined`,
-`attachment.released|quarantined` are recorded in the message trace; the sandbox event
-log is the audit record for these steps (the pipeline's per-document audit chain is
-unchanged and records the pipeline run after a release).
+* `legitimate`: the Correspondent reads it, releases the attachments (resolved ones run
+  through the pipeline) and drafts a reply, which is posted back as a
+  `draft_for_approval` entry (a draft; sending still needs approval and the outbox checks).
+* `quarantine`: attachments stay quarantined; reason and category (`phishing`, `malware`,
+  `other`) are in the decision entry.
 
-Deviations to note: the protocol says quarantine is released by a human only and never
-auto-released; here the Boss decision releases it, on explicit request. Only messages that
-carry a `possible_attack` signal are forwarded; a message that is merely classed hostile
-without such a signal (for example a spoofed legal notice) is not.
+Approving or rejecting any draft is also a `boss->correspondent` `approval|rejection` entry.
+Unattended: `--autonomy sandbox` makes the stand-in Boss Desk answer immediately through
+the mailbox (hostile mail stays quarantined); `--autonomy human` leaves the forward waiting
+for the operator.
+
+API: `GET /api/sandbox/v1/boss/mailbox` (filters `direction`, `role`, `thread`, `message`,
+`status`, `kind`, `since`, `limit`), `GET /boss/mailbox/{id}` (with status history),
+`GET /boss/pending`, `GET /boss/decisions`, `POST /boss/decisions` with
+`{message_id, decision, reason, category?}`. UI: a docked "Boss mailbox" panel with an
+unread badge that polls every 2 s on every tab, grouped by thread, with Release and
+Quarantine on pending forwards (also the "Pending boss review" tab). Observing it changes
+nothing; only the decision POST acts. The UI JS is covered by a node test with a stub DOM
+(`tests/sandbox/js/mailbox.test.mjs`); it has not been looked at in a real browser.
+
+Deviations: the protocol says quarantine is released by a human only; here the Boss decision
+releases it, on explicit request. Only messages carrying a `possible_attack` signal are
+forwarded (a message classed hostile without one, such as a spoofed legal notice, is not).
+
+Re-injecting scenarios into a server that already processed them (for example `smoke`
+for A1+E1 and then all six) can fail E1's "no reply" check: the benign companion's
+attachment is now a duplicate of an archived document, so a duplicates relation exists and
+an acknowledgement draft is produced. That is intended duplicate handling, not a defect;
+reset between runs (the conformance harness does).
