@@ -19,6 +19,7 @@ cannot strand a document.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -209,7 +210,12 @@ class Watcher:
         if self.concurrency <= 1:
             return sum(1 for f in files if self._process(f))
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
-            results = list(pool.map(self._process, files))
+            # each worker gets its own copy of the caller's context so run_scope survives the hop
+            futures = [
+                pool.submit(contextvars.copy_context().run, self._process, f)
+                for f in files
+            ]
+            results = [fut.result() for fut in futures]
         return sum(1 for r in results if r)
 
     def _process(self, path: Path) -> bool:

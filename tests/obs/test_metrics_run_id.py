@@ -181,6 +181,21 @@ def test_watcher_concurrency_never_produces_unscoped_points(
     assert {"mailroom.inflight", "mailroom.queue.depth", "mailroom.documents"} <= names
 
 
+def test_watcher_concurrency_keeps_the_callers_run_scope(
+    env, reader, monkeypatch
+) -> None:
+    _patch(monkeypatch)
+    bins = _inbox(env, 4)
+    with run_scope("caller-run", "eval"):
+        assert Watcher(bins, worker_id="w1", concurrency=3).drain_once() == 4
+    scoped = {
+        a["run_id"]
+        for n, a in _points(reader)
+        if n in {"mailroom.inflight", "mailroom.queue.depth"}
+    }
+    assert scoped == {"caller-run"}
+
+
 def test_retry_and_review_cause_counters(env, reader, monkeypatch) -> None:
     _patch(monkeypatch, confidences=(0.1, 1.0))
     bins = _inbox(env, 1)
@@ -189,6 +204,29 @@ def test_retry_and_review_cause_counters(env, reader, monkeypatch) -> None:
         (a["kind"], a["run_id"]) for n, a in _points(reader) if n == "mailroom.retries"
     ]
     assert retries and retries[0][0] == "retry_extract"
+
+
+def test_review_cause_counter_carries_run_labels(reader) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from mailroom_reloaded.pipeline import trace_capture
+
+    flow = SimpleNamespace(
+        state=SimpleNamespace(
+            extract=SimpleNamespace(schema_valid=False, parse_error="bad"),
+            verdict=None,
+            status="parked",
+            grade=None,
+        ),
+        _eval_ctx=None,
+    )
+    with run_scope("cause-run", "eval"):
+        trace_capture._reconsideration(MagicMock(), flow, "correspondence", None, False)
+    causes = [a for n, a in _points(reader) if n == "mailroom.review.causes"]
+    assert causes
+    assert {a["run_id"] for a in causes} == {"cause-run"}
+    assert {a["cause"] for a in causes} >= {"schema_invalid"}
 
 
 def test_escalation_counter_on_park(env, reader, monkeypatch) -> None:
