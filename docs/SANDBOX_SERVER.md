@@ -184,3 +184,85 @@ not share it with people who should only look.
   process globals, which `PipelineRunner` repoints at `<data-dir>/pipeline`.
 * The addendum's `/sandbox/v1` prefix is `/api/sandbox/v1` here, and the Window actions
   are served directly rather than proxied to `/v1/comms/*` (no comms API exists yet).
+
+## Conformance harness and Correspondent tuning
+
+`mailroom sandbox conformance --content <pack dir> [--json out.json] [--slim] [--only ID]`
+injects every scenario **alone** (state reset in between, so ingress admission control
+cannot hide results; the ingress policy itself is untouched), prints a per-scenario
+table with the failed checks, and writes the JSON. No scenario was shed when run alone.
+Scenarios are split deterministically by sorted id, every third one held out (29 of 88);
+rules were tuned against the other 59 only, and held-out numbers are reported separately.
+`tests/sandbox/conformance_baseline.json` is the committed result for the v0.5.0 pack.
+
+| Full pack (88), isolated | pass | fail | not run |
+| --- | --- | --- | --- |
+| before tuning | 15 | 72 | 1 |
+| after trust fixes | 17 | 70 | 1 |
+| after intent rules | 23 | 64 | 1 |
+| after signals and boss actions | 38 | 49 | 1 |
+| after outbox rules (final) | 45 | 42 | 1 |
+
+| Split | before | after |
+| --- | --- | --- |
+| tuned (59) | 10 pass | 40 pass |
+| held-out (29) | 5 pass | 5 pass (23 fail, 1 not run) |
+
+The held-out third did not improve: the rules fit the tuned scenarios, and the outbox
+rules in particular generalised badly (held-out outbox failures rose from 8 to 10). Treat
+the tuned number as an upper bound, not as expected accuracy.
+
+Remaining gaps (counts are failing scenarios in the full pack):
+
+* **S8** stays not run: it uses the unsimulated `fault:` directive.
+* **Evaluator takes the first email as primary.** Scenarios whose decisive message is not
+  first (E7 thread hijack, B5 retraction, A2 follow-ups) cannot pass for intent, trust or
+  outbox however the stand-in behaves.
+* **Relations (10)**: expected `a` labels are `attach` refs that the evaluator does not
+  resolve, and the attachments are `<dataset draw ...>` placeholders with no bytes in the
+  pack, so no relation can be proposed from content.
+* **C4 corrupted PDF** needs `quarantine_attachments` and `overblocking.benign_hard_actions: 0`
+  at once; the evaluator counts the quarantine as a hard action on a benign sender. Not
+  changed (overblocking is not weakened).
+* **Self-tests S1-S10** expect different `fyi` priorities for identical text.
+* A9 is a deprecated placeholder that expects a hostile verdict for a benign message.
+* Signals (28), boss actions (22), intent (13), outbox (14) failures remain in the long tail
+  (duplicates, cross-matter notes, conflicting instructions, litigation, password zip hold).
+
+Two rules read attachment text for screening (hidden injection); quarantine-listed
+extensions are never read.
+
+## Hostile mail and the Boss (user-requested addition, beyond Addendum v2)
+
+This section is a user-requested addition. It is not part of Addendum v2 and the pack
+does not define it. The pack and protocol define no dedicated Boss mailbox or queue:
+the Correspondent reports through typed signals (`comm_signals`, `pending` until the
+Boss Desk picks them up), so that is the channel used.
+
+Flow: the Correspondent emits a `possible_attack` signal (with `attack_class` and
+`priority`) -> the Boss Desk reads that signal from its inbox and opens a review case
+(`StandInBossDesk.consume_signals` looks at the signals only, not at message text) ->
+the message and its attachments stay held (quarantine or soft hold), nothing goes to
+the pipeline and the sender gets no reply -> the Boss decides:
+
+* `legitimate`: attachments are released, resolved ones go through the pipeline, and
+  the Correspondent drafts a reply (a draft; sending still needs approval and the
+  outbox checks). The reply is the only thing that can reach the sender.
+* `quarantine`: attachments stay quarantined; reason and category (`phishing`,
+  `malware`, `other`; default derived from the attack class) are recorded.
+
+Unattended default: `--autonomy human` leaves the case pending, `--autonomy sandbox`
+auto-quarantines (the previous behaviour for hostile mail).
+
+API: `GET /api/sandbox/v1/boss/pending`, `GET /api/sandbox/v1/boss/decisions`,
+`POST /api/sandbox/v1/boss/decisions` with `{message_id, decision, reason, category?}`.
+UI: tab "Pending boss review" with Release and Quarantine buttons, plus a Boss review
+block in the trace. Events `boss.review.pending|released|quarantined`,
+`attachment.released|quarantined` are recorded in the message trace; the sandbox event
+log is the audit record for these steps (the pipeline's per-document audit chain is
+unchanged and records the pipeline run after a release).
+
+Deviations to note: the protocol says quarantine is released by a human only and never
+auto-released; here the Boss decision releases it, on explicit request. Only messages that
+carry a `possible_attack` signal are forwarded; a message that is merely classed hostile
+without such a signal (for example a spoofed legal notice) is not.
