@@ -96,3 +96,54 @@ def serve(
         f"mailroom sandbox: UI http://{'127.0.0.1' if host in {'0.0.0.0', '::'} else host}:{port}/ui"
     )
     uvicorn.run(create_sandbox_app(service), host=host, port=port, log_level="info")
+
+
+@sandbox_app.command("conformance")
+def conformance(
+    content: str = typer.Option(
+        "locked", "--content", help="smoke | locked | <content dir>."
+    ),
+    data_dir: Path = typer.Option(
+        Path(".sandbox-conformance"), "--data-dir", help="Throwaway state dir."
+    ),
+    json_out: Path | None = typer.Option(
+        None, "--json", help="Write the full per-check result JSON here."
+    ),
+    only: list[str] = typer.Option(
+        [], "--only", help="Restrict to these scenario ids (repeatable)."
+    ),
+    slim: bool = typer.Option(
+        False, "--slim", help="Omit per-check rows from the JSON (baseline form)."
+    ),
+) -> None:
+    """Run every scenario in isolation and print a per-check conformance table."""
+    from mailroom_reloaded.sandbox.server.conformance import (
+        dumps,
+        format_table,
+        run_conformance,
+    )
+    from mailroom_reloaded.sandbox.server.content import (
+        ContentSpecError,
+        load_sandbox_content,
+        resolve_content_spec,
+    )
+    from mailroom_reloaded.sandbox.server.guard import NetworkGuard
+    from mailroom_reloaded.sandbox.server.service import SandboxService
+    from mailroom_reloaded.sandbox.server.telemetry import silence_exporters
+
+    try:
+        loaded = load_sandbox_content(resolve_content_spec(content))
+    except (ContentSpecError, FileNotFoundError, ValueError, OSError) as exc:
+        typer.echo(f"mailroom sandbox conformance: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    silence_exporters()
+    guard = NetworkGuard().install()
+    svc = SandboxService(loaded, data_dir.resolve(), guard=guard).start(worker=False)
+    try:
+        result = run_conformance(svc, only or None)
+    finally:
+        svc.stop()
+        guard.uninstall()
+    typer.echo(format_table(result))
+    if json_out is not None:
+        json_out.write_text(dumps(result, slim=slim), encoding="utf-8")
