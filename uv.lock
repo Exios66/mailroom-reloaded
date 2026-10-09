@@ -1879,6 +1879,7 @@ parity = [
     { name = "llm-dojo-scoring" },
 ]
 sandbox = [
+    { name = "jinja2" },
     { name = "jsonschema" },
     { name = "zstandard" },
 ]
@@ -1894,6 +1895,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'" },
     { name = "httpx" },
     { name = "jellyfish" },
+    { name = "jinja2", marker = "extra == 'sandbox'" },
     { name = "jsonschema", marker = "extra == 'sandbox'", specifier = ">=4" },
     { name = "llm-dojo-scoring", marker = "extra == 'parity'", git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=v0.21.0" },
     { name = "mailroom-ml", extras = ["serve"], marker = "extra == 'bert'", git = "https://github.com/LLM-Mailroom-Services/mailroom-ml.git" },
