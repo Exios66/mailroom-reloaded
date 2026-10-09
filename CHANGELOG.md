@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Docs only: core plan status update. K-04 and K-06 are done in the content repo, K-03 is partly applied (draft rule and S-series priority decided by the owner), tracked on content PR #7.
 - Docs only: core plan Phase 4b (workstreams K-00..K-08) for hardening `mailroom-sandbox-content` and its hand-off here, with the design/evidence in `docs/superpowers/specs/2026-10-09-content-pack-hardening-design.md`. Corrects X-03: reloaded's `gen_spec` and `persona_behavior` schemas are the stricter copies, so nothing is upstreamed from content.
 
 - TUI: `ledger` (list, `head`, `verify [run_id]`) and `runs pin|unpin|keep [set ...]` over the ledger API; ids and policy values are validated client-side and every value is printed as text.
