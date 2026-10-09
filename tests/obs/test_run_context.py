@@ -197,6 +197,17 @@ def test_run_document_opens_scope_inside_the_worker(monkeypatch: pytest.MonkeyPa
     assert current_run() is None
 
 
+class _NullLedger:
+    def count(self, *a, **k):
+        return 0
+
+    def open_runs(self, *a, **k):
+        return []
+
+    def append(self, *a, **k):
+        return True
+
+
 def test_run_eval_scopes_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
     from mailroom_reloaded.eval import runner
 
@@ -215,8 +226,8 @@ def test_run_eval_scopes_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "select_graded", lambda *a, **k: set())
     monkeypatch.setattr(runner, "_engine", lambda: object())
     monkeypatch.setattr(runner, "_ensure_table", lambda engine: None)
-    cfg = type("Cfg", (), {"revision": "r", "split": "s", "local_dir": None, "per_class": 1, "seed": 0,
-                           "classes": None, "judge_sample_rate": 0.0})()
+    cfg = runner.EvalConfig()
+    monkeypatch.setattr(runner.run_ledger, "ledger_for", lambda overrides: _NullLedger())
     run_id = runner.run_eval(cfg)
     assert captured == [(run_id, "eval", f"eval-{run_id}")] * 2
     assert current_run() is None

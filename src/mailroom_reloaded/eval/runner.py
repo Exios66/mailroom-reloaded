@@ -36,6 +36,7 @@ from mailroom_reloaded.eval.dataset import (
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs.run_context import run_scope
 from mailroom_reloaded.pipeline import flow as flow_mod
+from mailroom_reloaded.pipeline import run_ledger
 from mailroom_reloaded.settings import get_settings, load_taxonomy
 from mailroom_reloaded.storage import db
 from mailroom_reloaded.storage.bins import Bins
@@ -407,6 +408,14 @@ async def _run_pipeline(
                 }
             )
         except Exception as exc:  # noqa: BLE001 - one bad doc must not kill the run
+            if not getattr(exc, "_ledger_recorded", False):  # it failed before the flow could record it
+                run_ledger.record_aborted(
+                    run_ledger.ledger_for(None),
+                    run_id,
+                    doc_id_for_sha(doc.content_sha256),
+                    exc,
+                    started=start,
+                )
             row = _base_row(
                 run_id, doc, gt, mode="pipeline", latency_s=time.monotonic() - start, graded=grade_this
             )
@@ -451,6 +460,14 @@ async def _run_cell(
                 cond=_cell_conditions(cfg, doc_type),
             )
         except Exception as exc:  # noqa: BLE001 - record and continue
+            run_ledger.record_aborted(
+                run_ledger.ledger_for(None),
+                run_id,
+                doc_id_for_sha(doc.content_sha256),
+                exc,
+                doc_type=doc_type,
+                started=start,
+            )
             row = _base_row(
                 run_id, doc, gt, mode="specialist_cell", latency_s=time.monotonic() - start, graded=False
             )
@@ -458,6 +475,14 @@ async def _run_cell(
             row["parse_error"] = str(exc)[:500]
             _insert(engine, row)
             return
+        run_ledger.record_cell(
+            run_ledger.ledger_for(None),
+            run_id,
+            doc_id_for_sha(doc.content_sha256),
+            doc_type,
+            result,
+            started=start,
+        )
         _insert(
             engine,
             _cell_row(run_id, doc, gt, result, latency_s=time.monotonic() - start),
@@ -508,6 +533,23 @@ def run_eval(cfg: EvalConfig) -> str:
     engine = _engine()
     _ensure_table(engine)
     # asyncio tasks (and to_thread) copy this context, so every eval document inherits the scope
-    with run_scope(run_id, "eval", "eval", session_id=f"eval-{run_id}"):
-        asyncio.run(_run_all(cfg, run_id, selected, gts, graded, engine))
+    ledger = run_ledger.ledger_for(None)
+    run_ledger.open_run(
+        ledger,
+        run_id,
+        "eval",
+        mode=cfg.mode,
+        posture_label=cfg.posture_label,
+        model=get_settings().provider,
+        prompt_set=cfg.prompt_set,
+        environment="eval",
+        source="eval",
+    )
+    closed_by = "interrupted"
+    try:
+        with run_scope(run_id, "eval", "eval", session_id=f"eval-{run_id}"):
+            asyncio.run(_run_all(cfg, run_id, selected, gts, graded, engine))
+        closed_by = "completed"
+    finally:
+        run_ledger.close_run(ledger, run_id, closed_by, expected=len(selected))
     return run_id

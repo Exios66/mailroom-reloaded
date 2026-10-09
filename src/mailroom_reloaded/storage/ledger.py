@@ -5,7 +5,7 @@ pair of tables in the same ``mailroom.db``:
 
 * ``ledger``: ``seq, kind, run_id, doc_id, ts, payload, digest, prev_hash,
   entry_hash``; one global chain (genesis ``prev_hash == ""``), tail-only append,
-  no de-duplication (a repeated pin/unpin must stay two entries).
+  lifecycle entries are unique per run (a repeated pin/unpin stays two entries).
 * ``ledger_metrics``: the flat metric rows captured for a run, capped per run
   (``row_cap``, default 5,000) with a single ``gap`` entry when the cap is hit.
 
@@ -170,7 +170,10 @@ class Ledger:
         payload: dict[str, Any] | None = None,
         metrics: Iterable[MetricRow] = (),
     ) -> bool:
-        """Queue a chain entry (and optional metric rows). Never raises; returns success."""
+        """Queue an entry; returns queue acceptance, not commit success. Never raises.
+
+        The writer ignores duplicate run boundaries and documents/metrics after closure.
+        """
         try:
             clean = sanitize_payload(kind, payload)
             rows = [r for r in (self._clean_row(m) for m in metrics) if r is not None]
@@ -333,7 +336,24 @@ class Ledger:
                     "dropped": {},  # run_id -> rows dropped by the cap in this transaction
                     "gaps": set(),  # runs whose row_cap gap exists
                 }
+                lifecycle: dict[str, set[str]] = {}
                 for item in batch:
+                    if item.kind in {"run_opened", "run_closed", "doc_closed", None}:
+                        if item.run_id not in lifecycle:
+                            lifecycle[item.run_id] = set(
+                                conn.execute(
+                                    select(_t.c.kind).where(
+                                        _t.c.run_id == item.run_id,
+                                        _t.c.kind.in_(("run_opened", "run_closed")),
+                                    )
+                                ).scalars()
+                            )
+                        seen = lifecycle[item.run_id]
+                        # BEGIN IMMEDIATE serializes this check with other writers.
+                        if "run_closed" in seen or item.kind in seen:
+                            continue
+                        if item.kind in {"run_opened", "run_closed"}:
+                            seen.add(item.kind)
                     if item.kind is not None:
                         self._insert_entry(conn, state, item)
                     else:
@@ -458,6 +478,26 @@ class Ledger:
         with self.engine.connect() as conn:
             row = conn.execute(select(_t).order_by(_t.c.seq.desc()).limit(1)).first()
         return _row_entry(row) if row else None
+
+    def count(self, kind: str, run_id: str, doc_id: str | None = None) -> int:
+        """Committed entries of ``kind`` for a run (and optionally one document)."""
+        q = select(func.count()).select_from(_t).where(_t.c.kind == kind, _t.c.run_id == run_id)
+        if doc_id is not None:
+            q = q.where(_t.c.doc_id == doc_id)
+        with self.engine.connect() as conn:
+            return conn.execute(q).scalar_one()
+
+    def open_runs(self, kind: str | None = None) -> list[str]:
+        """Run ids that have a committed ``run_opened`` and no ``run_closed`` (oldest first)."""
+        closed = select(_t.c.run_id).where(_t.c.kind == "run_closed")
+        q = (
+            select(_t.c.run_id, _t.c.payload)
+            .where(_t.c.kind == "run_opened", _t.c.run_id.not_in(closed))
+            .order_by(_t.c.seq)
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(q).all()
+        return [r.run_id for r in rows if kind is None or json.loads(r.payload).get("kind") == kind]
 
     def entries(
         self,
@@ -652,11 +692,20 @@ _default_lock = threading.Lock()
 
 
 def get_ledger() -> Ledger:
-    """The process-wide ledger on the default engine (created lazily)."""
+    """The process-wide ledger on the default engine (created lazily).
+
+    If the default engine was replaced (a different ``base_dir``), the old ledger is
+    flushed and closed and a new one is bound, so a late write never lands in the
+    wrong database.
+    """
     global _default
+    engine = get_engine()
     with _default_lock:
+        if _default is not None and _default.engine is not engine:
+            _default.close()
+            _default = None
         if _default is None:
-            _default = Ledger()
+            _default = Ledger(engine)
             atexit.register(_default.close)
         return _default
 

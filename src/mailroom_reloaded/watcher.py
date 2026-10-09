@@ -28,7 +28,9 @@ from typing import Any
 import structlog
 
 from mailroom_reloaded.obs.metrics import M
+from mailroom_reloaded.obs.run_context import live_run_id
 from mailroom_reloaded.pipeline import flow as _flow
+from mailroom_reloaded.pipeline import run_ledger as _run_ledger
 from mailroom_reloaded.schemas.manifest import Manifest
 from mailroom_reloaded.storage.bins import Bins
 
@@ -139,6 +141,7 @@ class Watcher:
         no duplicate entries.
         """
         count = 0
+        self._close_stale_ledger_runs()
         for manifest_path in sorted(self.bins.manifests.glob("*.json")):
             try:
                 manifest = Manifest.model_validate_json(manifest_path.read_text())
@@ -171,6 +174,15 @@ class Watcher:
         self.resumed += count
         self._startup_done = True
         return count
+
+    @staticmethod
+    def _close_stale_ledger_runs() -> None:
+        """Close live ledger runs a dead process left open (never today's bucket)."""
+        try:
+            ledger = _run_ledger.ledger_for(None)
+            _run_ledger.close_other_live_runs(ledger, live_run_id())
+        except Exception:
+            logger.warning("ledger_closeout_failed", exc_info=True)
 
     @staticmethod
     def _manifest_file(manifest: Manifest) -> Path | None:
