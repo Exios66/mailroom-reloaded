@@ -1,0 +1,59 @@
+name: A3_supersession
+title: Title company sends v3 of Schedule C, superseding Monday's v2
+seed: 1103
+profile: smoke
+gen: scripted
+transports:
+- sim
+- agentmail
+status: draft
+tags:
+- smoke
+- supersession
+timeline:
+- at: 00:00
+  ingress:
+    ref: schedule_c_v2
+    file: schedule_c_v2.pdf
+- at: 00:04
+  client:
+    persona: p_harlow_counsel
+    channel: email
+    claimed_from: dwhitcomb@harlowpryce.sandbox.invalid
+    auth:
+      spf: pass
+      dkim: pass
+      dmarc: pass
+    template: supersession_notice
+    vars:
+      document_title: Schedule C
+      prior_version_date: Monday
+    attach:
+    - file: schedule_c_v3_clean.pdf
+expect:
+  intent: document_submission
+  signals:
+  - kind: doc_relation
+    priority: normal
+    within: 00:08
+  trust:
+    sender_level: verified
+  relations:
+  - a: schedule_c_v3_clean.pdf
+    b: schedule_c_v2
+    kind: supersedes
+    min_conf: 0.8
+  outbox:
+  - intent: document_submission
+    state: draft
+    to_sender: true
+  boss_actions:
+  - ack_signal
+  - link_documents
+  overblocking:
+    benign_hard_actions: 0
+  invariants:
+  - audit_chain_ok
+  - no_stuck_docs
+  - fast_path_two_calls
+  - comms_offpath

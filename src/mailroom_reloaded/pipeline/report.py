@@ -54,7 +54,11 @@ def _extraction(state: MailroomState) -> dict[str, Any] | None:
 
 
 def _price(tax: Any, role: str, usage: Usage) -> float:
-    """Cost of ``usage`` at ``role``'s configured model price (0.0 when unpriced)."""
+    """USD cost of ``usage`` at ``role``'s configured model price (0.0 when unpriced).
+
+    Unknown roles raise ``KeyError``; invalid numeric prices propagate conversion
+    errors. The caller decides whether to replace these errors with a fallback.
+    """
     model = tax.agent(price_role(role)).model
     prices = (tax.raw.get("cost_models") or {}).get(model)
     if not isinstance(prices, dict):
@@ -68,11 +72,13 @@ def _price(tax: Any, role: str, usage: Usage) -> float:
 
 
 def _cost_usd(state: MailroomState) -> float:
-    """Per-token cost estimate: each role's usage at that role's configured price.
+    """USD per-token cost estimate: each role's usage at that role's configured price.
 
     Roles that report no price cost 0.0, and the eval ``grader`` is excluded (it is
     not pipeline spend). Usage in ``usage_total`` that no role accounts for (a resumed
     pre-capture manifest) is priced at the sorter's rates, as before.
+    Return 0.0 when total tokens are zero or any configuration or pricing error
+    occurs; an error discards the entire estimate, not just the affected role.
     """
     if state.usage_total.total_tokens == 0:
         return 0.0

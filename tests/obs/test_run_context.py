@@ -79,6 +79,19 @@ def test_ensure_keeps_existing_scope() -> None:
         assert scope.run_id == "keepme"
 
 
+@pytest.mark.parametrize(
+    ("run_id", "expected"),
+    [("eval-123", "eval-123"), ("a b/c:d\n", "a_b_c_d_"), ("x" * 200, "x" * 64)],
+)
+def test_ensure_eval_identifiers_are_consistent(run_id: str, expected: str) -> None:
+    with ensure_run_scope(source="eval", run_id=run_id) as scope:
+        assert scope.run_id == expected
+        assert scope.session_id == f"eval-{expected}"
+        assert scope.environment == "eval"
+        assert scope.source == "eval"
+    assert current_run() is None
+
+
 def test_live_run_id_daily_bucket_and_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MAILROOM_RUN_ID", raising=False)
     assert live_run_id(datetime(2026, 10, 9, tzinfo=UTC)) == "live-20261009"
