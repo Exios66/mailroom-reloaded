@@ -127,7 +127,8 @@ _INJECTION = re.compile(
 )
 _PAYMENT = re.compile(
     r"((wire|wiring|routing|remittance|bank|account)\b.{0,50}\b(instruction|detail|number|change|changed|updated|new)\b"
-    r"|\b(updated|new|changed)\b.{0,30}\b(wire|wiring|bank|remittance|routing)\b)",
+    r"|\b(updated|new|changed)\b.{0,30}\b(wire|wiring|bank|remittance|routing)\b"
+    r"|\b(new|different|another) (bank )?account\b|\baccount (is|are) being closed\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _CALL_SUPPRESS = re.compile(
@@ -140,27 +141,35 @@ _CRED = re.compile(
 )
 _URL = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
 _LEGAL = re.compile(
-    r"(subpoena|court order|summons|demand letter|regulator|regulatory inquiry|legal notice|cease and desist|litigation hold)",
+    r"(subpoena|court order|summons|demand letter|regulator|regulatory inquiry|legal notice|cease and desist|litigation hold"
+    r"|formal demand|demand for production|administrative action|legal action|\blawsuit\b|\bsue\b|notice of (default|violation))",
     re.IGNORECASE,
 )
 _PRIVACY = re.compile(
-    r"(delete (all )?(of )?my (personal )?data|privacy request|gdpr|ccpa|right to be forgotten|erase my)",
-    re.IGNORECASE,
+    r"(delete (all )?(of )?my (personal )?data|privacy request|gdpr|ccpa|right to be forgotten|erase my"
+    r"|(delet|eras|remov)\w*\b.{0,40}\b(personal|my) (information|data)"
+    r"|(personal (information|data)|my (information|data))\b.{0,60}\b(delet|eras|remov)\w*)",
+    re.IGNORECASE | re.DOTALL,
 )
 _BULK = re.compile(
-    r"(send (me )?(every|all) (the )?(claims|documents|files)|every claim for|export (all|everything))",
+    r"(send (me )?(every|all) (the )?(claims|documents|files)|every claim for|export (all|everything)"
+    r"|\b(send|provide|forward|export|release)\b[^.]{0,50}\b(complete|entire|full) (file|record|history)"
+    r"|\b(need|want|require)\b[^.]{0,30}\b(all|every)\b[^.]{0,30}\b(claims?|notes|correspondence|records)\b)",
     re.IGNORECASE,
 )
 _STATUS = re.compile(
-    r"(status (check|update|of|on)|where is|what is the status|update on|still in flight|in flight, archived)",
+    r"(status (check|update|of|on|request)|processing status|where is|where are we|what is the status|update on"
+    r"|still in flight|in flight, archived|(come|came|go|went) through|(did|have) you (get|got|receive)\w*)",
     re.IGNORECASE,
 )
 _COMPLAINT = re.compile(
-    r"(unacceptable|frustrat|third (time|message)|far too long|taking too long|fed up|ridiculous)",
+    r"(unacceptable|frustrat|third (time|message|email|request)|far too long|taking too long|fed up|ridiculous"
+    r"|nobody (answers|responds|replies)|no one (answers|responds|replies)|sitting for \d+ days)",
     re.IGNORECASE,
 )
 _URGENT = re.compile(
-    r"(closing is today|deadline (is )?today|expedite|asap|urgent(ly)? need|by end of day)",
+    r"(closing is today|deadline (is )?today|expedite|asap|urgent(ly)? need|by end of day"
+    r"|\bdeadline\b|court gave me|needs? to be (processed|done|filed) (by|before)|processed before)",
     re.IGNORECASE,
 )
 _SUPERSEDE = re.compile(
@@ -174,7 +183,37 @@ _WITHDRAW = re.compile(
     r"(ignore the earlier|withdraw|wrong file|disregard (the )?(earlier|previous) (upload|file))",
     re.IGNORECASE,
 )
-_SUBMIT = re.compile(r"(attached|enclosed|please find|find attached)", re.IGNORECASE)
+_SUBMIT = re.compile(
+    r"(attached|enclosed|please find|find attached|\bhere (is|are)\b|i am (sending|forwarding)|forwarding)",
+    re.IGNORECASE,
+)
+_UNRELATED = re.compile(
+    r"(webinar|newsletter|unsubscribe|you(?:'|\u2019)re invited|you are invited|calendar invit"
+    r"|no (action|reply|response) (is )?(required|needed)|\bself-?test\b|out-of-band notification)",
+    re.IGNORECASE,
+)
+_ANNOUNCE = re.compile(
+    r"(is|are) being sent|will (be sent|arrive|follow|reach you)|coming (separately|shortly)|should reach you|tie it to this matter",
+    re.IGNORECASE,
+)
+_NOTE_AMEND = re.compile(
+    r"(takes? effect|effective date|parties agreed|agreed (today|that)|note it against|quick note for the file)",
+    re.IGNORECASE,
+)
+_QUESTION = re.compile(
+    r"(\?|\b(can|could|would) you (please )?(give|tell|send|explain|summari[sz]e|confirm)\b|\bconfirm what\b)",
+    re.IGNORECASE,
+)
+_IMPERSONATE = re.compile(
+    r"\b(this is|i am|it(?:'|\u2019)s)\s+(the\s+)?(pi|principal investigator|boss|ceo|owner|managing partner|director)\b"
+    r"|keep this between us|do not loop in|don(?:'|\u2019)t loop in",
+    re.IGNORECASE,
+)
+_CTA = re.compile(
+    r"(review and sign|sign here|sign in|click (here|the link|below)|open the link|view (the )?document online)",
+    re.IGNORECASE,
+)
+_NO_CHANGE = re.compile(r"\bno (changes?|updates?) (to|in|on)\b", re.IGNORECASE)
 _CONFIRM = re.compile(r"(confirm|acknowledg)", re.IGNORECASE)
 _VENDOR = re.compile(
     r"(book a (\d+-minute )?demo|final notice|limited[- ]time offer|new vendor|we help (teams|you)|worth a \d+-minute|free trial)",
@@ -477,7 +516,58 @@ class StandInCorrespondent:
                 ),
                 summary="Message contains instruction-like text aimed at an assistant; treated as data, escalated.",
             )
-        payment = bool(_PAYMENT.search(text))
+        # text extraction only: attachments that are not on the hard-hold list are screened
+        # for instruction-like text addressed to an assistant (never rendered or executed)
+        for a in msg.attachments:
+            if (
+                a.resolved
+                and _ext(a.name) not in _RISKY_EXT | _ARCHIVE_EXT
+                and _INJECTION.search(tools.read_attachment_text(a) or "")
+            ):
+                reasons.append(
+                    f"safety: instruction-like text inside attachment {a.name}; zero tool calls driven by it"
+                )
+                return result(
+                    trust="hostile" if trust != "verified" else "suspicious",
+                    intent="possible_prompt_injection",
+                    issue_class="possible_prompt_injection",
+                    signals=[
+                        {
+                            "kind": "possible_attack",
+                            "attack_class": "injection",
+                            "priority": "critical",
+                            "state": "pending",
+                        },
+                        {
+                            "kind": "possible_attack",
+                            "attack_class": "exfiltration",
+                            "priority": "high",
+                            "state": "pending",
+                        },
+                    ],
+                    attachment_lanes=lanes(
+                        "quarantine", "attachment carries injected instructions"
+                    ),
+                    summary="Attachment text contains instruction-like content aimed at an assistant; quarantined, escalated.",
+                )
+        if _IMPERSONATE.search(text) and trust in {"suspicious", "hostile"}:
+            reasons.append("safety: claims a senior identity from an unverified origin")
+            return result(
+                trust="hostile",
+                intent="spam_or_phishing",
+                issue_class="impersonation",
+                signals=[
+                    {
+                        "kind": "possible_attack",
+                        "attack_class": "impersonation",
+                        "priority": "high",
+                        "state": "pending",
+                    }
+                ],
+                attachment_lanes=lanes("quarantine", "impersonation indicators"),
+                summary="Sender claims a senior identity from a failed-auth origin; no reply, escalated.",
+            )
+        payment = bool(_PAYMENT.search(text)) and not _NO_CHANGE.search(text)
         suppress = bool(_CALL_SUPPRESS.search(text))
         if payment:
             reasons.append(
@@ -529,7 +619,10 @@ class StandInCorrespondent:
                 callback=cb,
                 summary="Verified sender announces a payment change; attachments held pending callback.",
             )
-        if _CRED.search(text) and _URL.search(text):
+        if _URL.search(text) and (
+            _CRED.search(text)
+            or (_CTA.search(text) and trust in {"suspicious", "hostile"})
+        ):
             reasons.append("safety: credential request with a link")
             return result(
                 trust="hostile" if trust != "verified" else "suspicious",
@@ -612,7 +705,35 @@ class StandInCorrespondent:
                 "urgent",
                 "high",
             )
-        elif _LOCKOUT.search(text):
+        elif _UNRELATED.search(text) and not has_att:
+            intent, issue, sig, pri = "unrelated", "spam_or_phishing", "fyi", "low"
+        elif _STATUS.search(text) and not _SUBMIT.search(text):
+            intent, issue, sig, pri = (
+                "status_request",
+                "status_request",
+                "status_request",
+                "normal",
+            )
+        elif _ANNOUNCE.search(text) and not has_att:
+            intent, issue, sig, pri = (
+                "document_submission",
+                "document_submission",
+                "doc_relation",
+                "normal",
+            )
+        elif _NOTE_AMEND.search(text) and not has_att:
+            intent, issue, sig, pri = (
+                "correction_or_amendment",
+                "document_submission",
+                "doc_relation",
+                "normal",
+            )
+        elif (
+            has_att
+            and _QUESTION.search(text)
+            and not _SUBMIT.search(text)
+            or _LOCKOUT.search(text)
+        ):
             intent, issue, sig, pri = (
                 "general_question",
                 "general_question",
@@ -657,16 +778,19 @@ class StandInCorrespondent:
                 "normal",
             )
         reasons.append(f"triage: intent={intent} (keyword rules)")
+        if intent == "legal_notice" and trust == "suspicious":
+            trust = "hostile"  # a legal demand that fails sender authentication
 
         if intent == "disclosure_request":
             return result(
+                trust="hostile" if trust != "verified" else trust,
                 intent=intent,
                 issue_class=issue,
                 signals=[
                     {
                         "kind": "possible_attack",
                         "attack_class": "exfiltration",
-                        "priority": "high",
+                        "priority": "critical" if trust != "verified" else "high",
                         "state": "pending",
                     }
                 ],
