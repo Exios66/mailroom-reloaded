@@ -111,14 +111,19 @@ The offline ingress simulator (`src/mailroom_reloaded/sandbox/server/`) runs two
 flows on the same simulated message:
 
 - **Flow A — Correspondent:** a clearly labelled deterministic **stand-in**
-  (`correspondent.py`, `rule-based-standin/v1`) behind the replaceable
+  (`correspondent.py`, `rule-based-standin/v2`) behind the replaceable
   `CorrespondentAgent` interface. It performs pre-filter, safety screen, trust
   level, intent, signals, attachment lanes, relation proposals and drafts.
+  Intent is chosen by the scored triage in `triage.py` (intent lexicons, abstain
+  path). `llm_correspondent.py` is an optional, default-off Correspondent that
+  delegates only the triage step to a loopback endpoint and falls back to the
+  rules on any failure.
 - **Boss Desk:** a stand-in (`bossdesk.py`, `rule-based-standin-bossdesk/v1`)
   that turns a Correspondent result into typed Boss actions from
   `protocol/delegation_matrix.csv`.
 - **Flow B — the real pipeline:** runs in-process in an isolated data dir on an
-  offline mock LLM (`pipeline_runner.py`, `mock_llm.py`).
+  offline mock LLM (`pipeline_runner.py`, `mock_llm.py`). Dataset-draw attachments
+  are materialised as deterministic placeholder PDFs (`synthetic.py`).
 - **Boss mailbox:** a durable, append-only SQLite two-way channel between the
   Correspondent and the Boss (`sandbox/server/mailbox.py`; see §7.6).
 
@@ -130,7 +135,7 @@ flows on the same simulated message:
 | A model-backed agent or prompt | `src/mailroom_reloaded/agents/`, `prompts/`, `config/taxonomy.yaml` |
 | API / read surface | `src/mailroom_reloaded/api/` |
 | Browser UIs | `src/mailroom_reloaded/api/ui/` (`/ui`), `src/mailroom_reloaded/api/tui/` (`/tui`) |
-| Sandbox server / Correspondent / Boss Desk / mailbox | `src/mailroom_reloaded/sandbox/server/` |
+| Sandbox server / Correspondent / triage / LLM Correspondent / Boss Desk / mailbox | `src/mailroom_reloaded/sandbox/server/` |
 | Content contracts / loader / pin | top-level `schemas/`, `src/mailroom_reloaded/sandbox/content/`, `sandbox/content.lock` |
 | Evaluation / cards / calibration | `src/mailroom_reloaded/eval/`, `cli.py` (`eval`, `card`, `train-gate`, `conformance`) |
 | Observability / replay / ledger | `src/mailroom_reloaded/obs/`, `storage/{ledger,span_store,retention,anchor}.py` |
@@ -150,7 +155,7 @@ flows on the same simulated message:
 | `src/mailroom_reloaded/obs/` | OpenTelemetry + OpenInference tracing, metrics, run context, scores. |
 | `src/mailroom_reloaded/pipeline/` | `state.py`, `flow.py` (`MailroomFlow`), `guards.py`, `report.py`, `archivist.py`. |
 | `src/mailroom_reloaded/prompts/` | Frozen prompts: `frozen_v1/`, `sand37/`, sorter/judge/boss/arbiter, `loader.py`, `lineage.json`. |
-| `src/mailroom_reloaded/sandbox/` | `content/` (loader, compat, lock, bundle, CLI), `server/` (offline ingress sim), `fixtures/` (smoke + vendored policy), `showcase/`. |
+| `src/mailroom_reloaded/sandbox/` | `content/` (loader, compat, lock, bundle, CLI), `server/` (offline ingress sim; `triage.py` scored intent triage, `llm_correspondent.py` optional loopback LLM Correspondent, `synthetic.py` placeholder PDFs, `conformance.py` + LOFO, `mailbox.py`), `fixtures/` (smoke + vendored policy), `showcase/`. |
 | `src/mailroom_reloaded/schemas/` | Extraction response schemas, manifest, audit, ledger models. |
 | `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` v0.21.0 subset (`PARITY.md`); lint-excluded. |
 | `src/mailroom_reloaded/storage/` | Bins, SQLite DB/catalog/audit, ledger, span store, retention, anchor. |
@@ -257,7 +262,7 @@ API (see §7.5).
 | LLM | `tests/llm/` | client resolve/structured calls, tooling, retry |
 | Scoring | `tests/scoring/` | vendored dojo subset + upstream parity |
 | Schemas/Storage | `tests/schemas/`, `tests/storage/` | extraction schemas, audit chain, bins |
-| Sandbox | `tests/sandbox/` | content loader/pin, sandbox API, Correspondent, ingress/egress, conformance, mailbox, UI |
+| Sandbox | `tests/sandbox/` | content loader/pin, sandbox API, Correspondent, triage (`test_server_triage.py`), LLM Correspondent (`test_server_llm_correspondent.py`), ingress/egress, conformance, mailbox, UI |
 | TUI | `tests/tui/` | Python engine/stations tests; JS under `tests/tui/js/` via `node --test` |
 | Top-level | `tests/test_*.py` | dependency fence, prompt lock, settings, tools, watcher/review |
 
