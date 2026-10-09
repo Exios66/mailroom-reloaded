@@ -629,3 +629,23 @@ async def test_async_kickoffs_overlap_synchronous_work(monkeypatch):
         flow_mod.MailroomFlow().kickoff_async({}),
     )
     assert results == ['completed', 'completed']
+
+
+def test_arbiter_cannot_retry_forever(flow, monkeypatch):
+    flow._resume_from = 'gate_extract'
+    monkeypatch.setattr(flow, '_extract_route', lambda: 'do_verify')
+    calls = []
+
+    def verify():
+        calls.append('verify')
+        assert len(calls) <= 4, 'unbounded verifier loop'
+        flow.state.arbiter = ArbiterDecision(action='re_extract')
+
+    monkeypatch.setattr(flow, '_node_verify', verify)
+    monkeypatch.setattr(flow, 'extract', Mock())
+    escalation = Mock()
+    monkeypatch.setattr(flow, '_escalation', escalation)
+    assert flow._drive().status == 'parked'
+    assert len(calls) == 3
+    escalation.assert_called_once_with('human_review', 'arbiter_retries_spent')
+

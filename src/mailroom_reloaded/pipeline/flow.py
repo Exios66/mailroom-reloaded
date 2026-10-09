@@ -857,6 +857,11 @@ class MailroomFlow(Flow[MailroomState]):
                     self._arbiter_events()
                     arbiter_route = self._arbiter_route()
                     if arbiter_route == "retry_extract":
+                        if state.extract_attempts >= load_taxonomy().confidence_for(
+                            self._effective_doc_type()
+                        ).retry_max:
+                            self._escalation("human_review", "arbiter_retries_spent")
+                            return self._park("arbiter_retries_spent")
                         state.extract_attempts += 1
                         self._retry_event("retry_extract", state.extract_attempts, state.extract)
                         self._resume_done.discard("extract")

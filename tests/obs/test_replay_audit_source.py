@@ -403,3 +403,12 @@ def test_gate_reason_prose_does_not_survive(engine) -> None:
         "confidence >= high 0.9",
         "jev choice proceed p=0.950",
     ]
+
+
+def test_arbiter_retry_budget_park_reason_is_kept(engine) -> None:
+    _chain(engine, "dz", [("human_review", "parked", {"reason": "arbiter_retries_spent"}, 3.5)])
+    _eval(engine, "live-1", "z.pdf", "dz")
+    tl = timeline_from_audit("run", "live-1", engine=engine)
+    assert tl is not None
+    parked = next(e for e in tl.events if e.kind == "parked")
+    assert parked.payload == {"reason": "arbiter_retries_spent"}
