@@ -244,7 +244,12 @@ function ledgerRows({ ledger, cols }) {
   const v = ledger.verify;
   if (!v || typeof v !== 'object') out.push(clip([[' chain: not verified', 'dim']], cols));
   else if (v.ok) out.push(clip([[` chain ok — ${truncate(v.count, 8)} entries`, 'ok']], cols));
-  else out.push(clip([[` chain BROKEN${v.broken_at != null ? ` at seq ${truncate(v.broken_at, 8)}` : ''}`, 'err']], cols));
+  else if (v.broken_at == null) {
+    // The run has no ledger rows to verify (e.g. a seeded showcase run). A run-scoped verify
+    // cannot tell that from deleted rows, so this is a warning, not a clean result.
+    const why = typeof v.detail === 'string' && v.detail ? `: ${truncate(v.detail, 40)}` : '';
+    out.push(clip([[` verify failed${why}`, 'warn']], cols));
+  } else out.push(clip([[` chain BROKEN at seq ${truncate(v.broken_at, 8)}`, 'err']], cols));
   return out;
 }
 
