@@ -18,6 +18,7 @@ at import time.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import time
@@ -930,7 +931,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     async def kickoff_async(self, inputs: dict[str, Any] | None = None, input_files: Any = None, **kwargs: Any):
         """Async wrapper around :meth:`kickoff` (the driver is synchronous)."""
-        return self.kickoff(inputs, input_files, **kwargs)
+        return await asyncio.to_thread(self.kickoff, inputs, input_files, **kwargs)
 
 
 def _document_scope(eval_ctx: Any | None):

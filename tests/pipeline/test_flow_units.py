@@ -596,3 +596,36 @@ def test_drive_preserves_original_exception_when_ledger_end_fails(flow, monkeypa
     record.assert_called_once()
     assert record.call_args.kwargs["failure"] is original
     assert record.call_args.kwargs["aborted"] is True
+
+
+async def test_async_kickoff_does_not_block_event_loop(flow, monkeypatch):
+    import asyncio
+    import threading
+
+    release = threading.Event()
+    monkeypatch.setattr(flow, 'kickoff', lambda *a, **k: release.wait(2))
+    task = asyncio.create_task(flow.kickoff_async({}))
+    try:
+        await asyncio.sleep(0.05)
+        assert not task.done(), 'synchronous kickoff blocked the event loop'
+    finally:
+        release.set()
+        await task
+
+
+async def test_async_kickoffs_overlap_synchronous_work(monkeypatch):
+    import asyncio
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    def kickoff(self, *args, **kwargs):
+        barrier.wait(timeout=2)
+        return 'completed'
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, 'kickoff', kickoff)
+    results = await asyncio.gather(
+        flow_mod.MailroomFlow().kickoff_async({}),
+        flow_mod.MailroomFlow().kickoff_async({}),
+    )
+    assert results == ['completed', 'completed']
