@@ -267,7 +267,7 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 **Intake (all best-effort).** Scope is set inside `run_document` in the worker thread (ContextVars do not cross the watcher's thread pool), the bucket is pinned at open, and counters sit under a lock.
 - `flow._drive`: try/finally. Usage is snapshotted at entry and per-invocation **deltas** are taken at exit, because `_configure` restores `usage_total` from the manifest on resume (`flow.py:585-590`). It accumulates from `_record_node`, `_audit_gate` and `_fail_node`. `reconcile_archived` writes `reconciled`.
 - `eval.run_eval`: opens before the gather and closes in `finally` with `expected`. The eval exception path and `specialist_cell` rows (`runner.py:429-466`, which never touch the flow) are recorded explicitly.
-- `watcher`: lazy rollover. The first document of a new day or process closes the previous bucket as `completed`; `resume_processing` runs the closeout. The manifest `processing` status is the open marker, so there is no `doc_open` entry.
+- `watcher`: lazy rollover. The first document of a new day or process closes the previous bucket as `completed` when this process opened it; a stale run left by an earlier process is closed as `interrupted` by `resume_processing`. The manifest `processing` status is the open marker, so there is no `doc_open` entry.
 - LLM usage is captured for **every** role (Decision 12, Task 19), so `doc_closed` carries `usage_by_role` and `usage_complete`. It is false only when a node raised mid-call and its sub-call usage was lost; that node is named in `usage_partial_nodes`.
 - `failure_reason` uses a bounded enum, because today's strings embed filenames and exception text (`clerk.py:156-168`, `flow.py:164`).
 
@@ -767,7 +767,7 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
   - A resumed document reports per-invocation deltas (no double-counted spend); an eval run does not inherit a live parked manifest's usage.
   - `usage_complete=false` when judge, boss or arbiter usage is missing.
   - A hostile fixture (filenames, exception text, judge notes, run ids, `reviewer`) produces no leaked content, with `trace_mask=False`.
-  - Lazy rollover closes the old live bucket as `completed` (the day ended normally; `interrupted` is reserved for a kill during `_drive`); a kill during `_drive` leaves a closeout on the next start.
+  - Lazy rollover of a bucket opened by the current process closes it as `completed` (the day ended normally); a stale run left by a previous process (a kill during `_drive`, or a restart) is closed as `interrupted` on the next start.
 - [ ] **Step 2:** Implement; the ledger is passed through `overrides` like `bins`; failures are logged, never raised.
 - [ ] **Step 3: Commit** `feat(ledger): intake hooks for eval and live runs with allow-list`.
 

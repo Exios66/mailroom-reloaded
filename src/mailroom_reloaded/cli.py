@@ -279,6 +279,9 @@ def audit_verify(
 
     ledger = get_ledger(anchor=False)
     verdict = ledger.verify(run)
+    if run is not None and not verdict.ok and verdict.detail == "unknown run":
+        typer.echo(f"unknown run {run!r}")
+        raise typer.Exit(2)
     if not verdict.ok:
         where = f" at {verdict.broken_at}" if verdict.broken_at is not None else ""
         typer.echo(f"chain: broken{where} ({verdict.detail or 'invalid'})")

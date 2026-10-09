@@ -555,6 +555,53 @@ def test_push_duplicate_same_hash_ok_via_readback(ledger) -> None:
     assert [r.method for r in store.requests] == ["POST", "GET"]
 
 
+class _RacedBackend(MemBackend):
+    """``head()`` is empty on the first call, then shows what a concurrent writer anchored."""
+
+    def __init__(self, raced: dict[int, str]) -> None:
+        super().__init__()
+        self._raced = raced
+        self._calls = 0
+
+    def head(self) -> Head | None:
+        self._calls += 1
+        if self._calls > 1:
+            self.rows.update(self._raced)
+        return super().head()
+
+    def push(self, seq: int, entry_hash: str) -> None:
+        raise AnchorConflict("seq is already anchored")
+
+
+def test_push_losing_a_race_to_the_same_head_is_already(ledger) -> None:
+    _fill(ledger, 3)
+    head = ledger.head()
+    res = anchor.push_head(ledger, _RacedBackend({head.seq: head.entry_hash}))
+    assert (res.status, res.seq, res.entry_hash) == (
+        "already",
+        head.seq,
+        head.entry_hash,
+    )
+
+
+def test_push_losing_a_race_to_a_longer_prefix_head_is_already(ledger) -> None:
+    _fill(ledger, 3)
+    head = ledger.head()
+    ledger.append("run_opened", "later", payload={"kind": "eval", "mode": "pipeline"})
+    ledger.flush()
+    newer = ledger.head()
+    res = anchor.push_head(ledger, _RacedBackend({newer.seq: newer.entry_hash}))
+    assert res.status == "already" and res.seq == newer.seq
+    assert newer.seq > head.seq
+
+
+def test_push_losing_a_race_to_a_different_hash_still_conflicts(ledger) -> None:
+    _fill(ledger, 3)
+    head = ledger.head()
+    with pytest.raises(AnchorConflict):
+        anchor.push_head(ledger, _RacedBackend({head.seq: H1}))
+
+
 def test_push_duplicate_different_hash_conflicts(ledger) -> None:
     _fill(ledger)
     store = FakeStore()
@@ -963,6 +1010,12 @@ def test_cli_verify_chain_ok_without_anchor(cli) -> None:
     _seed()
     res = _invoke("verify")
     assert res.exit_code == 0 and "chain: ok (3 entries" in res.output
+
+
+def test_cli_verify_unknown_run_is_a_usage_error_not_tamper(cli) -> None:
+    _seed()
+    res = _invoke("verify", "--run", "no-such-run")
+    assert res.exit_code == 2 and "unknown run 'no-such-run'" in res.output
 
 
 def test_cli_verify_empty_ledger_ok(cli) -> None:
@@ -1446,17 +1499,19 @@ def captured_engine(monkeypatch):
     return seen
 
 
-def test_postgres_remote_host_forces_sslmode_require(captured_engine) -> None:
+def test_postgres_remote_host_verifies_the_certificate_by_default(
+    captured_engine,
+) -> None:
     SqlBackend("postgresql://u:pw@db.example.test/db")
     args = captured_engine["connect_args"]
-    assert args["sslmode"] == "require" and "connect_timeout" in args
+    assert args["sslmode"] == "verify-full" and "connect_timeout" in args
 
 
 def test_postgres_remote_host_without_password_also_requires_tls(
     captured_engine,
 ) -> None:
     SqlBackend("postgres://u@db.example.test:5432/db", "pw-from-key")
-    assert captured_engine["connect_args"]["sslmode"] == "require"
+    assert captured_engine["connect_args"]["sslmode"] == "verify-full"
 
 
 @pytest.mark.parametrize(
