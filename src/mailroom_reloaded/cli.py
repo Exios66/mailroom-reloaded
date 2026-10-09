@@ -337,6 +337,10 @@ gmail_app = typer.Typer(
 )
 app.add_typer(gmail_app, name="gmail")
 
+from mailroom_reloaded.sandbox.content.cli import sandbox_app
+
+app.add_typer(sandbox_app, name="sandbox")
+
 
 def _gmail_failure(exc: Exception) -> typer.Exit:
     """Print a Gmail command failure and return a non-zero exit."""
