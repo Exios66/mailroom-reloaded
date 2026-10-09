@@ -29,6 +29,14 @@ possible** (no deps, offline). The only executed checks: `node --test` on
 (#44: 1876 passed, 1 env-dependent failure; #45: 1831 passed) are the authors'
 own and unverified, and they differ because the branches differ.
 
+**Baseline (2026-10-09, this machine, R-01 done).** On `main` @ `44c8b0f`:
+`uv run pytest -q` → **1886 passed, 3 skipped, 2 deselected**; `uv run ruff
+check .` → clean; `node --test tests/tui/js/*.test.mjs` → **198 pass**. The one
+audited failure (`test_api.py::test_jev_status_off_by_default`) was a
+test-isolation defect: a developer `.env` sets `MAILROOM_JEV_PROVIDER` and
+pydantic environment values win over `.env`, so deleting the key could not
+neutralize it; the test now forces `off` explicitly.
+
 ---
 
 ## 1. Where additions land (file-organisation contract)
@@ -174,10 +182,10 @@ Steps are checkboxes; tick them in this file as part of the PR that completes th
 #### R-01: Run the full suite once, on current `main`, with deps (reloaded)
 **Why:** every pass count in the repo's docs is unverified (673, 593, 1831, 1876 all differ).
 **Where:** a machine with network; no repo changes except recording the numbers in this ledger.
-- [ ] `cd mailroom-reloaded && git checkout main && git pull`
-- [ ] `uv sync --extra dev && uv run pytest -q && uv run ruff check . && node --test tests/tui/js/*.test.mjs`
-- [ ] If anything fails, open a fix PR first; do not start Phase 1 on a red baseline.
-- [ ] Replace the "unverified" line in the Evidence rule above with the real counts and the date.
+- [x] `cd mailroom-reloaded && git checkout main && git pull`
+- [x] `uv sync --extra dev && uv run pytest -q && uv run ruff check . && node --test tests/tui/js/*.test.mjs` (1886 passed / 3 skipped / 2 deselected; ruff clean; 198 node tests)
+- [x] If anything fails, open a fix PR first; do not start Phase 1 on a red baseline. (Jev test-isolation fix folded into PR1.)
+- [x] Replace the "unverified" line in the Evidence rule above with the real counts and the date.
 
 ### Phase 1: land what is already in flight
 

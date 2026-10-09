@@ -484,8 +484,13 @@ def test_push_route_unconfigured_oidc_rejects_non_static_token(env, monkeypatch)
 
 
 def test_jev_status_off_by_default(env, monkeypatch, client):
-    for key in ("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER"):
-        monkeypatch.delenv(key, raising=False)
+    # Force "off" explicitly rather than deleting the keys: a developer's local
+    # ``.env`` may set MAILROOM_JEV_PROVIDER, and environment variables take
+    # precedence over ``.env`` in pydantic-settings, so a delete would be
+    # refilled from the file. Setting the knob to ``off`` is the default state
+    # this test asserts and is robust in any checkout.
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "off")
+    monkeypatch.delenv("JEV_PROVIDER", raising=False)
     body = client.get("/v1/jev").json()
     assert body["enabled"] is False
     assert body["provider"] == "off"
