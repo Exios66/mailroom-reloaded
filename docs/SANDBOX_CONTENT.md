@@ -63,3 +63,7 @@ The plan's paths map onto this repo's `src/` layout:
 
 `content.lock` fields: `repo`, `tag`, `commit`, `bundle_sha256`, `schema_version`, `dataset_revision`.
 CLI: `mailroom sandbox content pull|validate|build|bump|status`. `pull` takes `--from-bundle` (sha256 verified against the lock), `--from-dir`, or `--url` (refused unless `--allow-network`). `build` validates a content dir and regenerates the smoke fixtures via its `tools/export_smoke.py`. The smoke fixtures were produced by `python3 tools/export_smoke.py --out DIR` at content v0.5.0.
+
+## Running the content (ingress simulation)
+
+`mailroom sandbox serve` loads the smoke set or a pulled bundle and lets you inject its scenarios and inspect the Correspondent and pipeline flows offline; see [SANDBOX_SERVER.md](SANDBOX_SERVER.md). The vendored policy copies it uses for the smoke set live in `src/mailroom_reloaded/sandbox/fixtures/policy/`.
