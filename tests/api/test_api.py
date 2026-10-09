@@ -293,6 +293,37 @@ def test_links_public(client, monkeypatch):
     }
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "javascript:alert(1)//",
+        "data:text/html,x",
+        "ftp://host",
+        "https://svc:hunter2@phoenix.internal:6006",
+        "https://phoenix.example/?token=abc",
+        "https://phoenix.example/#frag",
+        "not a url",
+    ],
+)
+def test_link_settings_reject_unsafe_values(monkeypatch, bad):
+    """Verify the public link settings accept only credential-free http(s) URLs."""
+    from pydantic import ValidationError
+
+    from mailroom_reloaded.settings import Settings
+
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", bad)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_link_settings_strip_trailing_slash(monkeypatch):
+    """Verify a trailing slash is dropped so joined paths never double the slash."""
+    from mailroom_reloaded.settings import Settings
+
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://g.example/")
+    assert Settings().grafana_url == "https://g.example"
+
+
 def test_links_public_without_token(client, monkeypatch):
     """Verify /links stays public while every /v1 route requires the token."""
     monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")

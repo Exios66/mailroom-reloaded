@@ -100,7 +100,11 @@
       if (!res.ok) return;
       const body = await res.json();
       for (const key of ["public_url", "phoenix_url", "grafana_url", "phoenix_project"]) {
-        if (typeof body[key] === "string" && body[key]) LINKS[key] = body[key];
+        const v = body[key];
+        if (typeof v !== "string" || !v) continue;
+        // Only plain http(s) bases are linked; anything else keeps the static default.
+        if (key !== "phoenix_project" && !/^https?:\/\/[^\s@]+$/i.test(v)) continue;
+        LINKS[key] = key === "phoenix_project" ? v : v.replace(/\/+$/, "");
       }
       $("phoenixLink").href = LINKS.phoenix_url;
       $("grafanaLink").href = LINKS.grafana_url;
