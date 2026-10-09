@@ -129,6 +129,31 @@ fixture is named `<b>hostile<b>.txt` to check that filenames render as text.
 (`/` cannot appear in a filename, so a closing `</b>` is impossible.)
 Open http://127.0.0.1:8000/tui.
 
+The four showcase runs (`run:showcase-clean`, `-escalation`, `-judge-arbiter`,
+`-parked-failed`) are seeded on API startup (when span capture is enabled), so the replay viewer has data straight
+away: `replay run:showcase-judge-arbiter`, or open
+`http://127.0.0.1:8000/tui#replay=run:showcase-judge-arbiter`. They have spans but no
+ledger rows, so the ledger panel shows `no ledger entries` and `verify failed: unknown run`.
+A run-scoped verify cannot tell "never had ledger rows" from "rows deleted", so for any
+run that should have a chain, treat that line as a warning and run `ledger verify`.
+
+### Browser check: `scripts/tui_replay_check.mjs`
+
+With the harness up, drive the viewer in headless Chromium (play, pause, seek, jump,
+inspector, ledger panel, quit, keyboard handed back, no injected markup, no page errors):
+
+```bash
+node scripts/tui_replay_check.mjs                       # run:showcase-judge-arbiter
+node scripts/tui_replay_check.mjs run:showcase-parked-failed
+MAILROOM_API_TOKEN=secret node scripts/tui_replay_check.mjs   # authenticates first
+```
+
+It needs Playwright (`PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs` if it is not
+importable) and a Chromium (`CHROMIUM_PATH`). `TUI_URL` overrides `http://127.0.0.1:8000`;
+`SHOT=file.png` saves a screenshot. It exits non-zero on any failed check. It is a dev
+tool, not part of the pytest suite. The viewer needs a physical keyboard: the input is
+read-only while it is open.
+
 The server reads `api/ui/index.html` and the TUI shell once at startup, so
 restart (`down`, `up`) after editing them.
 
@@ -164,6 +189,7 @@ light scheme beyond a selectable theme.
 | `.../tui/commands/shell.js`, `pipeline.js` | Commands. |
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |
+| `scripts/tui_replay_check.mjs` | Headless-Chromium check of the replay viewer. |
 | `tests/api/test_tui_serving.py` | Serving tests. |
 
 ## Local dev with Jev

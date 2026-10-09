@@ -128,6 +128,9 @@ test('panel switch: inspector vs ledger vs none', () => {
   assert.match(led({ entries, verify: { ok: true, count: 3 } }), /#3 +doc_closed +abcdef012345[\s\S]*chain ok — 3 entries/);
   assert.match(led({ entries, verify: { ok: false, broken_at: 2 } }), /chain BROKEN at seq 2/);
   assert.match(led({ entries, verify: null }), /not verified/);
+  const unknown = led({ entries: [], verify: { ok: false, broken_at: null, detail: 'unknown run' } });
+  assert.match(unknown, /verify failed: unknown run/);
+  assert.ok(!/BROKEN/.test(unknown));
   assert.match(led(null), /loading…/);
   assert.match(led({ unavailable: true }), /unavailable/);
 });
