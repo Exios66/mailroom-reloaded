@@ -254,6 +254,129 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
 
   const ABORTED = Symbol('aborted');
 
+  // Character grid that fits the output box; falls back to 100x30 when it cannot be measured.
+  ctx.gridSize = function gridSize() {
+    const fallback = { cols: 100, rows: 30 };
+    try {
+      const probe = el(doc, 'pre', 'takeover-grid', 'x'.repeat(40));
+      probe.style.visibility = 'hidden';
+      probe.style.position = 'absolute';
+      output.appendChild(probe);
+      const rect = probe.getBoundingClientRect();
+      probe.remove();
+      const cw = rect.width / 40;
+      const ch = rect.height;
+      const box = output.clientWidth;
+      const vh = globalThis.innerHeight;
+      if (!(cw > 0) || !(ch > 0) || !(box > 0) || !(vh > 0)) return fallback;
+      return {
+        cols: Math.max(60, Math.min(160, Math.floor(box / cw) - 2)),
+        rows: Math.max(14, Math.min(60, Math.floor((vh * 0.75) / ch))),
+      };
+    } catch {
+      return fallback;
+    }
+  };
+
+  // ---- takeover: a running command borrows the keyboard and a character grid ----
+  const TAKEOVER_MAX_ROWS = 200;
+  const TAKEOVER_MAX_COLS = 400;
+  const GRID_CLS = /^[a-z0-9-]+$/;
+  let takeoverState = null;
+
+  function drawGrid(pre, rows) {
+    if (!Array.isArray(rows)) return;
+    pre.textContent = '';
+    const list = rows.slice(0, TAKEOVER_MAX_ROWS);
+    list.forEach((row, i) => {
+      if (i > 0) pre.appendChild(doc.createTextNode('\n'));
+      let room = TAKEOVER_MAX_COLS;
+      const segs = Array.isArray(row) ? row : [row];
+      for (const seg of segs) {
+        if (room <= 0) break;
+        const isPair = Array.isArray(seg);
+        const raw = isPair ? seg[0] : seg;
+        const cls = isPair ? seg[1] : undefined;
+        const text = Array.from(String(raw === undefined || raw === null ? '' : raw)).slice(0, room).join('');
+        if (text === '') continue;
+        room -= Array.from(text).length;
+        if (typeof cls === 'string' && GRID_CLS.test(cls)) {
+          pre.appendChild(el(doc, 'span', `g-${cls}`, text));
+        } else {
+          pre.appendChild(doc.createTextNode(text));
+        }
+      }
+    });
+  }
+
+  ctx.takeover = function takeover({ onKey, label } = {}) {
+    if (takeoverState) return null;
+    const box = el(doc, 'div', 'takeover');
+    box.setAttribute('role', 'application');
+    box.setAttribute('aria-label', label || 'viewer');
+    const pre = el(doc, 'pre', 'takeover-grid', '');
+    box.appendChild(pre);
+    append(box);
+
+    const sig = controller.signal;
+    let resolveDone;
+    const done = new Promise((resolve) => {
+      resolveDone = resolve;
+    });
+    const state = { onKey: typeof onKey === 'function' ? onKey : () => {}, released: false };
+    takeoverState = state;
+    setInputEnabled(false);
+
+    function release() {
+      if (state.released) return;
+      state.released = true;
+      if (takeoverState === state) takeoverState = null;
+      sig.removeEventListener('abort', release);
+      box.className = 'takeover ended';
+      setInputEnabled(true);
+      focus();
+      resolveDone();
+    }
+    sig.addEventListener('abort', release, { once: true });
+    if (sig.aborted) release();
+
+    return {
+      draw: (rows) => {
+        if (!state.released) drawGrid(pre, rows);
+      },
+      setLabel: (text) => box.setAttribute('aria-label', String(text)),
+      release,
+      done,
+    };
+  };
+
+  function takeoverKey(e) {
+    if (e.isComposing || composing || e.keyCode === 229) return;
+    const k = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+    if ((e.ctrlKey || e.metaKey) && k === 'c') {
+      if (input.selectionStart !== input.selectionEnd) return; // browser copy
+      if (e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        controller.abort(); // releases the takeover via the abort listener
+        queue.length = 0;
+        out.line('^C', 'dim');
+        return;
+      }
+    }
+    e.preventDefault();
+    try {
+      takeoverState.onKey({
+        key: e.key,
+        ctrlKey: !!e.ctrlKey,
+        shiftKey: !!e.shiftKey,
+        altKey: !!e.altKey,
+        metaKey: !!e.metaKey,
+      });
+    } catch {
+      /* a faulty handler must not wedge the keyboard */
+    }
+  }
+
   async function run(line, { warn } = {}) {
     const text = String(line);
     const masked = maskCommand(text);
@@ -401,6 +524,10 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
   });
 
   input.addEventListener('keydown', (e) => {
+    if (takeoverState) {
+      takeoverKey(e);
+      return;
+    }
     if (e.isComposing || composing || e.keyCode === 229) return;
     if (e.ctrlKey && !e.metaKey && !e.altKey) {
       const k = e.key.toLowerCase();

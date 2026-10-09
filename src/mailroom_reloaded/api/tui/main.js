@@ -6,6 +6,7 @@ import { boot } from './boot.js';
 import { createAmbient } from './ambient.js';
 import { registerPipeline } from './commands/pipeline.js';
 import { registerLedger } from './commands/ledger.js';
+import { registerReplay } from './commands/replay.js';
 import { registerShell } from './commands/shell.js';
 
 async function loadText(name) {
@@ -20,6 +21,7 @@ async function loadText(name) {
 export function registerAll(registry, { ambient }) {
   registerPipeline(registry);
   registerLedger(registry);
+  registerReplay(registry);
   registerShell(registry, { ambient });
 }
 

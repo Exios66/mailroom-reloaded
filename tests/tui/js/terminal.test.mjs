@@ -343,3 +343,116 @@ test('banner and divider are aria-hidden', () => {
   const doc = makeDoc();
   assert.equal(renderBanner(doc, 'x').attrs['aria-hidden'], 'true');
 });
+
+// ---- ctx.takeover ----
+async function startTakeover(opts = {}) {
+  let view = null;
+  const t = mkTerm({
+    run: (ctx) => {
+      view = ctx.takeover(opts);
+      return new Promise(() => {});
+    },
+  });
+  t.type('slow');
+  t.key('Enter');
+  await tick();
+  return { t, view };
+}
+
+test('takeover draw builds spans via textContent; hostile text stays text', async () => {
+  const { t, view } = await startTakeover({ label: 'demo' });
+  const box = t.out.children.at(-1);
+  assert.equal(box.className, 'takeover');
+  assert.equal(box.attrs.role, 'application');
+  assert.equal(box.attrs['aria-label'], 'demo');
+  const pre = box.children[0];
+  assert.equal(pre.tagName, 'pre');
+  assert.equal(pre.className, 'takeover-grid');
+  view.draw([HOSTILE, [[HOSTILE, 'hot'], [42, 'bad Cls'], ['x', 'g-ok']]]);
+  assert.equal(pre.textContent, `${HOSTILE}\n${HOSTILE}42x`);
+  const spans = pre.children.filter((c) => c.tagName === 'span');
+  assert.equal(spans.length, 2);
+  assert.equal(spans[0].className, 'g-hot');
+  assert.equal(spans[1].className, 'g-g-ok');
+  assert.equal(spans[0].children.length, 0);
+  assert.ok(pre.children.every((c) => c.tagName !== 'img'));
+  view.draw('nope');
+  assert.equal(pre.textContent, `${HOSTILE}\n${HOSTILE}42x`, 'non-array draws nothing');
+  view.setLabel('next');
+  assert.equal(box.attrs['aria-label'], 'next');
+});
+
+test('takeover draw caps rows at 200 and each row at 400 chars', async () => {
+  const { t, view } = await startTakeover();
+  const pre = t.out.children.at(-1).children[0];
+  view.draw(Array.from({ length: 300 }, () => 'a'));
+  assert.equal(pre.textContent.split('\n').length, 200);
+  view.draw([[['b'.repeat(300), 'ok'], ['c'.repeat(300), 'err'], ['d', 'dim']]]);
+  assert.equal(pre.textContent.length, 400);
+  assert.equal(pre.children.filter((c) => c.tagName === 'span').length, 2);
+});
+
+test('second takeover returns null while one is active', async () => {
+  const { t, view } = await startTakeover();
+  assert.ok(view);
+  assert.equal(t.term.ctx.takeover({}), null);
+  view.release();
+  assert.ok(t.term.ctx.takeover({}));
+});
+
+test('takeover routes keys to onKey, not the input; release is idempotent and restores input', async () => {
+  const keys = [];
+  const { t, view } = await startTakeover({ onKey: (e) => keys.push(e) });
+  t.type('half');
+  const e = t.key('ArrowUp', { shiftKey: true });
+  assert.equal(e.defaultPrevented, true);
+  assert.deepEqual(keys[0], { key: 'ArrowUp', ctrlKey: false, shiftKey: true, altKey: false, metaKey: false });
+  t.key('Enter');
+  assert.equal(t.input.value, 'half', 'typed text preserved, nothing submitted');
+  assert.equal(t.input.readOnly, true);
+  // copy with a selection is left to the browser
+  t.input.selectionStart = 0;
+  t.input.selectionEnd = 2;
+  const n = keys.length;
+  assert.equal(t.key('c', { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(keys.length, n);
+  // IME composition is not forwarded
+  t.key('a', { isComposing: true });
+  assert.equal(keys.length, n);
+  view.release();
+  view.release();
+  await view.done;
+  assert.equal(t.input.readOnly, false);
+  assert.equal(t.input.value, 'half');
+  assert.equal(t.out.children.at(-1).className, 'takeover ended');
+  const before = keys.length;
+  t.key('x');
+  assert.equal(keys.length, before);
+});
+
+test('Ctrl+C releases an active takeover and frees the prompt', async () => {
+  const keys = [];
+  const { t, view } = await startTakeover({ onKey: (e) => keys.push(e) });
+  view.draw(['frame']);
+  t.input.selectionStart = t.input.selectionEnd = 0;
+  t.key('c', { ctrlKey: true });
+  await view.done;
+  assert.equal(keys.length, 0);
+  assert.equal(t.input.readOnly, false);
+  const box = t.out.children.find((c) => c.className === 'takeover ended');
+  assert.ok(box);
+  assert.equal(box.textContent, 'frame');
+  view.draw(['late']);
+  assert.equal(box.textContent, 'frame', 'draw after release is ignored');
+});
+
+test('lines submitted during a takeover are queued', async () => {
+  const { t, view } = await startTakeover();
+  t.input.readOnly = false;
+  t.input.value = 'echo';
+  // Enter is swallowed by the takeover; the line stays in the input
+  t.key('Enter');
+  assert.equal(t.input.value, 'echo');
+  assert.ok(!t.texts().includes('ran'));
+  view.release();
+});
