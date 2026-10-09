@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mailroom_reloaded.llm.client import price_role
+from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.pipeline.state import MailroomState
 from mailroom_reloaded.settings import load_taxonomy
 
@@ -51,16 +53,10 @@ def _extraction(state: MailroomState) -> dict[str, Any] | None:
     }
 
 
-def _cost_usd(state: MailroomState) -> float:
-    """Approximate per-token cost using the sorter's configured price (estimate)."""
-    usage = state.usage_total
-    if usage.total_tokens == 0:
-        return 0.0
-    try:
-        model = load_taxonomy().agent("sorter").model
-        prices = (load_taxonomy().raw.get("cost_models") or {}).get(model)
-    except Exception:  # noqa: BLE001 - report must never raise
-        return 0.0
+def _price(tax: Any, role: str, usage: Usage) -> float:
+    """Cost of ``usage`` at ``role``'s configured model price (0.0 when unpriced)."""
+    model = tax.agent(price_role(role)).model
+    prices = (tax.raw.get("cost_models") or {}).get(model)
     if not isinstance(prices, dict):
         return 0.0
     return float(
@@ -69,6 +65,28 @@ def _cost_usd(state: MailroomState) -> float:
         / 1_000_000
         * float(prices.get("output_per_million", 0.0))
     )
+
+
+def _cost_usd(state: MailroomState) -> float:
+    """Per-token cost estimate: each role's usage at that role's configured price.
+
+    Roles that report no price cost 0.0, and the eval ``grader`` is excluded (it is
+    not pipeline spend). States saved before per-role capture price the whole total
+    at the sorter's rates, as before.
+    """
+    if state.usage_total.total_tokens == 0:
+        return 0.0
+    try:
+        tax = load_taxonomy()
+        if state.usage_by_role:
+            return sum(
+                _price(tax, role, usage)
+                for role, usage in state.usage_by_role.items()
+                if role != "grader"
+            )
+        return _price(tax, "sorter", state.usage_total)
+    except Exception:  # noqa: BLE001 - report must never raise
+        return 0.0
 
 
 def compile_report(state: MailroomState) -> dict[str, Any]:

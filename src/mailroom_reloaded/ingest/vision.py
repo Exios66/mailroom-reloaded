@@ -8,6 +8,7 @@ from pathlib import Path
 import structlog
 
 from mailroom_reloaded.llm.client import call_structured
+from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.settings import load_taxonomy
 
 logger = structlog.get_logger(__name__)
@@ -50,11 +51,13 @@ def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None)
     return uris
 
 
-def transcribe_pages(pdf_path: Path) -> str:
+def transcribe_pages(pdf_path: Path, usage_out: list[Usage] | None = None) -> str:
     """Transcribe every rendered page (up to ``vision.max_pages``; 0 = all) of a scanned PDF.
 
     One ``pdf_transcriber`` call per page, joined in page order. Raises on render
-    failure or when no page yields text, so the caller can record an error.
+    failure or when no page yields text, so the caller can record an error. Each
+    page's usage is appended to ``usage_out`` as soon as the call returns, so the
+    caller keeps the spend of the pages done before a later page raises.
     """
     pdf_path = Path(pdf_path)
     cap, dpi = _vision_cfg()
@@ -74,6 +77,8 @@ def transcribe_pages(pdf_path: Path) -> str:
             },
         ]
         res = call_structured("pdf_transcriber", messages)
+        if usage_out is not None:
+            usage_out.append(res.usage)
         if res.content.strip():
             out.append(res.content.strip())
     text = "\n\n".join(out)

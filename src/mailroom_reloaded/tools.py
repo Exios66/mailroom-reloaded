@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.schemas.extraction import get_extraction_schema as _get_schema
 from mailroom_reloaded.scoring import subclass_vocab
 from mailroom_reloaded.settings import load_taxonomy
@@ -32,6 +33,8 @@ class ToolContext:
     doc_id: str = ""
     eval_mode: bool = False
     ground_truth: Callable[[str], dict] | None = None
+    #: ``(role, usage)`` entries appended by CrewAI agents; the flow drains it after the node.
+    usage_sink: list[tuple[str, Usage]] = field(default_factory=list)
 
 
 class _Params(BaseModel):

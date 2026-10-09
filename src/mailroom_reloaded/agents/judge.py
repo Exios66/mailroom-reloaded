@@ -14,8 +14,8 @@ from typing import Any, Literal
 from crewai import Agent, Crew, Task
 from pydantic import BaseModel, ConfigDict, Field
 
-from mailroom_reloaded.llm.client import make_llm
-from mailroom_reloaded.llm.usage import Usage
+from mailroom_reloaded.llm.client import make_llm, record_crew_usage, record_usage
+from mailroom_reloaded.llm.usage import Usage, usage_from_crew
 from mailroom_reloaded.prompts.loader import load_prompt
 from mailroom_reloaded.settings import Taxonomy, load_taxonomy
 from mailroom_reloaded.tools import ToolContext, crewai_tool, tools_for
@@ -79,17 +79,25 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, default=str)
 
 
-def _usage(token_usage: Any) -> Usage:
-    """Convert a CrewAI ``token_usage`` object into a ``Usage`` total."""
-    return Usage(
-        prompt_tokens=int(getattr(token_usage, "prompt_tokens", 0) or 0),
-        completion_tokens=int(getattr(token_usage, "completion_tokens", 0) or 0),
-        calls=int(getattr(token_usage, "successful_requests", 0) or 0),
-    )
+_usage = usage_from_crew
 
 
-def _run(goal: str, backstory: str, description: str, model: type[BaseModel], ctx: ToolContext, tools):
-    """Build and run the single-agent judge crew for one task."""
+def _run(
+    goal: str,
+    backstory: str,
+    description: str,
+    model: type[BaseModel],
+    ctx: ToolContext,
+    tools,
+    *,
+    capture: bool = True,
+):
+    """Build and run the single-agent judge crew for one task.
+
+    With ``capture`` the crew's token usage goes to ``ctx.usage_sink`` (and the LLM
+    metrics) under the judge role; the eval grader passes ``capture=False`` and
+    reports its own usage on the :class:`JudgeGrade`.
+    """
     agent = Agent(
         role=ROLE,
         goal=goal,
@@ -105,7 +113,10 @@ def _run(goal: str, backstory: str, description: str, model: type[BaseModel], ct
         output_pydantic=model,
         agent=agent,
     )
-    return Crew(agents=[agent], tasks=[task]).kickoff()
+    result = Crew(agents=[agent], tasks=[task]).kickoff()
+    if capture:
+        record_crew_usage(ROLE, result, ctx.usage_sink)
+    return result
 
 
 def _extract(result: Any, model: type[BaseModel]) -> BaseModel:
@@ -155,13 +166,16 @@ def judge_grade(text: str, doc_type: str, data: dict | None, ctx: ToolContext) -
         _GradeOutput,
         ctx,
         tools,
+        capture=False,
     )
     parsed = _extract(result, _GradeOutput)
+    grade_usage = _usage(result.token_usage)
+    record_usage("grader", grade_usage)
     return JudgeGrade(
         doc_id=ctx.doc_id,
         doc_type=doc_type,
         fields=parsed.fields,
         classification=parsed.classification,
         overall=parsed.overall,
-        usage=_usage(result.token_usage),
+        usage=grade_usage,
     )

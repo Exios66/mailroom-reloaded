@@ -42,6 +42,7 @@ from mailroom_reloaded.ingest.bert import (
     decide_handoff,
 )
 from mailroom_reloaded.ingest.clerk import ingest as _ingest
+from mailroom_reloaded.llm.usage import Usage, add_role_usage
 from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.obs.run_context import ensure_run_scope
 from mailroom_reloaded.pipeline.archivist import archive_document
@@ -84,6 +85,9 @@ _NEXT: dict[str, str] = {
 }
 
 _DEFAULT_PROMPT_SET = "frozen_v1"
+
+#: Nodes that call an LLM (their spend can be partly lost when they raise).
+_LLM_NODES = frozenset({"ingest", "sort", "extract", "verify", "boss", "grade"})
 
 
 def _sha256_file(path: Path) -> str:
@@ -161,6 +165,7 @@ class MailroomFlow(Flow[MailroomState]):
         result = _ingest(Path(state.path))
         state.ingest = result
         state.text = result.text
+        self._add_usage("pdf_transcriber", result.usage)  # vision spend, kept even on failure
         if result.error:
             self._fail_node("ingest", f"ingest_failed:{result.error}")
 
@@ -188,7 +193,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.handoff = handoff
         result = _sort(state.text, handoff, attempt=state.classify_attempts)
         state.sort = result
-        state.usage_total = state.usage_total + result.usage
+        self._add_usage("sorter", result.usage)
         self._llm_calls += 1
 
     @guarded("extract", NODE_DEADLINES["extract"], 0)
@@ -209,7 +214,7 @@ class MailroomFlow(Flow[MailroomState]):
             kwargs["cond"] = cond
         result = _extract(state.text, doc_type, doc_subclass, **kwargs)
         state.extract = result
-        state.usage_total = state.usage_total + result.usage
+        self._add_usage(load_taxonomy().classes[doc_type].specialist, result.usage)
         self._llm_calls += 1
         M.schema_valid.add(1 if result.schema_valid else 0, {"doc_type": doc_type})
 
@@ -219,7 +224,12 @@ class MailroomFlow(Flow[MailroomState]):
         state = self.state
         doc_type = self._effective_doc_type()
         data = state.extract.data if state.extract is not None else None
-        ctx = ToolContext(doc_text=state.text, doc_id=state.doc_id, eval_mode=False)
+        ctx = ToolContext(
+            doc_text=state.text,
+            doc_id=state.doc_id,
+            eval_mode=False,
+            usage_sink=self._sink(),
+        )
         state.verdict = judge_verify(state.text, doc_type, data, ctx)
         state.arbiter = arbitrate(state.text, doc_type, data, state.verdict, ctx)
 
@@ -227,7 +237,12 @@ class MailroomFlow(Flow[MailroomState]):
     def _node_boss(self) -> None:
         """Escalate to the boss with a summary of the failed classification."""
         state = self.state
-        ctx = ToolContext(doc_text=state.text, doc_id=state.doc_id, eval_mode=False)
+        ctx = ToolContext(
+            doc_text=state.text,
+            doc_id=state.doc_id,
+            eval_mode=False,
+            usage_sink=self._sink(),
+        )
         summary = {
             "doc_type": state.sort.doc_type if state.sort is not None else None,
             "doc_subclass": state.sort.doc_subclass if state.sort is not None else None,
@@ -283,6 +298,37 @@ class MailroomFlow(Flow[MailroomState]):
             )
         except Exception:  # noqa: BLE001 - grading must not fail the document
             state.grade = None
+            self._mark_usage_partial("grade")
+        else:
+            # grading spend is kept apart: it never inflates the pipeline's usage_total
+            add_role_usage(state.usage_by_role, "grader", state.grade.usage)
+
+    # --------------------------------------------------------------- usage plumbing
+    def _add_usage(self, role: str, usage: Usage) -> None:
+        """Count ``usage`` into the pipeline total and under ``role``."""
+        state = self.state
+        state.usage_total = state.usage_total + usage
+        add_role_usage(state.usage_by_role, role, usage)
+
+    def _sink(self) -> list[tuple[str, Usage]]:
+        """The per-run collector the CrewAI agents append to (created on first use)."""
+        try:
+            return self._usage_sink
+        except AttributeError:
+            self._usage_sink = []
+            return self._usage_sink
+
+    def _drain_usage_sink(self) -> None:
+        """Move the CrewAI agents' collected ``(role, usage)`` entries into the state."""
+        sink = self._sink()
+        entries, sink[:] = list(sink), []
+        for role, usage in entries:
+            self._add_usage(role, usage)
+
+    def _mark_usage_partial(self, node_name: str) -> None:
+        """Flag an LLM-calling node that raised mid-call: part of its spend may be unrecorded."""
+        if node_name in _LLM_NODES and node_name not in self.state.usage_partial_nodes:
+            self.state.usage_partial_nodes.append(node_name)
 
     # --------------------------------------------------------------- guard plumbing
     def _guard_node(
@@ -310,12 +356,16 @@ class MailroomFlow(Flow[MailroomState]):
             try:
                 result = fn(self, *args, **kwargs)
             except NodeFailed:
+                self._drain_usage_sink()
                 raise
             except Exception as exc:  # persist the completed prefix, then surface
+                self._drain_usage_sink()
+                self._mark_usage_partial(node_name)
                 self._manifest.state = self.state.model_dump(mode="json")
                 save_manifest(self._bins, self._manifest)
                 span.record_exception(exc)
                 raise
+            self._drain_usage_sink()
             elapsed = time.monotonic() - start
             used_tokens = self.state.usage_total.total_tokens - before_tokens
             if deadline and deadline > 0 and elapsed > deadline:
@@ -557,6 +607,7 @@ class MailroomFlow(Flow[MailroomState]):
         self._eval_ctx = eval_ctx
         self._resume_from = resume_from
         self._llm_calls = 0
+        self._usage_sink: list[tuple[str, Usage]] = []
         self._gate = load_gate()
         self._tracer = trace.get_tracer("mailroom.pipeline")
 

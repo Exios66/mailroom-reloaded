@@ -8,7 +8,7 @@ from typing import Any, Literal
 from crewai import Agent, Crew, Task
 from pydantic import BaseModel
 
-from mailroom_reloaded.llm.client import make_llm
+from mailroom_reloaded.llm.client import make_llm, record_crew_usage
 from mailroom_reloaded.prompts.loader import load_prompt
 from mailroom_reloaded.tools import ToolContext, crewai_tool, tools_for
 
@@ -52,6 +52,7 @@ def escalate(text: str, state_summary: dict | None, ctx: ToolContext) -> BossDec
         agent=agent,
     )
     result = Crew(agents=[agent], tasks=[task]).kickoff()
+    record_crew_usage(ROLE, result, ctx.usage_sink)
     if isinstance(result.pydantic, BossDecision):
         return result.pydantic
     if result.json_dict:
