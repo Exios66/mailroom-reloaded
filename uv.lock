@@ -1878,6 +1878,9 @@ gmail = [
 parity = [
     { name = "llm-dojo-scoring" },
 ]
+sandbox = [
+    { name = "jsonschema" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1890,6 +1893,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'" },
     { name = "httpx" },
     { name = "jellyfish" },
+    { name = "jsonschema", marker = "extra == 'sandbox'", specifier = ">=4" },
     { name = "llm-dojo-scoring", marker = "extra == 'parity'", git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=v0.21.0" },
     { name = "mailroom-ml", extras = ["serve"], marker = "extra == 'bert'", git = "https://github.com/LLM-Mailroom-Services/mailroom-ml.git" },
     { name = "matplotlib", marker = "extra == 'eval'" },
@@ -1922,7 +1926,7 @@ requires-dist = [
     { name = "uvicorn" },
     { name = "watchdog" },
 ]
-provides-extras = ["bert", "eval", "gmail", "embeddings", "deploy", "dev", "parity"]
+provides-extras = ["bert", "eval", "gmail", "embeddings", "deploy", "dev", "sandbox", "parity"]
 
 [[package]]
 name = "markdown-it-py"

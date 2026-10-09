@@ -1,0 +1,104 @@
+{
+ "$id": "https://github.com/Exios66/mailroom-sandbox-content/schemas/registry.v1.json",
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "additionalProperties": false,
+ "description": "Client registry schema (addendum v2 \u00a72.3). Schema owned by comms/registry.py in the main repo; data is synthetic and comes from this content repo (clients/). Compiled to dist/registry.yaml. Never contains: lookalike domains, impostor personas, scenario ids, stratum-level weights, or labels.",
+ "properties": {
+  "clients": {
+   "additionalProperties": {
+    "additionalProperties": false,
+    "properties": {
+     "callback": {
+      "properties": {
+       "contact": {
+        "type": "string"
+       },
+       "phone": {
+        "pattern": "^\\+1-555-01[0-9]{2}$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "contact",
+       "phone"
+      ],
+      "type": "object"
+     },
+     "display_name": {
+      "type": "string"
+     },
+     "normal_send_hours": {
+      "type": "string"
+     },
+     "reference_formats": {
+      "properties": {
+       "claim": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "matter": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "usual_channels": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "usual_mix": {
+      "additionalProperties": {
+       "maximum": 1.0,
+       "minimum": 0.0,
+       "type": "number"
+      },
+      "description": "Class-level weights only (stratum-level weights never in the registry)",
+      "type": "object"
+     },
+     "verified_addresses": {
+      "items": {
+       "pattern": "^[^@\\s]+@([A-Za-z0-9-]+\\.)*sandbox\\.invalid$",
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "verified_domains": {
+      "items": {
+       "pattern": "^([A-Za-z0-9-]+\\.)*sandbox\\.invalid$",
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "display_name",
+     "verified_domains",
+     "verified_addresses",
+     "callback"
+    ],
+    "type": "object"
+   },
+   "type": "object"
+  },
+  "generated_from": {
+   "description": "content repo tag/commit the registry was compiled from",
+   "type": "string"
+  },
+  "version": {
+   "const": 1
+  }
+ },
+ "required": [
+  "version",
+  "clients"
+ ],
+ "title": "mailroom.comm.registry/v1",
+ "type": "object"
+}

@@ -1,0 +1,25 @@
+# Generation spec: vendor cold outreach with a fake-urgent subject (addendum v2 §6.3)
+# Archetype D1: fyi, low priority, folded into the digest. No reply, no attachments.
+id: gen_D1_vendor_spam_0301
+persona: p_vendor_spam
+target_client: brightwater
+archetype: D1
+goal: Send vendor cold outreach carrying a fake-urgent subject line.
+constraints:
+  must_include: [fake_urgency_subject, product_pitch, demo_cta]
+  forbidden: [real_brands, real_urls, working_links, phone_numbers_outside_555_01xx]
+style:
+  register: salesy
+  length: "60-110 words"
+  language: en
+context:
+  product: ClaimsBoost AI
+  claimed_from: hello@claimsboost-ai.sandbox.invalid
+  pitch_claim: cut processing time 10x
+attachments: []
+pool: free_pool
+expect:
+  intent: spam_or_phishing
+  signal: fyi
+  quarantine: false
+  reply_to_sender: false

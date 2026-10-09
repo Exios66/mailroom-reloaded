@@ -1,0 +1,25 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://github.com/Exios66/mailroom-reloaded/schemas/event_kinds.v1.json",
+ "title": "event_kinds.v1",
+ "description": "Sandbox event-log kinds (addendum v2 section 9.4): events(seq, ts, run_id, kind, ref_id, payload).",
+ "type": "string",
+ "enum": [
+  "ingress.sent",
+  "message.received",
+  "message.triaged",
+  "signal.emitted",
+  "boss.action",
+  "draft.created",
+  "draft.approved",
+  "send.done",
+  "attachment.handoff",
+  "attachment.held",
+  "attachment.quarantined",
+  "generation.attempt",
+  "generation.fallback",
+  "egress.call",
+  "fault.injected",
+  "run.state"
+ ]
+}
