@@ -241,7 +241,36 @@ _COURT_URGENT = re.compile(
     r"(court|closing is today|deadline (is )?today|filing)", re.IGNORECASE
 )
 _EN_STOP = frozenset(
-    "the and to of a in is it you that for with this be are on as at have not we your i from or my can me".split()
+    [
+        "the",
+        "and",
+        "to",
+        "of",
+        "a",
+        "in",
+        "is",
+        "it",
+        "you",
+        "that",
+        "for",
+        "with",
+        "this",
+        "be",
+        "are",
+        "on",
+        "as",
+        "at",
+        "have",
+        "not",
+        "we",
+        "your",
+        "i",
+        "from",
+        "or",
+        "my",
+        "can",
+        "me",
+    ]
 )
 
 
@@ -252,6 +281,16 @@ def _non_english(text: str) -> bool:
     return sum(t in _EN_STOP for t in toks) / len(toks) < 0.12
 
 
+_ASK = re.compile(
+    r"(\?|\b(can|could|would) you\b|\bplease (send|provide|give|tell|confirm what)\b|\bwhere (is|are)\b"
+    r"|\bwho can\b|\bwhat (is|are|does|was)\b)",
+    re.IGNORECASE,
+)
+_CONTEXT = re.compile(
+    r"(part \d+ of \d+|missing|\blate\b|left out|counterparty|read together|as requested|let me know if|heads up"
+    r"|will follow|being sent|takes? effect|note it against)",
+    re.IGNORECASE,
+)
 _NO_CHANGE = re.compile(r"\bno (changes?|updates?) (to|in|on)\b", re.IGNORECASE)
 _CONFIRM = re.compile(r"(confirm|acknowledg)", re.IGNORECASE)
 _VENDOR = re.compile(
@@ -337,6 +376,20 @@ _T_HOLDING = _ENV.from_string(
     "Hello,\n\nThank you for your message, and we are sorry for the delay. We have flagged your "
     "request for review so it gets attention. We will follow up with a concrete update as soon as "
     "we have one.\n\nBest regards,\nMailroom Correspondent\n"
+)
+_T_PRIVACY = _ENV.from_string(
+    "Hello,\n\nWe received your privacy request. It has been passed to a person who is responsible "
+    "for these requests. Nothing is disclosed or deleted until that review is complete, and we "
+    "will write to you with the outcome.\n\nBest regards,\nMailroom Correspondent\n"
+)
+_T_QUESTION = _ENV.from_string(
+    "Hello,\n\nThank you for your question. We have noted it and a team member will confirm the "
+    "details with you. We do not share document contents or extracted details by email "
+    "until they have been checked.\n\nBest regards,\nMailroom Correspondent\n"
+)
+_T_CLARIFY = _ENV.from_string(
+    "Hello,\n\nThank you for sending {{ names }}. It differs from what we normally receive from "
+    "you, so could you confirm which matter it belongs to?\n\nBest regards,\nMailroom Correspondent\n"
 )
 _T_ACK = _ENV.from_string(
     "Hello,\n\nWe received your message and have flagged it for priority handling. "
@@ -1042,7 +1095,12 @@ class StandInCorrespondent:
             "subject": reply_subject,
             "in_reply_to": msg.message_id,
         }
+        asked = bool(_ASK.search(msg.body))
+        text = f"{msg.subject}\n{msg.body}"
+        quarantined = any(ln["lane"] == "quarantine" for ln in lane_list)
         if intent == "status_request":
+            if not asked:
+                return []  # the sender is reporting status, not asking for it
             refs = entities.get("refs", [])
             facts, ev = [], []
             for doc in tools.lookup_catalog():
@@ -1053,33 +1111,50 @@ class StandInCorrespondent:
                     ev.append(doc["doc_id"])
             body = _T_STATUS.render(refs=", ".join(refs), facts=facts)
             return [Draft(**base, body=body + _FOOTER, intent=intent, evidence=ev)]
-        if (
-            intent in {"document_submission", "correction_or_amendment"}
-            and trust == "verified"
+        if intent in {"document_submission", "correction_or_amendment"} and (
+            trust == "verified" and not quarantined
         ):
-            if relations or _CONFIRM.search(msg.body):
-                names = ", ".join(a.name for a in msg.attachments) or "your message"
-                ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
-                body = _T_SUBMISSION.render(
-                    names=names, doc_ids=ids, relations=relations
-                )
+            names = ", ".join(a.name for a in msg.attachments) or "your message"
+            if _ANOMALY.search(msg.body) and msg.attachments:
                 return [
                     Draft(
                         **base,
-                        body=body + _FOOTER,
-                        intent=intent,
-                        evidence=[r["b_doc_id"] for r in relations],
+                        body=_T_CLARIFY.render(names=names) + _FOOTER,
+                        intent="clarifying_question",
                     )
                 ]
-            return []
+            if not (relations or _CONFIRM.search(msg.body) or _CONTEXT.search(text)):
+                return []  # a bare transmittal needs no acknowledgement draft
+            ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
+            body = _T_SUBMISSION.render(names=names, doc_ids=ids, relations=relations)
+            return [
+                Draft(
+                    **base,
+                    body=body + _FOOTER,
+                    intent=intent,
+                    evidence=[r["b_doc_id"] for r in relations],
+                )
+            ]
         if intent == "general_question" and trust == "unverified":
             return [
                 Draft(**base, body=_T_HOLD.render() + _FOOTER, intent="status_update")
             ]
+        if (
+            intent == "general_question"
+            and trust == "verified"
+            and asked
+            and not (
+                _ADVISORY.search(msg.body)
+                or _FORWARDED.search(msg.body)
+                or _MISSING.search(msg.body)
+                or _non_english(msg.body)
+            )
+        ):
+            return [Draft(**base, body=_T_QUESTION.render() + _FOOTER, intent=intent)]
+        if intent == "privacy_request" and trust == "verified":
+            return [Draft(**base, body=_T_PRIVACY.render() + _FOOTER, intent=intent)]
         if intent == "complaint" and trust == "verified":
             return [Draft(**base, body=_T_HOLDING.render() + _FOOTER, intent=intent)]
-        if intent == "urgent_deadline" and trust == "verified":
-            return [Draft(**base, body=_T_ACK.render() + _FOOTER, intent=intent)]
         return []
 
 
