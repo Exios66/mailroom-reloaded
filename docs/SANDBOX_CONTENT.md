@@ -53,3 +53,21 @@ there and are added here because the plan assigns them to M0.
 - **Code window.** `content.json` carries `min_code_version` / `max_code_version`; the loader refuses content outside the running code's version.
 - **Pinning.** `sandbox/content.lock` pins repo, tag, commit, bundle sha256, schema_version and dataset_revision. Consumers never track a branch.
 - Schema changes are contract changes: they land here (M0) first, then the content repo adopts them.
+
+## Loader layout (workstream M6)
+
+The plan's paths map onto this repo's `src/` layout:
+
+| Plan path | This repo |
+|---|---|
+| `sandbox/content/` | `src/mailroom_reloaded/sandbox/content/` (loader, compat, lock, bundle, CLI) |
+| `sandbox/fixtures/smoke/` | `src/mailroom_reloaded/sandbox/fixtures/smoke/` (committed, <= 2 MB, ships in the wheel) |
+| `sandbox/content.lock` | `sandbox/content.lock` at the repo root (a pin, not package data) |
+| `schemas/` | repo-root `schemas/`; force-included in the wheel as `mailroom_reloaded/sandbox/schemas` |
+
+`content.lock` fields: `repo`, `tag`, `commit`, `bundle_sha256`, `schema_version`, `dataset_revision`.
+CLI: `mailroom sandbox content pull|validate|build|bump|status`. `pull` takes `--from-bundle` (sha256 verified against the lock), `--from-dir`, or `--url` (refused unless `--allow-network`). `build` validates a content dir and regenerates the smoke fixtures via its `tools/export_smoke.py`. The smoke fixtures were produced by `python3 tools/export_smoke.py --out DIR` at content v0.5.0.
+
+## Running the content (ingress simulation)
+
+`mailroom sandbox serve` loads the smoke set or a pulled bundle and lets you inject its scenarios and inspect the Correspondent and pipeline flows offline; see [SANDBOX_SERVER.md](SANDBOX_SERVER.md). The vendored policy copies it uses for the smoke set live in `src/mailroom_reloaded/sandbox/fixtures/policy/`.

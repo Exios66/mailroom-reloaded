@@ -59,7 +59,11 @@ _RETRY_STAGE = {"sort": "retry_classify", "extract": "retry_extract"}
 
 
 def _safe(fn):
-    """Run a capture helper, swallowing and logging any failure."""
+    """Wrap a capture helper, returning ``None`` on caught ``Exception`` errors.
+
+    Re-raise those errors when pytest is loaded. ``BaseException`` subclasses
+    outside ``Exception`` always propagate.
+    """
 
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
@@ -79,7 +83,10 @@ def _safe(fn):
 
 @_safe
 def emit_event(event: str, /, **attrs: Any) -> None:
-    """Add the span event ``mailroom.<event>`` (``None`` values are dropped) to the current span."""
+    """Add ``mailroom.<event>`` to the current span if recording, dropping ``None`` values.
+
+    Capture errors are suppressed except when pytest is loaded.
+    """
     span = trace.get_current_span()
     if span.is_recording():
         span.add_event(
@@ -88,7 +95,11 @@ def emit_event(event: str, /, **attrs: Any) -> None:
 
 
 def stage_after(node: str, state: Any, retry: bool = False) -> str:
-    """The document's stage after ``node`` (The-Mailroom's vocabulary)."""
+    """Return the post-node stage in The-Mailroom's vocabulary.
+
+    Failed and parked states take precedence, yielding ``failed`` and ``review``.
+    ``retry`` selects retry stages only for sort/extract; unknown nodes pass through.
+    """
     if state.status == "failed":
         return "failed"
     if state.status == "parked":
@@ -101,7 +112,11 @@ def stage_after(node: str, state: Any, retry: bool = False) -> str:
 # --------------------------------------------------------------------------- root span
 @_safe
 def root_start(span: Any, flow: Any) -> None:
-    """Section A attributes known when the document starts."""
+    """Annotate the root span with document, run-configuration and eval identities.
+
+    Strip claim prefixes from the filename and limit it to 256 characters.
+    Capture errors are suppressed except when pytest is loaded.
+    """
     state, manifest = flow.state, flow._manifest
     filename = _CLAIM_PREFIX.sub(
         "", Path(state.path).name if state.path else manifest.filename
@@ -135,12 +150,17 @@ def root_start(span: Any, flow: Any) -> None:
 
 
 def _ground_truth(flow: Any) -> dict[str, Any]:
+    """Fetch this document's eval labels, or return an empty dict when absent.
+
+    Errors from the ground-truth lookup propagate.
+    """
     if getattr(flow, "_eval_ctx", None) is None:
         return {}
     return flow._ground_truth_fn()(flow.state.doc_id) or {}
 
 
 def _failure_class(flow: Any, error: BaseException | None) -> str | None:
+    """Classify ``error`` first, otherwise the flow's failure reason; absent both, return ``None``."""
     if error is not None:
         return A.failure_class_for(error)
     reason = getattr(flow, "_failure_reason", None)
@@ -151,7 +171,12 @@ def _failure_class(flow: Any, error: BaseException | None) -> str | None:
 def root_end(
     span: Any, flow: Any, error: BaseException | None, elapsed_s: float
 ) -> None:
-    """Flat output attributes, the output summary and the every-run / reconsideration scores."""
+    """Write root outcome, usage, summary and run/reconsideration scores.
+
+    ``elapsed_s`` is this invocation's duration in seconds. A supplied ``error``
+    marks the run aborted; it is classified, not raised here. Capture errors
+    are suppressed except when pytest is loaded.
+    """
     state = flow.state
     doc_type = flow._effective_doc_type()
     subclass = flow._effective_subclass()
@@ -204,6 +229,7 @@ def root_end(
 
 
 def _by_role(state: Any) -> dict[str, dict[str, float]]:
+    """Summarize every recorded role's tokens, calls and cost in USD, including grading."""
     return {
         role: {
             "prompt_tokens": u.prompt_tokens,
@@ -216,6 +242,10 @@ def _by_role(state: Any) -> dict[str, dict[str, float]]:
 
 
 def pipeline_cost(state: Any) -> float:
+    """Sum recorded role costs in USD, excluding the eval grader.
+
+    Unknown or unpriced roles and pricing failures contribute zero.
+    """
     return sum(
         cost_for(role, u) for role, u in state.usage_by_role.items() if role != "grader"
     )
@@ -231,6 +261,11 @@ def _every_run_scores(
     sort_conf: float | None,
     ext_conf: float | None,
 ) -> None:
+    """Emit run scores using duration in seconds and pipeline cost in USD.
+
+    Success is 1 only for completion without a retry, re-sort or boss escalation.
+    Attempt counts include the initial attempt. Score-emission errors propagate.
+    """
     state = flow.state
     extract = state.extract
     retried = (
@@ -262,7 +297,11 @@ def _every_run_scores(
 def _ground_truth_scores(
     span: Any, flow: Any, doc_type: str, aborted: bool
 ) -> dict[str, Any]:
-    """class_correct / stage_correct against the eval labels; returns them for the causes."""
+    """Emit and return correctness scores for available eval labels.
+
+    Skip stage correctness for aborted runs; accept ``archive`` as an alias
+    for expected ``archived``. Lookup and score-emission errors propagate.
+    """
     gt = _ground_truth(flow)
     out: dict[str, Any] = {}
     if not gt:
@@ -286,6 +325,11 @@ def _ground_truth_scores(
 def _reconsideration(
     span: Any, flow: Any, doc_type: str, subclass: str | None, aborted: bool
 ) -> None:
+    """Emit eval correctness, review causes and the reconsideration flag.
+
+    Use a floor of 0.88 if the class threshold cannot be loaded. Aborted runs
+    retain causes but never request reconsideration. Other errors propagate.
+    """
     state = flow.state
     extract = state.extract
     gt = _ground_truth(flow)
@@ -336,7 +380,11 @@ def _reconsideration(
 def node_start(
     span: Any, flow: Any, node: str, deadline_s: float, token_budget: int
 ) -> None:
-    """Section B attributes known when a node starts."""
+    """Annotate node identity, attempt, deadline in seconds and token budget.
+
+    Consume a pending retry tag only for sort/extract and set ``flow._node_retry``
+    for the ending stage. Capture errors are suppressed except under pytest.
+    """
     state = flow.state
     station = A.station_for(node)
     span.set_attribute(A.SPAN_KIND, A.SPAN_KIND_FOR_NODE.get(node, "SPAN"))
@@ -368,7 +416,13 @@ def node_end(
     error: BaseException | None = None,
     fail_reason: str | None = None,
 ) -> None:
-    """Usage, stage and (on failure) reason attributes once a node has run."""
+    """Record node usage deltas, stage, results and failure details.
+
+    ``before`` and ``before_cost`` are the starting usage and pipeline cost in
+    USD; the cost delta is clamped to zero. ``fail_reason`` takes precedence
+    over ``error`` for failure classification. The supplied error is not raised;
+    capture errors are suppressed except when pytest is loaded.
+    """
     state = flow.state
     used = state.usage_total - before
     span.set_attribute("mailroom.tokens.used", used.total_tokens)
@@ -395,6 +449,10 @@ def node_end(
 
 
 def _node_extras(span: Any, flow: Any, node: str) -> None:
+    """Add available node-specific result summaries; unknown nodes add nothing.
+
+    Attribute conversion and span errors propagate.
+    """
     state = flow.state
     if node == "ingest" and state.ingest is not None:
         ing = state.ingest
@@ -448,7 +506,13 @@ def _node_extras(span: Any, flow: Any, node: str) -> None:
 
 @_safe
 def grade_scores(span: Any, flow: Any) -> None:
-    """Grounded extraction scores on the ``grade`` span (eval only): overall, per field, P/R/F1."""
+    """Emit judge and grounded extraction scores on the eval ``grade`` span.
+
+    Emit a present judge grade even without expected fields or extracted data;
+    those are required for extraction scores. Include per-field and binary
+    metrics and cache a computed overall score on ``flow`` for reconsideration.
+    Capture errors are suppressed except when pytest is loaded.
+    """
     from mailroom_reloaded.scoring import score_extraction
     from mailroom_reloaded.scoring.extraction_metrics import extraction_binary_metrics
 

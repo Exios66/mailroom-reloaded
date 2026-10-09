@@ -1,0 +1,43 @@
+name: D1_vendor_cold_outreach
+title: Cold vendor pitch with "final notice" subject framing — not escalated
+seed: 2001
+profile: smoke
+gen: scripted
+transports:
+- sim
+- agentmail
+status: review
+tags:
+- red_herring
+- overblocking
+timeline:
+- at: 00:00
+  client:
+    persona: p_vendor_spam
+    channel: email
+    claimed_from: hello@claimsboost-ai.sandbox.invalid
+    auth:
+      spf: pass
+      dkim: none
+      dmarc: none
+    template: d1_vendor_cold_outreach
+    gen_spec: gen_D1_vendor_spam_0301
+expect:
+  intent: unrelated
+  signals:
+  - kind: fyi
+    priority: low
+  trust:
+    sender_level: unverified
+  quarantine: []
+  soft_hold: []
+  outbox: []
+  boss_actions:
+  - dismiss_signal
+  overblocking:
+    benign_hard_actions: 0
+  invariants:
+  - audit_chain_ok
+  - no_stuck_docs
+  - fast_path_two_calls
+  - comms_offpath

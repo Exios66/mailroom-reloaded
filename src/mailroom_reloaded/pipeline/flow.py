@@ -257,7 +257,11 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("report_catalog_archive", NODE_DEADLINES["report_catalog_archive"], 0)
     def _node_report_catalog_archive(self) -> None:
-        """Compile the report, archive the file and upsert the catalog record."""
+        """Compile the report, archive the file and upsert the catalog record.
+
+        Defer a failed catalog upsert through ``catalog_pending``; report and
+        archival errors propagate.
+        """
         state = self.state
         report = compile_report(state)
         report["llm_calls"] = self._llm_calls
@@ -283,7 +287,13 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("grade", NODE_DEADLINES["grade"], 0)
     def _node_grade(self) -> None:
-        """Eval-only: grade the extraction against ground truth (never fails the doc)."""
+        """Grade the extraction against ground truth when an eval context is present.
+
+        Keep successful grader usage in ``usage_by_role``, outside ``usage_total``.
+        Grading errors clear ``state.grade`` and mark usage partial; the surrounding
+        node guard can still raise ``NodeFailed`` if its deadline is exceeded.
+        Capture errors can propagate under pytest and remain subject to the node guard.
+        """
         if self._eval_ctx is None:
             return
         state = self.state
@@ -329,7 +339,10 @@ class MailroomFlow(Flow[MailroomState]):
             self._add_usage(role, usage)
 
     def _mark_usage_partial(self, node_name: str) -> None:
-        """Flag an LLM-calling node that raised mid-call: part of its spend may be unrecorded."""
+        """Flag potentially unrecorded spend once for a known LLM-calling node.
+
+        Ignore other node names; this does not establish where a failure occurred.
+        """
         if node_name in _LLM_NODES and node_name not in self.state.usage_partial_nodes:
             self.state.usage_partial_nodes.append(node_name)
 
@@ -343,7 +356,18 @@ class MailroomFlow(Flow[MailroomState]):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        """Run a node under resume-skip, manifest/audit, span and budget guards."""
+        """Run a node under resume-skip, manifest/audit, span and budget guards.
+
+        Return the node's result, or ``None`` when consuming a resume skip.
+        Per-node overrides replace ``deadline_s`` (seconds) and ``token_budget``
+        (the increase in pipeline total tokens). Nonpositive limits are disabled;
+        exceeding a positive limit after execution fails the document with
+        ``NodeFailed``. Exact limits are allowed; execution is not interrupted.
+
+        Drain collected usage after execution, including on node exceptions.
+        Re-raise ``NodeFailed``; for other node errors, mark LLM usage partial and
+        save state before re-raising. Persistence and audit errors also propagate.
+        """
         if node_name in self._resume_done:
             self._resume_done.remove(node_name)
             return None
@@ -438,7 +462,11 @@ class MailroomFlow(Flow[MailroomState]):
         raise NodeFailed(node_name, reason)
 
     def _park(self, reason: str) -> MailroomState:
-        """Park the document in ``review/`` with manifest/audit updates."""
+        """Mark the document parked, attempt moving it to ``review/`` and return its state.
+
+        Persist the manifest and audit reason. Relocation and catalog errors are
+        suppressed; manifest and audit errors propagate.
+        """
         state = self.state
         state.route_trail.append("human_review")
         state.status = "parked"
@@ -551,7 +579,10 @@ class MailroomFlow(Flow[MailroomState]):
         trace_capture.emit_event("escalation", to=to, reason=reason)
 
     def _retry_event(self, kind: str, attempt: int, result: Any) -> None:
-        """Record a gate retry and tag the next node span with its ``retry_kind``."""
+        """Record a gate retry and tag the next sort/extract span with its ``retry_kind``.
+
+        ``attempt`` is one-based. Omit the maximum if its taxonomy lookup fails.
+        """
         self._retry_kind = kind
         M.retries.add(1, {"kind": kind})
         try:
@@ -657,7 +688,12 @@ class MailroomFlow(Flow[MailroomState]):
         overrides: dict[str, Any] | None,
         eval_ctx: Any | None,
     ) -> None:
-        """Claim the file, load its manifest and restore state for this run."""
+        """Claim the file, load its manifest and restore state for this run.
+
+        Raise ``FileNotFoundError`` if the selected work path does not exist.
+        Ignore invalid state within a loaded manifest; manifest validation and
+        other I/O errors propagate.
+        """
         self._bins = (overrides or {}).get("bins") or Bins(get_settings().base_dir)
         self._overrides = dict(overrides or {})
         self._eval_ctx = eval_ctx
@@ -770,7 +806,11 @@ class MailroomFlow(Flow[MailroomState]):
             logger.warning("ledger_end_failed", exc_info=True)
 
     def _drive_nodes(self) -> MailroomState:
-        """Deterministically walk the guarded nodes and gates to a terminal bin."""
+        """Walk guarded nodes and gates, returning the final document state.
+
+        Catch ``NodeFailed`` to end the walk with its current state; other errors
+        propagate. After archival, run pending eval grading when enabled.
+        """
         self._resume_done = set(self._manifest.completed_nodes)
         state = self.state
         node = self._resume_start()
@@ -969,12 +1009,13 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
         with ensure_run_scope("reconcile") as scope:
             ledger = run_ledger.ledger_for(None)
             run_id = run_ledger.ensure_live_run(ledger, scope)
-            run_ledger.record_reconciled(
-                ledger,
-                run_id,
-                manifest.doc_id,
-                str(payload.get("doc_type") or sort.get("doc_type") or "unknown"),
-            )
+            if run_id is not None:
+                run_ledger.record_reconciled(
+                    ledger,
+                    run_id,
+                    manifest.doc_id,
+                    str(payload.get("doc_type") or sort.get("doc_type") or "unknown"),
+                )
     except Exception:
         logger.warning("ledger_reconcile_failed", doc_id=manifest.doc_id, exc_info=True)
     return True
@@ -994,6 +1035,11 @@ def run_document(
     a node crashes (the manifest keeps the completed prefix, so a later call
     resumes). A deadline/token-budget failure or an ingest failure returns a
     state with ``status == "failed"``.
+
+    Reuse the current run scope, or open one inside the calling worker via
+    :func:`ensure_run_scope`, using ``eval_ctx.run_id`` when available. The
+    caller's scope is restored on exit, including on errors. A missing document
+    raises ``FileNotFoundError``; setup and persistence errors also propagate.
     """
     flow = MailroomFlow()
     # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
