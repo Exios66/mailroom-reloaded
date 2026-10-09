@@ -218,13 +218,13 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 | `sort` (+ `retry_sort` / `re_sort`) | `sorter` | `intake_sort` | classify / retry_classify | `--term-cyan` |
 | `gate_classify`, `gate_extract` | `gate` | `intake_sort` / `extraction` | (new: deterministic gate) | `--term-phosphor` |
 | `extract` (+ `retry_extract`) | `specialist` | `extraction` | extract / retry_extract | `--term-amber` |
-| `verify` | `judge` | `extraction` | judge_verify / arbiter | `--term-magenta`* |
+| `verify` | `judge` | `extraction` | judge_verify / arbiter | `--term-station-judge` (= `--term-magenta`) |
 | `boss` | `boss` | `extraction` | boss | `--term-red` |
-| `human_review` | `review` (bay) | `review` | review | `--term-yellow`* |
+| `human_review` | `review` (bay) | `review` | review | `--term-station-review` (= `--term-yellow`) |
 | `report_catalog_archive` | `archive` | `reporting` | report / catalog / archive | `--term-green` |
 | terminal `failed` | `failed` (bay) | `terminal` | failed | `--term-red` |
 
-\* `--term-magenta` (`#f472b6`) and `--term-yellow` (`#facc15`) exist in The-Mailroom terminal site's palette but not yet in our `tokens.css`. This is listed under open questions as a brand-kit addition.
+`--term-magenta` (`#f472b6`) and `--term-yellow` (`#facc15`) were already vendored in `tokens.css` (dark, light and hc). The viewer takes them through the `--term-station-judge` and `--term-station-review` role aliases, added in the brand-kit follow-up.
 
 ## Concept mapping (F1 → mailroom)
 
@@ -328,7 +328,7 @@ src/mailroom_reloaded/
   api/tui/main.js             (modify) registerReplay; #replay= deep link
   api/tui/commands/replay.js  (new)
   api/tui/replay/{clock,model,view,panels,stations}.js     (new)
-  api/tui/tokens.css, tui.css (modify) .replay-* layout; magenta/yellow tokens if approved
+  api/tui/tokens.css, tui.css (modify) .replay-* layout; station role tokens (done)
 deploy/grafana/dashboards/{pipeline,quality}.json          (modify) replay ↗ / phoenix ↗ links, decision panels
 deploy/otel-collector*.yaml   (optional) commented `file` exporter example
 tests/obs/test_run_context.py, test_span_attrs.py, test_scores.py, test_metrics_run_id.py,
@@ -651,11 +651,11 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 
 ## Open questions
 
-1. **Brand tokens:** add `--term-magenta #f472b6` and `--term-yellow #facc15` (from The-Mailroom terminal site) to the kit for the judge and review stations, or reuse existing tokens?
+1. ~~**Brand tokens**~~ **Resolved:** magenta and yellow were already in the kit; added `--term-station-judge` / `--term-station-review` role aliases.
 2. **Live `run_id` granularity:** a daily bucket (`live-<YYYYMMDD>`, proposed), one per watcher process start, or one per hour?
 3. **Retention:** 14 days for live spans; should eval runs be pinned indefinitely (proposed: yes, with `mailroom replay unpin <run>`)?
 4. **Hosted judge scores:** `mailroom-pipeline-judge` and `mailroom-pipeline-quality` were asynchronous Langfuse evaluators. Here they come from the in-pipeline `verify` node. Is that equivalence acceptable, or should an offline judge pass write scores back into the span store later (as a `mailroom.score` late event)?
-5. **The-Mailroom compatibility:** should we also ship a small `mailroom_ui` source adapter PR to The-Mailroom that reads `traces.db` or `/v1/replay`, so the original floor can render mailroom-reloaded runs?
+5. ~~**The-Mailroom compatibility**~~ **Resolved:** shipped as Exios66/The-Mailroom#39 (Phoenix source reads `mailroom.document` / `mailroom.node.*`). Original wording: should we also ship a small `mailroom_ui` source adapter PR to The-Mailroom that reads `traces.db` or `/v1/replay`, so the original floor can render mailroom-reloaded runs?
 6. **`/ui` entry point:** add a `replay ↗` link per eval run in `/ui`'s Eval runs section?
 
 ## Self-review

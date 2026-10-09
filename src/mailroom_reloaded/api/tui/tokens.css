@@ -23,6 +23,9 @@
   --term-red: #ef4444; /* Terminal error lines (5.4:1 on `term-bg` brand). Light (proposed, not yet in the source): #b02118. */
   --term-green: #4ade80; /* Terminal prompt `mailroom@floor`, success lines, ok boot tags, the live status dot. Light (proposed, not yet in the source): #17703a. */
   --term-yellow: #facc15; /* Terminal warning lines and warn boot tags. Light (proposed, not yet in the source): #6f5400. */
+  /* Station roles (replay track, inspector): the judge and review stations take the kit's magenta and yellow. */
+  --term-station-judge: var(--term-magenta);
+  --term-station-review: var(--term-yellow);
   --term-border: #1d2530; /* Terminal hairlines: status bar rule, table cells, man pages, pre blocks. 1.2–1.3:1 in the brand theme (decorative). The `hc` theme raises it to 4.5:1+ on every terminal ground. Light (proposed, not yet in the source): #737c8a. */
   --term-sky-1: #0c130f; /* Terminal ambient skyline, near (front) layer. Light (proposed, not yet in the source): #e2dccf. */
   --term-sky-2: #0e1712; /* Terminal ambient skyline, far (back) layer, drawn at 55% opacity. Light (proposed, not yet in the source): #e9e4d9. */
