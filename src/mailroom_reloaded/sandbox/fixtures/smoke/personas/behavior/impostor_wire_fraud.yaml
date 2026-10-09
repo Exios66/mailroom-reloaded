@@ -1,0 +1,26 @@
+persona_id: p_tricounty_impostor
+tone: hurried
+register: rushed business English; urgent subjects, terse instructions, claims to be in closings all day and unreachable by phone
+escalation:
+  patience_sim_min: 30
+  steps:
+    - after_sim_min: 30
+      action: increases_urgency
+    - after_sim_min: 60
+      action: goes_quiet
+attachment_habits:
+  formats: [pdf]
+  naming: generic_filenames
+  fragmentation: whole
+notes: >
+  Wire-fraud impostor archetype. Claims to be kalvarado@tricounty-title.sandbox.invalid —
+  NOTE the hyphenated lookalike domain (tricounty-title vs the registered
+  tricountytitle). Manufactures urgency around a pending closing, suppresses
+  phone callbacks ("reply by email only, no calls; in closings all day"),
+  and ships a fabricated wire-instructions PDF. Auth on the leg fails
+  (spf fail, dkim none, dmarc fail). The simulator must yield possible_attack
+  with attack_class payment_fraud, quarantine the attachment, and recommend
+  the registered callback number — never the one in the message.
+reply_templates:
+  - "Subject: URGENT - updated wire instructions for today's closing. Bank changed this morning; use the attached instructions. In closings all day, reply by email only, no calls."
+  - "Subject: Re: wire instructions — please confirm you switched to the new instructions before the closing window."

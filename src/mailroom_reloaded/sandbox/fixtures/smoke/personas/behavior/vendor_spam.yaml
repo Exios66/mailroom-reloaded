@@ -1,0 +1,25 @@
+persona_id: p_vendor_spam
+tone: salesy
+register: breathless marketing English; "final notice" urgency, throughput claims, demo booking calls to action
+escalation:
+  patience_sim_min: 0
+  steps:
+    - after_sim_min: 1440
+      action: sends_second_cold_pitch
+    - after_sim_min: 2880
+      action: goes_quiet
+attachment_habits:
+  formats: []
+  naming: no_attachments
+  fragmentation: whole
+notes: >
+  Cold-outreach vendor from hello@claimsboost-ai.sandbox.invalid. Sends
+  unsolicited sales mail ("cut processing time 10x", "book a demo this
+  week") with no attachments and no relation to any matter. Expected
+  handling: fyi / low priority, folded into the digest, no reply, no
+  attachments to hold. patience_sim_min 0 because this persona never
+  expects an answer and never escalates — the only state change is a
+  scheduled second cold pitch in the spam cadence.
+reply_templates:
+  - "Subject: Final notice: your claims throughput is lagging — cut processing time 10x with automated document processing. Book a demo this week!"
+  - "Subject: Quick follow-up on claims throughput — we help teams clear backlogs fast. Worth a 15-minute look?"

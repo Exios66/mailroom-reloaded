@@ -1,0 +1,38 @@
+# Recipient policy per profile (addendum v2 §7.3)
+#
+# Replaces the old "no egress / *.sandbox.invalid only" rule with an
+# allowlisted version (alignment #1, amended I7).
+
+schema: mailroom.recipient_policy/v1
+
+closed:
+  profile_env: MAILROOM_SANDBOX_EGRESS=closed
+  allowed_recipients:
+    - "*.sandbox.invalid (only)"
+  note: no egress at all; both legs are sim.
+
+egress:
+  profile_env: MAILROOM_SANDBOX_EGRESS=egress
+  allowed_recipients:
+    - generated AgentMail sandbox inboxes (the sender pool + Correspondent inbox)
+    - the designated sandbox Gmail address (MAILROOM_SANDBOX_GMAIL_ADDRESS)
+    - >-
+      virtual *.sandbox.invalid addresses WITH an overlay route record
+      (overlay/contract.md): a draft to a routed virtual address is delivered
+      to the mapped sender inbox; a virtual address with NO route fails closed.
+  default_action: >
+    FAIL CLOSED (S6): any recipient outside the classes above is refused and
+    logged. The gateway never improvises a destination.
+
+external_inbound:
+  # Real people writing to the sandbox inbox from the outside.
+  allowed: true
+  tagging:
+    origin: external
+  handling: >
+    Treated as untrusted input under the same rules as generated mail, but
+    EXCLUDED from scored runs because it has no ground truth.
+
+enforcement: >
+  Enforced by the persona-leg gateway, and again independently by the egress
+  proxy (unknown hosts/recipient domains are denied and logged — S5).
