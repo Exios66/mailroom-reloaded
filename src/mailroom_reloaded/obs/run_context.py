@@ -100,6 +100,7 @@ def ensure_run_scope(source: str = "watch", run_id: str | None = None) -> Iterat
         yield existing
         return
     if run_id:
+        run_id = _safe_run_id(run_id)
         opened = run_scope(run_id, "eval", source, session_id=f"eval-{run_id}")
     else:
         opened = run_scope(live_run_id(), environment_name(), source)
