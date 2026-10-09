@@ -112,9 +112,11 @@ test('scoresAt, generationsFor, docAt', () => {
   assert.equal(m.scoresAt(10).length, 2);
   assert.equal(m.scoresAt(10, 'b').length, 1);
   assert.deepEqual(m.generationsFor('a', 5).map((g) => g.span_id), ['g1']);
-  assert.deepEqual(m.generationsFor('a', 7).map((g) => g.span_id), ['g1', 'g2']);
-  assert.equal(m.docAt('b').filename, 'b.pdf');
-  assert.equal(m.docAt('zzz'), undefined);
+  // g2 spans t 7..9: it is in flight at 7 (no tokens or cost yet), so it shows from 9.
+  assert.deepEqual(m.generationsFor('a', 7).map((g) => g.span_id), ['g1']);
+  assert.deepEqual(m.generationsFor('a', 9).map((g) => g.span_id), ['g1', 'g2']);
+  assert.equal(m.docAt('b', 100).filename, 'b.pdf');
+  assert.equal(m.docAt('zzz', 100), undefined);
   assert.deepEqual(m.segmentsFor('zzz'), []);
 });
 
@@ -167,7 +169,7 @@ test('empty and garbage timelines never throw', () => {
 test('hostile strings pass through verbatim', () => {
   const m = createModel(timeline());
   assert.equal(byId(m.stateAt(2), 'a').filename, HOSTILE);
-  assert.equal(m.docAt('a').filename, HOSTILE);
+  assert.equal(m.docAt('a', 100).filename, HOSTILE);
   const h = createModel(timeline({ events: [{ t: 1, doc_id: 'a', kind: HOSTILE, payload: { reason: HOSTILE } }] }));
   assert.equal(h.eventsUpTo(1)[0].kind, HOSTILE);
   assert.equal(h.eventsUpTo(1)[0].payload.reason, HOSTILE);
@@ -200,4 +202,63 @@ test('non-primitive doc ids do not throw', () => {
   const m = createModel(tl);
   assert.doesNotThrow(() => m.stateAt(5));
   assert.doesNotThrow(() => m.eventsForDoc({ toString: 1 }, 5));
+});
+
+test('outcome fields appear only at the end time; identity from the start', () => {
+  const m = createModel(
+    timeline({
+      entities: [
+        { doc_id: 'a', filename: 'a.pdf', t_start: 1, t_end: 12, final_status: 'archived', final_stage: 'archive', verdict: 'CORRECT', failure_class: 'bad', review_causes: ['low_conf'], totals: { tokens: 9 } },
+        { doc_id: 'c', filename: 'c.pdf', t_start: 4, t_end: null },
+      ],
+    }),
+  );
+  const before = byId(m.stateAt(10), 'a');
+  assert.equal(before.finished, false);
+  assert.equal(before.final_status, null);
+  assert.equal(before.final_stage, null);
+  assert.equal(before.verdict, null);
+  assert.equal(byId(m.stateAt(3), 'c').filename, '');
+  assert.equal(byId(m.stateAt(5), 'c').filename, 'c.pdf');
+  const early = m.docAt('a', 10);
+  assert.equal(early.filename, 'a.pdf');
+  for (const k of ['final_status', 'final_stage', 'verdict', 'failure_class', 'review_causes', 'totals']) {
+    assert.equal(k in early, false, k);
+  }
+  const after = m.docAt('a', 12);
+  assert.equal(after.verdict, 'CORRECT');
+  assert.equal(after.failure_class, 'bad');
+  assert.deepEqual(after.review_causes, ['low_conf']);
+  assert.equal(byId(m.stateAt(12), 'a').final_status, 'archived');
+  assert.equal(m.docAt('a').filename, '', 'no time given: no identity before the start, no outcome');
+});
+
+test('firstPassAt counts only documents finished by t, with the rollup rule', () => {
+  const m = createModel({
+    session: { id: 's', duration_s: 30 },
+    entities: [
+      { doc_id: 'p', t_start: 0, t_end: 5, final_status: 'archived' },
+      { doc_id: 'q', t_start: 0, t_end: 8, final_status: 'archived' },
+      { doc_id: 'r', t_start: 0, t_end: 20, final_status: 'archived' },
+    ],
+    segments: [{ doc_id: 'q', node: 'extract', station: 'specialist', t0: 1, t1: 2, attempt: 2, retry_kind: 'llm', status: 'ok' }],
+    scores: [{ doc_id: 'r', name: 'success_rate', value: 0, t: 15 }],
+    rollups: { first_pass_rate: 0.9 },
+  });
+  assert.equal(m.firstPassAt(4), null);
+  assert.equal(m.firstPassAt(5), 1);
+  assert.equal(m.firstPassAt(8), 0.5);
+  assert.equal(m.firstPassAt(14), 0.5);
+  assert.equal(m.firstPassAt(20), 1 / 3);
+});
+
+test('firstPassAt ignores a score that arrives after the document finished', () => {
+  const m = createModel({
+    session: { id: 's', duration_s: 30 },
+    entities: [{ doc_id: 's', t_start: 0, t_end: 6, final_status: 'archived' }],
+    segments: [],
+    scores: [{ doc_id: 's', name: 'success_rate', value: 0, t: 9 }],
+  });
+  assert.equal(m.firstPassAt(6), 1, 'the failing score is not visible until t=9');
+  assert.equal(m.firstPassAt(9), 0);
 });
