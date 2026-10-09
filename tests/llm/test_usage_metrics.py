@@ -67,7 +67,13 @@ def test_usage_metrics_price_tokens_and_keep_labels(
     assert (
         calls.attributes
         == cost.attributes
-        == {"role": "sorter", "provider": "mock", "model": "test-model"}
+        == {
+            "role": "sorter",
+            "provider": "mock",
+            "model": "test-model",
+            "run_id": "unscoped",
+            "environment": "unscoped",
+        }
     )
     tokens = {
         p.attributes["gen_ai.token.type"]: p
@@ -81,6 +87,8 @@ def test_usage_metrics_price_tokens_and_keep_labels(
             "gen_ai.token.type": kind,
             "gen_ai.request.model": "test-model",
             "gen_ai.provider.name": "mock",
+            "run_id": "unscoped",
+            "environment": "unscoped",
         }
     (duration,) = emitted["gen_ai.client.operation.duration"]
     assert duration.sum == pytest.approx(1.25)
@@ -89,6 +97,8 @@ def test_usage_metrics_price_tokens_and_keep_labels(
         "gen_ai.request.model": "test-model",
         "gen_ai.provider.name": "mock",
         "gen_ai.operation.name": "chat",
+        "run_id": "unscoped",
+        "environment": "unscoped",
     }
 
 
@@ -174,6 +184,8 @@ def test_structured_call_records_all_usage_even_on_length_cap(
         "role": "sorter",
         "provider": "mock",
         "model": "test-model",
+        "run_id": "unscoped",
+        "environment": "unscoped",
     }
     tokens = {
         p.attributes["gen_ai.token.type"]: p.sum

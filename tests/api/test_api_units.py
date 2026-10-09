@@ -136,14 +136,14 @@ def test_review_forwards_corrections_and_reports_missing_document(monkeypatch):
 
 
 def test_cards_skip_malformed_files_and_return_sorted_valid_cards(bins):
-    cards = bins.base / "runs" / "run-1" / "cards"
+    cards = bins.base / "runs" / "0123456789ab" / "cards"
     cards.mkdir(parents=True)
     (cards / "b.json").write_text(json.dumps({"name": "second"}))
     (cards / "a.json").write_text(json.dumps({"name": "first"}))
     (cards / "broken.json").write_text("{invalid")
     (cards / "ignored.txt").write_text("{}")
-    assert api.run_cards_endpoint("run-1") == {
-        "run_id": "run-1",
+    assert api.run_cards_endpoint("0123456789ab") == {
+        "run_id": "0123456789ab",
         "cards": [{"name": "first"}, {"name": "second"}],
     }
-    assert api.run_cards_endpoint("missing") == {"run_id": "missing", "cards": []}
+    assert api.run_cards_endpoint("abcdef012345") == {"run_id": "abcdef012345", "cards": []}
