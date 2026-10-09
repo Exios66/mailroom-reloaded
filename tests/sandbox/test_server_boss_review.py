@@ -117,16 +117,8 @@ def make_client(tmp_path):
         guard.uninstall()
 
 
-def _attack_mid(svc):
-    return next(
-        m["id"]
-        for m in svc.messages.values()
-        if m["scenario"] == E1 and m["kind"] == "email" and m["id"] in svc.reviews
-    )
-
-
 def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
-    client, svc = make_client()
+    client, _svc = make_client()
     pend = client.get(f"{API}/boss/pending").json()
     assert pend["count"] == 1
     case = pend["pending"][0]
@@ -142,7 +134,7 @@ def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
 
 
 def test_boss_release_drafts_a_reply_and_runs_the_pipeline(make_client):
-    client, svc = make_client()
+    client, _svc = make_client()
     mid = client.get(f"{API}/boss/pending").json()["pending"][0]["message_id"]
     r = client.post(
         f"{API}/boss/decisions",
@@ -164,7 +156,7 @@ def test_boss_release_drafts_a_reply_and_runs_the_pipeline(make_client):
 
 
 def test_boss_quarantine_records_reason_and_keeps_everything_held(make_client):
-    client, svc = make_client()
+    client, _svc = make_client()
     mid = client.get(f"{API}/boss/pending").json()["pending"][0]["message_id"]
     r = client.post(
         f"{API}/boss/decisions",
@@ -194,7 +186,7 @@ def test_boss_quarantine_records_reason_and_keeps_everything_held(make_client):
 
 
 def test_unattended_sandbox_autonomy_keeps_hostile_quarantined(make_client):
-    client, svc = make_client(autonomy="sandbox")
+    client, _svc = make_client(autonomy="sandbox")
     assert client.get(f"{API}/boss/pending").json()["count"] == 0
     d = client.get(f"{API}/boss/decisions").json()["decisions"]
     assert len(d) == 1 and d[0]["state"] == "quarantined"
