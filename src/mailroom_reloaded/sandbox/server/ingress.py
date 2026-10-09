@@ -14,6 +14,7 @@ import math
 import re
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from jinja2.sandbox import SandboxedEnvironment
@@ -71,8 +72,24 @@ def _local_name(addr: str) -> str:
     return addr.split("@", 1)[0]
 
 
+def _entry_for(path: Path, name: str, **extra: Any) -> dict:
+    data = path.read_bytes()
+    return {
+        "name": name,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "doc_id": doc_id_for_bytes(data),
+        "path": str(path),
+        "resolved": True,
+        **extra,
+    }
+
+
 def _attachment(
-    content: SandboxContent, spec: dict, bound: dict[str, dict]
+    content: SandboxContent,
+    spec: dict,
+    bound: dict[str, dict],
+    synth_dir: Path | None = None,
 ) -> tuple[dict, str | None]:
     """Resolve one ``attach`` entry to wire metadata, plus a note when unresolved."""
     if "same_as" in spec:
@@ -87,6 +104,20 @@ def _attachment(
             entry["name"] = spec["as"]
         return entry, None
     fname = spec.get("file")
+    if not fname and synth_dir is not None and spec.get("class"):
+        from mailroom_reloaded.sandbox.server.synthetic import materialise_draw
+
+        path, name = materialise_draw(spec, synth_dir)
+        entry = _entry_for(
+            path,
+            name,
+            synthetic=True,
+            ref=spec.get("ref"),
+            draw=f"{spec.get('class')}/{spec.get('stratum')}",
+        )
+        if spec.get("ref"):
+            bound[spec["ref"]] = entry
+        return entry, f"synthetic placeholder for dataset draw {entry['draw']}"
     if not fname:
         label = f"{spec.get('class')}/{spec.get('stratum')}"
         return (
@@ -99,16 +130,9 @@ def _attachment(
             "name": spec.get("as") or fname,
             "resolved": False,
         }, f"attachment {fname!r} not in content"
-    data = path.read_bytes()
-    entry = {
-        "name": spec.get("as") or fname,
-        "source_file": fname,
-        "size": len(data),
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "doc_id": doc_id_for_bytes(data),
-        "path": str(path),
-        "resolved": True,
-    }
+    entry = _entry_for(
+        path, spec.get("as") or fname, source_file=fname, ref=spec.get("ref")
+    )
     if spec.get("ref"):
         bound[spec["ref"]] = entry
     return entry, None
@@ -142,7 +166,9 @@ def _render_email(
     return subject, body.strip("\n") + "\n", notes
 
 
-def plan_scenario(content: SandboxContent, name: str) -> list[PlannedItem]:
+def plan_scenario(
+    content: SandboxContent, name: str, synth_dir: Path | None = None
+) -> list[PlannedItem]:
     """Expand a scenario timeline into renderable inbound items (document feeds + emails)."""
     scenario = content.cs.scenarios[name]
     items: list[PlannedItem] = []
@@ -151,9 +177,7 @@ def plan_scenario(content: SandboxContent, name: str) -> list[PlannedItem]:
         offset = parse_offset(step.get("at", "00:00"))
         if "ingress" in step:
             spec = step["ingress"]
-            att, note = _attachment(
-                content, {"file": spec.get("file"), "ref": spec.get("ref")}, bound
-            )
+            att, note = _attachment(content, dict(spec), bound, synth_dir)
             items.append(
                 PlannedItem(
                     name,
@@ -175,7 +199,7 @@ def plan_scenario(content: SandboxContent, name: str) -> list[PlannedItem]:
             atts: list[dict] = []
             notes: list[str] = []
             for spec in c.get("attach", []) or []:
-                att, note = _attachment(content, spec, bound)
+                att, note = _attachment(content, spec, bound, synth_dir)
                 atts.append(att)
                 if note:
                     notes.append(note)
@@ -204,6 +228,7 @@ def plan_scenario(content: SandboxContent, name: str) -> list[PlannedItem]:
                         "channel": c.get("channel", "email"),
                     },
                     truth={
+                        "ref": c.get("ref"),
                         "persona": c.get("persona"),
                         "role": persona.get("role"),
                         "client_id": persona.get("client_id"),

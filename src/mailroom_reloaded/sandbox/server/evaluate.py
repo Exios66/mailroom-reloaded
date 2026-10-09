@@ -14,6 +14,35 @@ __all__ = ["compare_scenario"]
 _BENIGN_ROLES = {"real", "personal-address"}
 
 
+_PRIMARY_NOTE = {
+    True: "first email in the scenario",
+    False: "the email the scenario's expectations are about (see _primary)",
+}
+_TRUST_RANK = {"hostile": 0, "suspicious": 1, "unverified": 2, "verified": 3}
+
+
+def _primary(scenario: dict, emails: list[dict]) -> dict:
+    """The email that ``expect.intent`` / ``expect.trust`` describe.
+
+    1. the message named by ``a`` of an expected relation (scenario ``ref``), else
+    2. for scenarios that expect a hostile or suspicious sender, the email the
+       Correspondent rated least trusted (the scenario asserts the adversarial message;
+       if nothing was rated that low, the first email is compared and fails), else
+    3. the first email.
+    """
+    expect = scenario.get("expect", {})
+    by_ref = {m["truth"]["ref"]: m for m in emails if (m.get("truth") or {}).get("ref")}
+    for er in expect.get("relations", []) or []:
+        if er["a"] in by_ref:
+            return by_ref[er["a"]]
+    want = (expect.get("trust") or {}).get("sender_level")
+    if want in {"hostile", "suspicious"}:
+        low = min(emails, key=lambda m: _TRUST_RANK.get(m["correspondent"]["trust"], 9))
+        if _TRUST_RANK.get(low["correspondent"]["trust"], 9) <= _TRUST_RANK[want]:
+            return low
+    return emails[0]
+
+
 def _chk(key: str, expected: Any, actual: Any, ok: bool | None, note: str = "") -> dict:
     """Package an expected-versus-actual check with a tri-state result and note."""
     return {"key": key, "expected": expected, "actual": actual, "ok": ok, "note": note}
@@ -38,14 +67,15 @@ def compare_scenario(
             "checks": [],
             "summary": {"passed": 0, "failed": 0, "unchecked": 0},
         }
-    primary = emails[0]["correspondent"]
+    primary_msg = _primary(scenario, emails)
+    primary = primary_msg["correspondent"]
     checks.append(
         _chk(
             "intent",
             expect.get("intent"),
             primary["intent"],
             expect.get("intent") == primary["intent"],
-            "primary = first email in the scenario",
+            "primary = " + _PRIMARY_NOTE[primary_msg["id"] == emails[0]["id"]],
         )
     )
     if "trust" in expect:
@@ -165,11 +195,28 @@ def compare_scenario(
         )
 
     if expect.get("relations"):
-        refs = {}
-        for st in scenario.get("timeline", []):
+        att_by_ref: dict[str, str] = {}
+        msg_by_ref: dict[str, dict] = {}
+        for m in msgs:
+            if (m.get("truth") or {}).get("ref"):
+                msg_by_ref[m["truth"]["ref"]] = m
+            for a in m["wire"]["attachments"]:
+                if a.get("ref"):
+                    att_by_ref.setdefault(a["ref"], a["name"])
+        for st in scenario.get("timeline", []):  # pinned files are named by themselves
             if "ingress" in st and st["ingress"].get("ref"):
-                refs[st["ingress"]["ref"]] = st["ingress"].get("file")
-        rels = [r for m in emails for r in m["correspondent"]["relations"]]
+                ing = st["ingress"]
+                att_by_ref.setdefault(ing["ref"], ing.get("as") or ing.get("file"))
+        rels_by_msg = {m["id"]: m["correspondent"]["relations"] for m in emails}
+        rels = [r for lst in rels_by_msg.values() for r in lst]
+
+        def names(ref: str) -> set[str]:
+            if ref in att_by_ref:
+                return {att_by_ref[ref]}
+            if ref in msg_by_ref:
+                return {a["name"] for a in msg_by_ref[ref]["wire"]["attachments"]}
+            return {ref}
+
         for er in expect["relations"]:
             if str(er["a"]).startswith("matter:") or str(er["b"]).startswith("matter:"):
                 checks.append(
@@ -182,13 +229,15 @@ def compare_scenario(
                     )
                 )
                 continue
-            b_name = refs.get(er["b"], er["b"])
+            a_names, b_names = names(er["a"]), names(er["b"])
+            a_msg = msg_by_ref.get(er["a"])
+            pool = rels_by_msg.get(a_msg["id"], []) if a_msg else rels
             hit = next(
                 (
                     r
-                    for r in rels
-                    if r["a"] == er["a"]
-                    and r["b"] == b_name
+                    for r in pool
+                    if (a_msg is not None or r["a"] in a_names)
+                    and r["b"] in b_names
                     and r["kind"] == er["kind"]
                     and r["confidence"] >= er.get("min_conf", 0)
                 ),

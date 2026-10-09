@@ -114,6 +114,9 @@ class _Tools:
         """Return the content pack registry clients."""
         return self.svc.content.registry_clients
 
+    def delegation(self) -> dict[str, dict]:
+        return self.svc.content.policy.delegation
+
     def lookup_catalog(self) -> list[dict]:
         """Snapshot document identifiers, filenames, statuses, and text under the lock."""
         with self.svc._lock:
@@ -356,7 +359,7 @@ class SandboxService:
             raise KeyError(unknown)
         planned = []
         for idx, name in enumerate(names):
-            for it in plan_scenario(self.content, name):
+            for it in plan_scenario(self.content, name, self.state_dir / "synthetic"):
                 planned.append((idx * stagger_seconds + it.offset_s, idx, it))
         planned.sort(key=lambda t: (t[0], t[1], t[2].step))
         with self._lock:
