@@ -27,16 +27,29 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
 | `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
 | `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
+| `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
 | `health` | `health` | Checks the API. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
 | `watch` | `watch [--interval 3]` | Follows status changes; stops on Ctrl+C or when the tab is hidden. |
 | `auth` | `auth <token> \| --clear` | Sets or clears the API token. |
 
-Sources: `src/mailroom_reloaded/api/tui/commands/shell.js` and
-`commands/pipeline.js` (each command carries its man page). Keys: Tab ghost
+Sources: `src/mailroom_reloaded/api/tui/commands/shell.js`,
+`commands/pipeline.js`, `commands/ledger.js` and `commands/replay.js` (with `replay/`) (each command carries its man page). Keys: Tab ghost
 completion, Up/Down history, Ctrl+L clear, Ctrl+C stop `watch`, any key skips
 the boot animation.
+
+### `replay` viewer
+
+`replay <run_id>` reads `GET /v1/replay/sessions/{id}/timeline` (the `replay/v1`
+payload) and takes over the output area with a character grid: a station track,
+a scrub bar with event ticks, run metrics, and an inspector or ledger panel. All
+text is rendered with `textContent`; bidi and control characters are replaced.
+Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
+jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
+demand, with a chain-verify line), `e` next event, `q`/Esc quit. Ctrl+C always
+releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
+The viewer needs a physical keyboard (the input stays read-only while it is open).
 
 ### `jev` and gate decisions
 
