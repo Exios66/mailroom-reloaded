@@ -216,9 +216,9 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 - **The `M` namespace in `obs/metrics.py`** wraps each instrument so every `add`, `record` and `set` merges `{"run_id": …, "environment": …}` into its labels. No call site changes, and the `gen_ai.*` instruments get it too.
 - **Cardinality guard.** Eval run ids are bounded (one per `mailroom eval`). Live traffic uses one daily bucket, not one per document. `doc_id` is **never** a metric label. A test asserts that the set of label keys is fixed.
 - **Grafana:**
-  - `pipeline.json` and `quality.json` gain a dashboard link `replay ↗` → `${MAILROOM_PUBLIC_URL}/tui#replay=run:${run_id}`, plus a `phoenix ↗` link.
+  - `pipeline.json` and `quality.json` gain a dashboard link `replay ↗` → `${public_url}/tui#replay=run:${run_id}`, plus a `phoenix ↗` link.
   - Panel data links on per-run series go to the same targets.
-  - `deploy/grafana/provisioning` gets a `MAILROOM_PUBLIC_URL` variable (default `http://localhost:8000`).
+  - Each dashboard gets a `public_url` template variable (default `http://localhost:8000`) and a `phoenix_url` variable. As built there is no `MAILROOM_PUBLIC_URL` environment variable and no provisioning change.
 - **Per-run Phoenix projects are dropped.** `build_resource` reads the project once (`obs/tracing.py:132`) and `setup_tracing` is a singleton (`:210`), so a per-run provider would fight the global one. Links to Phoenix filter on the `mailroom.run_id` span attribute instead.
 - **Known dashboard gap.** `quality.json` queries `mailroom_eval_.*` (lines 26, 29, 49), which no code emits, so the `run_id` label alone does not make those panels work. Task 4 fixes the queries to the metrics that are really emitted.
 - **Event metrics llm-mailroom never had.** `mailroom.retries{kind}`, `mailroom.escalations{to}` and `mailroom.review.causes{cause}` counters, so Grafana can show the same decision mix the replay ticker shows.
@@ -267,7 +267,7 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 **Intake (all best-effort).** Scope is set inside `run_document` in the worker thread (ContextVars do not cross the watcher's thread pool), the bucket is pinned at open, and counters sit under a lock.
 - `flow._drive`: try/finally. Usage is snapshotted at entry and per-invocation **deltas** are taken at exit, because `_configure` restores `usage_total` from the manifest on resume (`flow.py:585-590`). It accumulates from `_record_node`, `_audit_gate` and `_fail_node`. `reconcile_archived` writes `reconciled`.
 - `eval.run_eval`: opens before the gather and closes in `finally` with `expected`. The eval exception path and `specialist_cell` rows (`runner.py:429-466`, which never touch the flow) are recorded explicitly.
-- `watcher`: lazy rollover. The first document of a new day or process closes the previous bucket as `interrupted`; `resume_processing` runs the closeout. The manifest `processing` status is the open marker, so there is no `doc_open` entry.
+- `watcher`: lazy rollover. The first document of a new day or process closes the previous bucket as `completed`; `resume_processing` runs the closeout. The manifest `processing` status is the open marker, so there is no `doc_open` entry.
 - LLM usage is captured for **every** role (Decision 12, Task 19), so `doc_closed` carries `usage_by_role` and `usage_complete`. It is false only when a node raised mid-call and its sub-call usage was lost; that node is named in `usage_partial_nodes`.
 - `failure_reason` uses a bounded enum, because today's strings embed filenames and exception text (`clerk.py:156-168`, `flow.py:164`).
 
@@ -322,7 +322,6 @@ There is no precedent in the originals (llm-mailroom, The-Mailroom and llm-dojo-
 | `MAILROOM_ANCHOR_URL` | unset | Supabase project URL or Postgres DSN |
 | `MAILROOM_ANCHOR_KEY` | unset | Supabase key or Postgres password (never logged) |
 | `MAILROOM_ANCHOR_KEY_FILE` | unset | Path to a secrets file holding the key (env var wins if both are set) |
-| `MAILROOM_PUBLIC_URL` | `http://localhost:8000` | Grafana links to the viewer |
 
 Constants, documented in `docs/CONFIGURATION.md` rather than environment variables: the per-run row cap (5,000), the 3-day live span window, the default displayed tier (T1), and the idempotent showcase seed. Dropped env vars from revision 3: `MAILROOM_LEDGER`, `MAILROOM_TRACE_STORE`, `MAILROOM_RUN_BUCKET`, `MAILROOM_REPLAY_TIER`, `MAILROOM_SEED_SHOWCASE`, `MAILROOM_TRACE_LIVE_DAYS`.
 
@@ -564,13 +563,13 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 
 ### Task 4: Metrics `run_id`, decision metrics and Grafana links (Decision 2)
 
-**Files:** Modify `obs/metrics.py`, `obs/tracing.py`, `eval/runner.py`, `deploy/grafana/dashboards/{pipeline,quality}.json`, `deploy/grafana/provisioning/*`, `deploy/docker-compose*.yml` (`MAILROOM_PUBLIC_URL`); Create `tests/obs/test_metrics_run_id.py`, `tests/deploy/test_grafana_links.py`.
+**Files:** Modify `obs/metrics.py`, `obs/tracing.py`, `eval/runner.py`, `deploy/grafana/dashboards/{pipeline,quality}.json`, `deploy/grafana/provisioning/*`, `deploy/docker-compose*.yml` (unchanged as built); Create `tests/obs/test_metrics_run_id.py`, `tests/deploy/test_grafana_links.py`.
 
 **Interfaces:**
 - **`M.<instrument>`** returns a thin wrapper whose `add`, `record` and `set` merge `current_run()` labels (`run_id`, `environment`). It falls back to `run_id="unscoped"` outside a scope.
 - **New counters:** `mailroom.retries{kind}`, `mailroom.escalations{to}`, `mailroom.review.causes{cause}`.
 - **Grafana:**
-  - Dashboard `links`: `replay ↗` (`${MAILROOM_PUBLIC_URL}/tui#replay=run:${run_id}`) and `phoenix ↗` (Phoenix project filtered on `mailroom.run_id=${run_id}`).
+  - Dashboard `links`: `replay ↗` (`${public_url}/tui#replay=run:${run_id}`) and `phoenix ↗` (Phoenix project filtered on `mailroom.run_id=${run_id}`).
   - Panel data links on the per-run tables.
   - A new "decisions" row (retries, escalations, review causes by `run_id`).
 - **`quality.json`** panels that query `mailroom_eval_*` are rewritten against emitted metrics (check `obs/metrics.py` and the collector's Prometheus names first).
@@ -768,7 +767,7 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
   - A resumed document reports per-invocation deltas (no double-counted spend); an eval run does not inherit a live parked manifest's usage.
   - `usage_complete=false` when judge, boss or arbiter usage is missing.
   - A hostile fixture (filenames, exception text, judge notes, run ids, `reviewer`) produces no leaked content, with `trace_mask=False`.
-  - Lazy rollover closes the old live bucket as `interrupted`; a kill during `_drive` leaves a closeout on the next start.
+  - Lazy rollover closes the old live bucket as `completed` (the day ended normally; `interrupted` is reserved for a kill during `_drive`); a kill during `_drive` leaves a closeout on the next start.
 - [ ] **Step 2:** Implement; the ledger is passed through `overrides` like `bins`; failures are logged, never raised.
 - [ ] **Step 3: Commit** `feat(ledger): intake hooks for eval and live runs with allow-list`.
 
@@ -797,6 +796,8 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 - [ ] **Step 3: Commit** `feat(ui): replay link per eval run and #replay deep link`.
 
 ### Task 18: External anchor (Postgres / Supabase / export)
+
+**Status:** implemented in PR #34 (`claude/trace-replay-08-anchor`). The SQL in `deploy/anchor/` and the Supabase key header are unverified against a live project.
 
 **Files:** Create `storage/anchor.py`, `tests/storage/test_anchor.py`; modify `settings.py` (`anchor`, `anchor_url`, `anchor_key`, `anchor_key_file`, extended `_empty_to_none`), `cli.py` (`audit` sub-app: `verify`, `anchor`, `export-head`, lazy imports like `gmail_app`), `pyproject.toml` and `uv.lock` (optional `anchor` extra with `psycopg[binary]`), `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `docs/ARCHITECTURE.md` (about lines 132-149), the `audit_log.py` docstring, `.env.example`, `CHANGELOG.md`.
 
