@@ -19,6 +19,10 @@ def env(tmp_path, monkeypatch):
     """Isolate base dir, settings, the default engine and the ledger per test."""
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    # Bound the follow-live SSE stream so a stray request can never hang the suite.
+    monkeypatch.setenv("MAILROOM_REPLAY_LIVE_POLL_S", "0.02")
+    monkeypatch.setenv("MAILROOM_REPLAY_LIVE_HEARTBEAT_S", "0.02")
+    monkeypatch.setenv("MAILROOM_REPLAY_LIVE_MAX_FRAMES", "40")
     from mailroom_reloaded import settings
     from mailroom_reloaded.storage import db
 
@@ -62,6 +66,7 @@ def test_auth_required_when_token_set(client, monkeypatch):
         "/v1/replay/sessions",
         f"/v1/replay/sessions/{RUN}/timeline",
         f"/v1/replay/sessions/{RUN}/export",
+        f"/v1/replay/live?session=run:{RUN}",
     ]
     for path in paths:
         assert client.get(path).status_code == 401
@@ -183,3 +188,44 @@ def test_reads_never_install_the_anchor_hook(client, monkeypatch):
     assert client.get("/v1/replay/sessions").status_code == 200
     assert client.get(f"/v1/replay/sessions/{RUN}/timeline").status_code == 200
     assert calls == []
+
+
+def test_live_bad_session_is_400(client):
+    r = client.get("/v1/replay/live?session=bad%20id")
+    assert r.status_code == 400
+    assert r.json() == {"detail": "Invalid session ID"}
+
+
+def _live_frame_names(body: str) -> list[str]:
+    return [
+        line[len("event: ") :]
+        for line in body.splitlines()
+        if line.startswith("event: ")
+    ]
+
+
+def test_live_stream_emits_ready_segment_and_heartbeat(client):
+    with client.stream("GET", f"/v1/replay/live?session=run:{RUN}") as r:
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        assert r.headers["cache-control"] == "no-cache"
+        assert r.headers["x-accel-buffering"] == "no"
+        body = r.read().decode()
+    names = _live_frame_names(body)
+    assert "ready" in names
+    assert "segment" in names
+    assert "heartbeat" in names
+    assert all(name in {"ready", "segment", "generation", "event", "score", "heartbeat", "error"} for name in names)
+
+
+def test_live_items_keep_repeated_events_distinct():
+    """Two events sharing (t, doc, kind, station) get distinct keys, stable across snapshots."""
+    from types import SimpleNamespace as NS
+
+    from mailroom_reloaded.api.app import _live_items
+
+    ev = NS(t=1.0, doc_id="d", kind="retry", station="gate")
+    tl = NS(segments=[], generations=[], events=[ev, ev], scores=[])
+    keys = [k for _, _, k in _live_items(tl)]
+    assert len(keys) == 2 and len(set(keys)) == 2
+    assert keys == [k for _, _, k in _live_items(tl)]

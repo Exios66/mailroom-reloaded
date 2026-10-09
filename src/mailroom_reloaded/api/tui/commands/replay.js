@@ -6,15 +6,63 @@ import { fail, flagText, parseIntFlag, text, validRunId } from './pipeline.js';
 import { SPEEDS, createClock } from '../replay/clock.js';
 import { createModel } from '../replay/model.js';
 import { listPanels } from '../replay/panels.js';
+import { createFollowReader } from '../replay/live.js';
 import { fmtTime, renderFrame } from '../replay/grid.js';
 
 const PREFIXES = new Set(['run', 'session', 'doc', 'window']);
 const TAIL_RE = /^[A-Za-z0-9._:-]+$/;
-const USAGE = 'replay: usage: replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N]';
+const USAGE = 'replay: usage: replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N] [--follow]';
 const TICK_MS = 100;
 const STEP_S = 5;
 const STEP_BIG_S = 30;
 const NUM_RE = /^\d+(\.\d+)?$/;
+
+// Follow-live buffer bounds (Task 11): the last 2 h / 5,000 items per list.
+export const LIVE_MAX_ITEMS = 5000;
+export const LIVE_MAX_AGE_S = 7200;
+
+const LIVE_LISTS = ['segments', 'generations', 'events', 'scores'];
+const LIVE_TIME_KEY = { segments: 't0', generations: 't0', events: 't', scores: 't' };
+
+function liveItemTime(list, item) {
+  const v = item !== null && typeof item === 'object' ? item[LIVE_TIME_KEY[list]] : undefined;
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Bound the follow buffer in place: keep at most LIVE_MAX_ITEMS per list and drop
+ * items whose time is more than LIVE_MAX_AGE_S older than the newest item across
+ * the four lists (`t0` for segment/generation, `t` for event/score). An item with
+ * no finite time is kept (only the count cap can drop it). `session`, `stations`,
+ * `entities` and `rollups` are never touched.
+ */
+export function boundLiveTimeline(tl) {
+  if (tl === null || typeof tl !== 'object') return tl;
+  let newest = null;
+  for (const list of LIVE_LISTS) {
+    const arr = tl[list];
+    if (!Array.isArray(arr)) continue;
+    for (const item of arr) {
+      const t = liveItemTime(list, item);
+      if (t !== null && (newest === null || t > newest)) newest = t;
+    }
+  }
+  const floor = newest === null ? null : newest - LIVE_MAX_AGE_S;
+  for (const list of LIVE_LISTS) {
+    const arr = tl[list];
+    if (!Array.isArray(arr)) continue;
+    let next = arr;
+    if (floor !== null) {
+      next = next.filter((item) => {
+        const t = liveItemTime(list, item);
+        return t === null || t >= floor;
+      });
+    }
+    if (next.length > LIVE_MAX_ITEMS) next = next.slice(next.length - LIVE_MAX_ITEMS);
+    tl[list] = next;
+  }
+  return tl;
+}
 
 /** Session id for the API, or null when the argument is not acceptable. */
 export function normalizeSessionId(arg) {
@@ -33,20 +81,25 @@ const manPages = {
 
 SYNOPSIS
     replay [--limit N]
-    replay <run_id|session id> [--at SECONDS] [--speed N]
+    replay <run_id|session id> [--at SECONDS] [--speed N] [--follow]
 
 DESCRIPTION
     Bare 'replay' lists recent sessions from GET /v1/replay/sessions: id, docs,
     start, duration, source and whether retention pruned the data (--limit 1-100).
     'replay <id>' reads GET /v1/replay/sessions/<id>/timeline and opens a
     full-screen text viewer. A bare run id means run:<id>. --at starts paused at
-    that second; --speed is one of 0.5 1 2 4 8 16. The 'l' panel reads
+    that second; --speed is one of 0.5 1 2 4 8 16. --follow (or the 'f' key)
+    starts a live SSE reader on GET /v1/replay/live, appends each new segment,
+    generation, event and score as it lands, and pins the playhead to now-2s.
+    A backward scrub leaves follow; 'f' re-enters. The reader pauses while the
+    tab is hidden. The 'l' panel reads
     GET /v1/ledger and /v1/ledger/verify for the run, only when first opened.
     GET /links supplies the Phoenix and Grafana base URLs; 'o' and 'g' open the
     run in a new tab. With prefers-reduced-motion the viewer starts paused.
 
 KEYS
     space        play / pause           left/right   step -/+5s (shift: 30s)
+    f            follow live stream (f again, or a backward scrub, leaves it)
     [ ] or - +   slower / faster        Home / End   seek to start / end
     0-9          seek to 0%..90%        up/down j/k  select document
     Enter or i   toggle inspector       l            toggle ledger panel
@@ -79,7 +132,7 @@ async function listSessions(ctx, flags) {
 }
 
 function parseOpenFlags(flags) {
-  const unknown = Object.keys(flags).filter((k) => !['at', 'speed'].includes(k));
+  const unknown = Object.keys(flags).filter((k) => !['at', 'speed', 'follow'].includes(k));
   if (unknown.length) return { error: `unknown flag --${unknown[0]}` };
   const out = {};
   if (flags.at !== undefined) {
@@ -92,6 +145,10 @@ function parseOpenFlags(flags) {
     const n = raw !== undefined && NUM_RE.test(raw) ? Number(raw) : NaN;
     if (!SPEEDS.includes(n)) return { error: `--speed must be one of ${SPEEDS.join(' ')}` };
     out.speed = n;
+  }
+  if (flags.follow !== undefined) {
+    if (flags.follow !== true) return { error: '--follow takes no value' };
+    out.follow = true;
   }
   return out;
 }
@@ -150,6 +207,15 @@ async function openViewer(ctx, arg, flags) {
   } catch {
     return ctx.out.line('replay: unreadable timeline', 'error');
   }
+  // A mutable copy the follow reader appends to; createModel rebuilds from it (model.js is untouched).
+  const liveArr = (v) => (Array.isArray(v) ? v.slice() : []);
+  let liveTimeline = {
+    ...(timeline && typeof timeline === 'object' ? timeline : {}),
+    segments: liveArr(timeline?.segments),
+    generations: liveArr(timeline?.generations),
+    events: liveArr(timeline?.events),
+    scores: liveArr(timeline?.scores),
+  };
   const clock = createClock({ duration: model.duration, speed: opts.speed ?? 1 });
   const nowFn = () => (ctx.now ? ctx.now() : performance.now());
   const timers = ctx.timers ?? { setInterval: globalThis.setInterval.bind(globalThis), clearInterval: globalThis.clearInterval.bind(globalThis) };
@@ -164,6 +230,9 @@ async function openViewer(ctx, arg, flags) {
   let view = null;
   let timer = null;
   let closed = false;
+  let follow = Boolean(opts.follow);
+  let reader = null;
+  const doc = ctx.document ?? (typeof globalThis.document !== 'undefined' ? globalThis.document : null);
 
   if (opts.at !== undefined) clock.seek(opts.at);
   if (opts.at === undefined && !reducedMotion()) clock.play(nowFn());
@@ -229,10 +298,106 @@ async function openViewer(ctx, arg, flags) {
     });
   };
 
+  // ---- follow-live: an SSE reader appends items, the model is rebuilt and the playhead pinned ----
+  const stopFollow = () => {
+    if (reader) {
+      reader.stop();
+      reader = null;
+    }
+  };
+
+  const followSeek = () => {
+    // The total may have grown since the last frame; refresh it before clamping the pin.
+    clock.setDuration(model.duration);
+    const t0 = Date.parse(model.session?.t0_iso ?? '');
+    const elapsed = Number.isFinite(t0) ? (Date.now() - t0) / 1000 : model.duration;
+    clock.seek(Math.max(0, elapsed - 2));
+  };
+
+  // The live stream replays the whole timeline on every connect (first, `f` off/on, reconnect), so
+  // each item is matched against what the model already holds: `have` counts items per key ever
+  // accepted, `streamSeen` counts them on the current connection, and only the surplus is appended.
+  const LIVE_NAMES = { segment: 'segments', generation: 'generations', event: 'events', score: 'scores' };
+  const liveKey = (name, o) => {
+    if (name === 'event') return `event:${o.t}:${o.doc_id}:${o.kind}:${o.station}`;
+    if (name === 'score') return `score:${o.span_id}:${o.name}:${o.doc_id}`;
+    if (o.span_id) return `${name}:${o.span_id}`;
+    return `${name}:${o.doc_id}:${o.node}:${o.t0}:${o.t1}:${o.attempt}`;
+  };
+  const have = new Map();
+  for (const [name, list] of Object.entries(LIVE_NAMES)) {
+    for (const o of liveTimeline[list]) {
+      if (o && typeof o === 'object') {
+        const k = liveKey(name, o);
+        have.set(k, (have.get(k) ?? 0) + 1);
+      }
+    }
+  }
+  let streamSeen = new Map();
+
+  const applyLiveFrame = (name, obj) => {
+    if (closed) return;
+    // The server ends the stream after an `error` frame; do not reconnect into the same answer.
+    if (name === 'error') {
+      follow = false;
+      stopFollow();
+      return;
+    }
+    const list = LIVE_NAMES[name];
+    if (!list || !obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    const key = liveKey(name, obj);
+    const nth = (streamSeen.get(key) ?? 0) + 1;
+    streamSeen.set(key, nth);
+    if (nth <= (have.get(key) ?? 0)) return;
+    have.set(key, nth);
+    liveTimeline[list].push(obj);
+    boundLiveTimeline(liveTimeline);
+    model = createModel(liveTimeline);
+    clock.setDuration(model.duration);
+    redraw(true);
+  };
+
+  const startFollow = () => {
+    if (closed || reader || !liveTimeline) return;
+    const fetchFn = ctx.fetch ?? globalThis.fetch;
+    if (typeof fetchFn !== 'function') return;
+    const headers = typeof ctx.api?.authHeaders === 'function' ? ctx.api.authHeaders() : {};
+    streamSeen = new Map();
+    reader = createFollowReader({
+      fetchFn,
+      url: `/v1/replay/live?session=${encodeURIComponent(id)}`,
+      headers,
+      signal: ctx.signal(),
+      onFrame: applyLiveFrame,
+    });
+  };
+
+  const setFollow = (on) => {
+    if (closed) return;
+    follow = Boolean(on);
+    if (follow) {
+      startFollow();
+      followSeek();
+      redraw(true);
+    } else {
+      stopFollow();
+    }
+  };
+
+  function onVisibility() {
+    if (closed) return;
+    if (doc && doc.hidden) stopFollow();
+    else if (follow) startFollow();
+  }
+
   const close = () => {
     if (closed) return;
     closed = true;
     stopTimer();
+    stopFollow();
+    if (doc && typeof doc.removeEventListener === 'function') {
+      doc.removeEventListener('visibilitychange', onVisibility);
+    }
     if (view) view.release();
   };
 
@@ -257,6 +422,8 @@ async function openViewer(ctx, arg, flags) {
     const k = e.key;
     const big = e.shiftKey ? STEP_BIG_S : STEP_S;
     const dur = clock.state().duration;
+    // A backward scrub (or a jump/seek) leaves follow; `f` re-enters.
+    if (follow && (k === 'ArrowLeft' || k === 'Home' || /^[0-9]$/.test(k))) setFollow(false);
     if (k === ' ' || k === 'Spacebar') clock.toggle(nowFn());
     else if (k === 'ArrowLeft') clock.step(-big);
     else if (k === 'ArrowRight') clock.step(big);
@@ -282,7 +449,8 @@ async function openViewer(ctx, arg, flags) {
       const t = clock.state().t;
       const next = (model.eventsBetween(t, dur) || []).find((x) => x && typeof x.t === 'number' && x.t > t);
       if (next) clock.seek(next.t);
-    } else if (k === 'Escape' || k === 'q') {
+    } else if (k === 'f') setFollow(!follow);
+    else if (k === 'Escape' || k === 'q') {
       close();
       return;
     } else return;
@@ -292,17 +460,23 @@ async function openViewer(ctx, arg, flags) {
   view = ctx.takeover({ onKey, label: `replay ${id}` });
   if (!view) return ctx.out.line('replay: another viewer is already open', 'error');
   loadLinks();
+  if (doc && typeof doc.addEventListener === 'function') {
+    doc.addEventListener('visibilitychange', onVisibility);
+  }
+  if (follow) startFollow();
 
   const sig = ctx.signal();
   const onAbort = () => {
     closed = true;
     stopTimer();
+    stopFollow();
   };
   try {
     redraw(true);
     if (!closed) {
       timer = timers.setInterval(() => {
         clock.tick(nowFn());
+        if (follow) followSeek();
         redraw();
       }, TICK_MS);
     }
@@ -310,7 +484,7 @@ async function openViewer(ctx, arg, flags) {
     else sig.addEventListener('abort', onAbort, { once: true });
     await view.done;
   } finally {
-    // Every exit path releases the keyboard and the timer.
+    // Every exit path releases the keyboard, the timer and the live reader.
     close();
     sig.removeEventListener('abort', onAbort);
   }
@@ -322,7 +496,7 @@ export function registerReplay(registry) {
   registry.register({
     name: 'replay',
     summary: 'replay a pipeline run on a timeline',
-    usage: 'replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N]',
+    usage: 'replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N] [--follow]',
     man: manPages.replay,
     async run(ctx, args, flags) {
       if (args.length === 0) {

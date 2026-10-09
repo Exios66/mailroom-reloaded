@@ -186,6 +186,10 @@ export function createApi({
     hasToken() {
       return token !== null;
     },
+    /** The Authorization header for a raw streaming fetch (``{}`` when no token). */
+    authHeaders() {
+      return authHeaders();
+    },
     async health() {
       try {
         const res = await fetchImpl(`${base}/health`, { headers: { Accept: 'application/json' } });
