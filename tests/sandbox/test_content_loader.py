@@ -1,4 +1,5 @@
 """M6: loader, lock, compat and CLI. Acceptance: smoke loads with zero network."""
+
 import hashlib
 import io
 import json
@@ -28,6 +29,7 @@ runner = CliRunner()
 def no_network(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("network access attempted")
+
     monkeypatch.setattr(socket.socket, "connect", boom)
     monkeypatch.setattr(socket, "create_connection", boom)
     monkeypatch.setattr(socket, "getaddrinfo", boom)
@@ -41,11 +43,15 @@ def test_smoke_loads_with_zero_network(no_network):
 
 
 def test_smoke_budget():
-    assert sum(p.stat().st_size for p in SMOKE_DIR.rglob("*") if p.is_file()) <= 2 * 1024 * 1024
+    assert (
+        sum(p.stat().st_size for p in SMOKE_DIR.rglob("*") if p.is_file())
+        <= 2 * 1024 * 1024
+    )
 
 
 def test_tampered_smoke_detected(tmp_path):
     import shutil
+
     d = tmp_path / "s"
     shutil.copytree(SMOKE_DIR, d)
     (d / "templates" / "status_inquiry.j2").write_text("tampered")
@@ -72,7 +78,9 @@ def test_lock_roundtrip_and_bad_fields(tmp_path):
 def test_verify_bundle(tmp_path):
     b = tmp_path / "b.bin"
     b.write_bytes(b"hello")
-    good = ContentLock("r", "v1", "abcdef0", hashlib.sha256(b"hello").hexdigest(), "2.0", "x")
+    good = ContentLock(
+        "r", "v1", "abcdef0", hashlib.sha256(b"hello").hexdigest(), "2.0", "x"
+    )
     assert verify_bundle(b, good) == good.bundle_sha256
     bad = ContentLock("r", "v1", "abcdef0", "0" * 64, "2.0", "x")
     with pytest.raises(LockError):
@@ -80,7 +88,11 @@ def test_verify_bundle(tmp_path):
 
 
 def test_compat():
-    meta = {"schema_version": "2.0", "min_code_version": "0.2.0", "max_code_version": "0.3.0"}
+    meta = {
+        "schema_version": "2.0",
+        "min_code_version": "0.2.0",
+        "max_code_version": "0.3.0",
+    }
     check_compat(meta, code="0.2.0")
     check_compat(meta, code="0.3.0")
     with pytest.raises(CompatError):
@@ -92,7 +104,10 @@ def test_compat():
 
 
 def test_cli_status_and_validate():
-    r = runner.invoke(cli.app, ["sandbox", "content", "status", "--lock", str(ROOT / "sandbox/content.lock")])
+    r = runner.invoke(
+        cli.app,
+        ["sandbox", "content", "status", "--lock", str(ROOT / "sandbox/content.lock")],
+    )
     assert r.exit_code == 0, r.output
     assert json.loads(r.output)["smoke_matches_lock"] is True
     r = runner.invoke(cli.app, ["sandbox", "content", "validate"])
@@ -100,8 +115,20 @@ def test_cli_status_and_validate():
 
 
 def test_pull_url_requires_flag(tmp_path):
-    r = runner.invoke(cli.app, ["sandbox", "content", "pull", "--url", "https://x/y",
-                                "--lock", str(ROOT / "sandbox/content.lock"), "--dest", str(tmp_path / "d")])
+    r = runner.invoke(
+        cli.app,
+        [
+            "sandbox",
+            "content",
+            "pull",
+            "--url",
+            "https://x/y",
+            "--lock",
+            str(ROOT / "sandbox/content.lock"),
+            "--dest",
+            str(tmp_path / "d"),
+        ],
+    )
     assert r.exit_code == 1
 
 
@@ -119,18 +146,61 @@ def _bundle(tmp_path, meta):
 
 
 def test_bump_then_pull_bundle(tmp_path):
-    meta = {"schema_version": "2.0", "dataset_revision": "abc", "version": "9.9.9",
-            "min_code_version": "0.2.0", "max_code_version": "0.3.0"}
+    meta = {
+        "schema_version": "2.0",
+        "dataset_revision": "abc",
+        "version": "9.9.9",
+        "min_code_version": "0.2.0",
+        "max_code_version": "0.3.0",
+    }
     b = _bundle(tmp_path, meta)
     lock = tmp_path / "content.lock"
-    r = runner.invoke(cli.app, ["sandbox", "content", "bump", "--bundle", str(b), "--tag", "v9.9.9",
-                                "--commit", "abcdef0", "--lock", str(lock)])
+    r = runner.invoke(
+        cli.app,
+        [
+            "sandbox",
+            "content",
+            "bump",
+            "--bundle",
+            str(b),
+            "--tag",
+            "v9.9.9",
+            "--commit",
+            "abcdef0",
+            "--lock",
+            str(lock),
+        ],
+    )
     assert r.exit_code == 0, r.output
-    r = runner.invoke(cli.app, ["sandbox", "content", "pull", "--from-bundle", str(b),
-                                "--lock", str(lock), "--dest", str(tmp_path / "out")])
+    r = runner.invoke(
+        cli.app,
+        [
+            "sandbox",
+            "content",
+            "pull",
+            "--from-bundle",
+            str(b),
+            "--lock",
+            str(lock),
+            "--dest",
+            str(tmp_path / "out"),
+        ],
+    )
     assert r.exit_code == 0, r.output
     assert (tmp_path / "out" / "content.json").is_file()
     b.write_bytes(b.read_bytes() + b"x")
-    r = runner.invoke(cli.app, ["sandbox", "content", "pull", "--from-bundle", str(b),
-                                "--lock", str(lock), "--dest", str(tmp_path / "out2")])
+    r = runner.invoke(
+        cli.app,
+        [
+            "sandbox",
+            "content",
+            "pull",
+            "--from-bundle",
+            str(b),
+            "--lock",
+            str(lock),
+            "--dest",
+            str(tmp_path / "out2"),
+        ],
+    )
     assert r.exit_code == 1

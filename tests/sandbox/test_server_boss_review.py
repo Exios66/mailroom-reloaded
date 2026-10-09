@@ -76,20 +76,37 @@ CASES = {
 
 
 @pytest.mark.parametrize("attack_class", sorted(CASES))
-def test_hostile_class_is_reported_as_a_possible_attack_signal(attack_class):
+def test_hostile_class_is_forwarded_on_the_mailbox_and_signalled(attack_class):
     res = StandInCorrespondent().handle(CASES[attack_class], _Tools())
+    # the typed pack signal is still emitted
     sigs = [s for s in res.signals if s["kind"] == "possible_attack"]
     assert attack_class in {s["attack_class"] for s in sigs}
     assert res.drafts == []  # nothing for the sender
-    # the Desk acts from the signals alone: no message text, no other Correspondent output
-    case = StandInBossDesk({}).consume_signals("m1", res.signals, ["a.pdf"])
+    # and the Correspondent itself writes the forward at the moment of detection
+    assert [f["kind"] for f in res.to_boss] == ["hostile_forward"]
+    pl = res.to_boss[0]["payload"]
+    assert attack_class in pl["attack_classes"]
+    assert pl["message"]["from"] == CASES[attack_class].from_addr
+    assert pl["signals"] and pl["reasoning"] and "attachment_lanes" in pl
+    # the Desk reads the mailbox entry only: it is handed nothing else
+    entry = {
+        "id": "bm00001",
+        "kind": "hostile_forward",
+        "message_id": "m1",
+        "thread_id": "t1",
+        "payload": pl,
+    }
+    case = StandInBossDesk({}).read_forward(entry)
     assert case is not None and case["state"] == "pending"
     assert attack_class in case["attack_classes"]
 
 
-def test_desk_ignores_messages_without_attack_signals():
-    sig = [{"kind": "new_info", "priority": "normal", "state": "pending"}]
-    assert StandInBossDesk({}).consume_signals("m1", sig, []) is None
+def test_benign_mail_is_not_forwarded():
+    res = StandInCorrespondent().handle(
+        _wire("What are your hours?", frm="pat@acme.example"), _Tools()
+    )
+    assert res.to_boss == []
+    assert StandInBossDesk({}).read_forward({"kind": "draft_for_approval"}) is None
 
 
 @pytest.fixture
@@ -208,3 +225,199 @@ def test_unknown_message_and_bad_decision(make_client):
         ).status_code
         == 422
     )
+
+
+# ---------------------------------------------------------------- boss_mailbox channel
+def _mailbox(client, **params):
+    return client.get(f"{API}/boss/mailbox", params=params).json()["entries"]
+
+
+def test_hostile_forward_is_a_correspondent_to_boss_entry_read_in_the_same_step(
+    make_client,
+):
+    client, _svc = make_client()
+    fwd = _mailbox(client, kind="hostile_forward")
+    assert len(fwd) == 1
+    e = fwd[0]
+    assert e["direction"] == "correspondent->boss"
+    assert (e["sender_role"], e["recipient_role"]) == ("correspondent", "boss")
+    assert (
+        e["status"] == "read"
+    )  # the Boss Desk read it during the same processing step
+    assert "payment_fraud" in e["payload"]["attack_classes"]
+    assert e["payload"]["attachment_lanes"] and e["payload"]["reasoning"]
+    # nothing was sent back to the Correspondent, nothing to the sender, before a decision
+    assert _mailbox(client, direction="boss->correspondent") == []
+    assert client.get(f"{API}/outbox").json()["outbox"] == []
+    detail = client.get(f"{API}/boss/mailbox/{e['id']}").json()
+    assert [h["status"] for h in detail["history"]] == ["read"]
+    assert client.get(f"{API}/boss/mailbox/nope").status_code == 404
+
+
+def test_boss_desk_is_handed_the_mailbox_entry_only(make_client, monkeypatch):
+    seen = []
+    orig = StandInBossDesk.read_forward
+
+    def spy(self, entry):
+        seen.append(entry)
+        return orig(self, entry)
+
+    monkeypatch.setattr(StandInBossDesk, "read_forward", spy)
+    client, _svc = make_client()
+    assert len(seen) == 1
+    assert set(seen[0]) >= {"id", "direction", "sender_role", "kind", "payload"}
+    assert seen[0]["id"] == _mailbox(client, kind="hostile_forward")[0]["id"]
+
+
+def test_decision_travels_back_on_the_mailbox_and_the_correspondent_acts(make_client):
+    client, _svc = make_client()
+    fwd = _mailbox(client, kind="hostile_forward")[0]
+    mid = fwd["message_id"]
+    client.post(
+        f"{API}/boss/decisions",
+        json={"message_id": mid, "decision": "legitimate", "reason": "callback ok"},
+    )
+    back = _mailbox(client, direction="boss->correspondent")
+    assert [b["kind"] for b in back] == ["decision"]
+    dec = back[0]
+    assert dec["in_reply_to"] == fwd["id"] and dec["thread_id"] == fwd["thread_id"]
+    assert dec["payload"]["decision"] == "legitimate"
+    assert dec["status"] == "acted"  # the Correspondent read it and acted
+    assert client.get(f"{API}/boss/mailbox/{fwd['id']}").json()["status"] == "acted"
+    # the Correspondent's reply draft is itself a mailbox item awaiting approval
+    drafts = _mailbox(client, kind="draft_for_approval", role="boss")
+    assert len(drafts) == 1 and drafts[0]["direction"] == "correspondent->boss"
+    # approving the draft is a boss -> correspondent entry
+    oid = drafts[0]["payload"]["outbox_id"]
+    client.post(f"{API}/outbox/{oid}/approve")
+    kinds = [e["kind"] for e in _mailbox(client, direction="boss->correspondent")]
+    assert kinds == ["decision", "approval"]
+
+
+def test_quarantine_reason_is_in_the_decision_entry(make_client):
+    client, _svc = make_client()
+    mid = _mailbox(client, kind="hostile_forward")[0]["message_id"]
+    client.post(
+        f"{API}/boss/decisions",
+        json={
+            "message_id": mid,
+            "decision": "quarantine",
+            "reason": "lookalike",
+            "category": "phishing",
+        },
+    )
+    dec = _mailbox(client, kind="decision")[0]
+    assert dec["payload"] == {
+        "decision": "quarantine",
+        "reason": "lookalike",
+        "category": "phishing",
+        "by": "boss",
+    }
+    assert client.get(f"{API}/outbox").json()["outbox"] == []
+
+
+def test_sandbox_autonomy_boss_answers_through_the_mailbox_immediately(make_client):
+    client, _svc = make_client(autonomy="sandbox")
+    entries = _mailbox(client)
+    kinds = [(e["direction"], e["kind"]) for e in entries]
+    assert ("correspondent->boss", "hostile_forward") in kinds
+    assert ("boss->correspondent", "decision") in kinds
+    assert all(
+        e["status"] == "acted"
+        for e in entries
+        if e["kind"] in {"hostile_forward", "decision"}
+    )
+
+
+def test_mailbox_filters_events_stream_and_trace(make_client):
+    client, _svc = make_client()
+    all_ = _mailbox(client)
+    assert all_ and [e["seq"] for e in all_] == sorted(e["seq"] for e in all_)
+    first = all_[0]
+    assert _mailbox(client, since=first["seq"]) == all_[1:]
+    assert _mailbox(client, thread=first["thread_id"])
+    assert _mailbox(client, thread="no-such-thread") == []
+    assert _mailbox(client, status="acted") == [
+        e for e in all_ if e["status"] == "acted"
+    ]
+    assert all(
+        e["direction"] == "boss->correspondent"
+        for e in _mailbox(client, direction="boss->correspondent")
+    )
+    ev = client.get(f"{API}/events", params={"limit": 5000}).json()["events"]
+    assert any(e["kind"] == "mailbox.entry" for e in ev)
+    assert any(e["kind"] == "mailbox.status" for e in ev)
+    t = client.get(f"{API}/messages/{first['message_id']}/trace").json()
+    assert {e["id"] for e in t["mailbox"]} >= {first["id"]}
+    assert any(e["kind"] == "mailbox.entry" for e in t["events"])
+
+
+def test_observing_the_mailbox_changes_nothing(make_client):
+    client, svc = make_client()
+    before = (_mailbox(client), len(svc.events), svc.pending_reviews())
+    for _ in range(3):
+        _mailbox(client)
+        client.get(f"{API}/boss/pending")
+        client.get(f"{API}/boss/mailbox/{before[0][0]['id']}")
+    assert (_mailbox(client), len(svc.events), svc.pending_reviews()) == before
+
+
+def test_mailbox_is_append_only_and_two_way(tmp_path):
+    import sqlite3
+
+    from mailroom_reloaded.sandbox.server.mailbox import BossMailbox
+
+    mb = BossMailbox(tmp_path / "x" / "boss_mailbox.sqlite")
+    a = mb.post(
+        sender="correspondent",
+        recipient="boss",
+        kind="question",
+        thread_id="t",
+        message_id="m",
+        payload={"q": 1},
+    )
+    b = mb.post(
+        sender="boss",
+        recipient="correspondent",
+        kind="instruction",
+        thread_id="t",
+        message_id="m",
+        payload={"do": 2},
+        in_reply_to=a["id"],
+    )
+    assert (a["direction"], b["direction"]) == (
+        "correspondent->boss",
+        "boss->correspondent",
+    )
+    assert mb.set_status(a["id"], "read", "boss")["status"] == "read"
+    assert mb.set_status(a["id"], "acted", "boss")["status"] == "acted"
+    assert [h["status"] for h in mb.history(a["id"])] == ["read", "acted"]
+    raw = sqlite3.connect(tmp_path / "x" / "boss_mailbox.sqlite")
+    for sql in ("UPDATE entries SET kind='x'", "DELETE FROM entries"):
+        with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+            raw.execute(sql)
+    with pytest.raises(ValueError):
+        mb.post(
+            sender="boss",
+            recipient="boss",
+            kind="question",
+            thread_id="t",
+            message_id="m",
+            payload={},
+        )
+    with pytest.raises(ValueError):
+        mb.post(
+            sender="boss",
+            recipient="correspondent",
+            kind="nonsense",
+            thread_id="t",
+            message_id="m",
+            payload={},
+        )
+    assert mb.get(b["id"])["payload"] == {"do": 2} and mb.count() == 2
+
+
+def test_mailbox_lives_in_the_sandbox_data_dir_only(make_client, tmp_path):
+    _client, svc = make_client()
+    assert svc.mailbox.path.is_file()
+    assert str(svc.mailbox.path).startswith(str(tmp_path))

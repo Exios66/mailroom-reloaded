@@ -1,4 +1,5 @@
 """M0: worked examples (content-repo-shaped samples) validate against schemas/."""
+
 import json
 from pathlib import Path
 
@@ -31,12 +32,15 @@ def test_every_schema_is_valid(p):
     jsonschema.Draft202012Validator.check_schema(json.loads(p.read_text()))
 
 
-@pytest.mark.parametrize("schema,example", [
-    ("scenario.v2.json", "scenario_A1.yaml"),
-    ("gen_spec.v1.json", "gen_spec.yaml"),
-    ("persona_behavior.v1.json", "persona_behavior.yaml"),
-    ("registry.v1.json", "registry.yaml"),
-])
+@pytest.mark.parametrize(
+    "schema,example",
+    [
+        ("scenario.v2.json", "scenario_A1.yaml"),
+        ("gen_spec.v1.json", "gen_spec.yaml"),
+        ("persona_behavior.v1.json", "persona_behavior.yaml"),
+        ("registry.v1.json", "registry.yaml"),
+    ],
+)
 def test_yaml_examples_validate(schema, example):
     validator(schema).validate(yml(example))
 

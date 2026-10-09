@@ -100,6 +100,8 @@ class CorrespondentResult:
     reasons: list[str]
     llm_calls: int = 0
     flags: list[str] = field(default_factory=list)
+    # messages this agent writes to the boss_mailbox: [{"kind": ..., "payload": {...}}]
+    to_boss: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -468,6 +470,40 @@ class StandInCorrespondent:
 
     # ---------------------------------------------------------------- main
     def handle(
+        self, msg: WireMessage, tools: CorrespondentTools
+    ) -> CorrespondentResult:
+        res = self._classify(msg, tools)
+        attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
+        if attacks:
+            # hostile mail is forwarded to the Boss at the moment of detection, on the
+            # boss_mailbox; the typed signals above are still emitted for the pack
+            res.to_boss.append(
+                {
+                    "kind": "hostile_forward",
+                    "payload": {
+                        "message": {
+                            "message_id": msg.message_id,
+                            "from": msg.from_addr,
+                            "subject": msg.subject,
+                            "body": msg.body,
+                            "auth": dict(msg.auth),
+                        },
+                        "attachment_lanes": [dict(x) for x in res.attachment_lanes],
+                        "attack_classes": sorted(
+                            {s.get("attack_class", "other") for s in attacks}
+                        ),
+                        "signals": [dict(s) for s in attacks],
+                        "trust": res.trust,
+                        "trust_reasons": list(res.trust_reasons),
+                        "reasoning": list(res.reasons),
+                        "summary": res.summary,
+                        "held": "message and attachments are held; no reply sent",
+                    },
+                }
+            )
+        return res
+
+    def _classify(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
         text = f"{msg.subject}\n{msg.body}"

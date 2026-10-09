@@ -38,6 +38,7 @@ from mailroom_reloaded.sandbox.server.ingress import (
     plan_scenario,
     thread_id_for,
 )
+from mailroom_reloaded.sandbox.server.mailbox import BOSS, CORRESPONDENT, BossMailbox
 from mailroom_reloaded.sandbox.server.pipeline_runner import PipelineRunner
 
 __all__ = ["FLOWS", "SandboxService"]
@@ -133,6 +134,7 @@ class SandboxService:
         self.docs: dict[str, dict] = {}
         self.batches: list[dict] = []
         self.reviews: dict[str, dict] = {}
+        self.mailbox = BossMailbox(self.state_dir / "boss_mailbox.sqlite", self.emit)
         self._mseq = 0
         self._bseq = 0
         self._sim_next = 0.0
@@ -160,6 +162,7 @@ class SandboxService:
             self._worker.join(timeout=10)
             self._worker = None
         self._save()
+        self.mailbox.close()
         self.pipeline.deactivate()
 
     def _run_worker(self) -> None:
@@ -238,6 +241,7 @@ class SandboxService:
             self.wait_idle(30)
             self.messages, self.events, self.docs, self.batches = {}, [], {}, []
             self.reviews = {}
+            self.mailbox.clear()
             self._mseq = self._bseq = 0
             self._sim_next = 0.0
             self.meter.reset()
@@ -603,7 +607,8 @@ class SandboxService:
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
             self._queue_drafts(msg, res.drafts)
-            self._open_review(msg, res.signals)
+            for fwd in res.to_boss:
+                self._forward_to_boss(msg, fwd)
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:
             if "correspondent" not in msg["flows_done"]:
@@ -655,22 +660,70 @@ class SandboxService:
             )
             with self._lock:
                 msg["outbox_ids"].append(item["id"])
+            self.mailbox.post(
+                sender=CORRESPONDENT,
+                recipient=BOSS,
+                kind="draft_for_approval",
+                thread_id=msg["thread_id"],
+                message_id=msg["id"],
+                payload={
+                    "outbox_id": item["id"],
+                    "to": d.to,
+                    "subject": d.subject,
+                    "intent": d.intent,
+                },
+            )
             if self.autonomy == "sandbox":
                 self.outbox.approve(item["id"], by="boss-desk(autonomy=sandbox)")
+                self._mailbox_answer_draft(item, True, "boss-desk(autonomy=sandbox)")
                 for a in msg["bossdesk"]:
                     if a["action"] == "approve_outbound":
                         a["state"] = "done"
 
-    # ------------------------------------------------------------------ boss review
-    def _open_review(self, msg: dict, signals: list[dict]) -> None:
-        """The Boss Desk reads the Correspondent's signals and opens a review case for
-        attack signals. The message and attachments stay held; nothing goes to the
-        sender or the pipeline until the Boss decides."""
-        case = self.desk.consume_signals(
-            msg["id"],
-            signals,
-            [h["name"] for h in msg["handoffs"]],
+    # ------------------------------------------------------------------ boss_mailbox
+    def _mailbox_answer_draft(self, item: dict, approved: bool, by: str) -> None:
+        """Boss -> Correspondent: approval or rejection of a draft, on the mailbox."""
+        mid = item["message_id"]
+        req = next(
+            (
+                e
+                for e in self.mailbox.list(message_id=mid, kind="draft_for_approval")
+                if e["payload"].get("outbox_id") == item["id"]
+            ),
+            None,
         )
+        if req is None:
+            return
+        self.mailbox.set_status(req["id"], "read", BOSS)
+        ans = self.mailbox.post(
+            sender=BOSS,
+            recipient=CORRESPONDENT,
+            kind="approval" if approved else "rejection",
+            thread_id=req["thread_id"],
+            message_id=mid,
+            payload={"outbox_id": item["id"], "by": by},
+            in_reply_to=req["id"],
+        )
+        self.mailbox.set_status(req["id"], "acted", BOSS)
+        self.mailbox.set_status(ans["id"], "read", CORRESPONDENT)
+        self.mailbox.set_status(
+            ans["id"], "acted", CORRESPONDENT, "draft state updated"
+        )
+
+    def _forward_to_boss(self, msg: dict, fwd: dict) -> None:
+        """The Correspondent's own forward goes on the mailbox; the Boss Desk reads it in
+        the same processing step. The message and attachments stay held and nothing goes
+        to the sender or the pipeline until the Boss decides."""
+        entry = self.mailbox.post(
+            sender=CORRESPONDENT,
+            recipient=BOSS,
+            kind=fwd["kind"],
+            thread_id=msg["thread_id"],
+            message_id=msg["id"],
+            payload=fwd["payload"],
+        )
+        entry = self.mailbox.set_status(entry["id"], "read", BOSS)
+        case = self.desk.read_forward(entry)
         if case is None:
             return
         with self._lock:
@@ -679,7 +732,8 @@ class SandboxService:
             "boss.review.pending",
             msg["id"],
             {
-                "via": "signal channel (possible_attack)",
+                "via": "boss_mailbox",
+                "entry": entry["id"],
                 "attack_classes": case["attack_classes"],
                 "priority": case["priority"],
                 "held_attachments": case["attachments"],
@@ -712,7 +766,10 @@ class SandboxService:
         category: str | None = None,
         by: str = "boss",
     ) -> dict:
-        """Boss decision on a held hostile message: ``legitimate`` or ``quarantine``."""
+        """Boss decision on a held hostile message: ``legitimate`` or ``quarantine``.
+
+        Written to the mailbox as a boss -> correspondent entry; the Correspondent reads
+        it and acts (lanes, pipeline, reply draft) in the same step."""
         if decision not in {"legitimate", "quarantine"}:
             raise ValueError("decision must be 'legitimate' or 'quarantine'")
         if category is not None and category not in CATEGORIES:
@@ -725,33 +782,64 @@ class SandboxService:
                     raise KeyError(mid)
                 if case["state"] != "pending":
                     raise ValueError(f"review is already {case['state']}")
+                case["state"] = "deciding"
+                final_cat = category or case["category"]
+            ent = self.mailbox.post(
+                sender=BOSS,
+                recipient=CORRESPONDENT,
+                kind="decision",
+                thread_id=case["thread_id"],
+                message_id=mid,
+                payload={
+                    "decision": decision,
+                    "reason": reason,
+                    "category": final_cat,
+                    "by": by,
+                },
+                in_reply_to=case["forward_entry_id"],
+            )
+            self.mailbox.set_status(case["forward_entry_id"], "acted", BOSS, decision)
+            with self._lock:
                 case.update(
                     decision=decision,
                     reason=reason or case["reason"],
                     decided_by=by,
+                    category=final_cat,
+                    decision_entry_id=ent["id"],
                     state="released" if decision == "legitimate" else "quarantined",
                 )
-                if decision == "quarantine":
-                    case["category"] = category or case["category"]
-            if decision == "quarantine":
-                self.emit(
-                    "boss.review.quarantined",
-                    mid,
-                    {"by": by, "reason": reason, "category": case["category"]},
-                )
-                for entry in msg["handoffs"]:
-                    if entry["status"] == "held":
-                        entry["status"] = "quarantined"
-                        self.emit(
-                            "attachment.quarantined",
-                            mid,
-                            {"name": entry["name"], "reason": reason, "opened": False},
-                        )
-            else:
-                self.emit("boss.review.released", mid, {"by": by, "reason": reason})
-                self._release_after_review(msg, by)
+            self._correspondent_acts(msg, ent)
             self._save()
         return copy.deepcopy(case)
+
+    def _correspondent_acts(self, msg: dict, ent: dict) -> None:
+        """The Correspondent reads the Boss's decision entry and acts on it."""
+        mid = msg["id"]
+        self.mailbox.set_status(ent["id"], "read", CORRESPONDENT)
+        pl = ent["payload"]
+        by = pl.get("by", "boss")
+        if pl["decision"] == "quarantine":
+            self.emit(
+                "boss.review.quarantined",
+                mid,
+                {"by": by, "reason": pl["reason"], "category": pl["category"]},
+            )
+            for entry in msg["handoffs"]:
+                if entry["status"] == "held":
+                    entry["status"] = "quarantined"
+                    self.emit(
+                        "attachment.quarantined",
+                        mid,
+                        {
+                            "name": entry["name"],
+                            "reason": pl["reason"],
+                            "opened": False,
+                        },
+                    )
+        else:
+            self.emit("boss.review.released", mid, {"by": by, "reason": pl["reason"]})
+            self._release_after_review(msg, by)
+        self.mailbox.set_status(ent["id"], "acted", CORRESPONDENT, pl["decision"])
 
     def _release_after_review(self, msg: dict, by: str) -> None:
         mid = msg["id"]
@@ -788,7 +876,7 @@ class SandboxService:
                     "params": None,
                     "state": "done",
                     "autonomy": "boss",
-                    "source": "boss review decision",
+                    "source": "boss_mailbox decision",
                     "why": "Boss judged the message legitimate",
                 }
             )
@@ -864,6 +952,7 @@ class SandboxService:
     # ------------------------------------------------------------------ outbox
     def approve_outbound(self, oid: str, by: str = "reviewer") -> dict:
         item = self.outbox.approve(oid, by)
+        self._mailbox_answer_draft(item, True, by)
         with self._lock:
             msg = self.messages.get(item["message_id"])
             if msg:
@@ -875,6 +964,7 @@ class SandboxService:
 
     def reject_outbound(self, oid: str, by: str = "reviewer") -> dict:
         item = self.outbox.reject(oid, by)
+        self._mailbox_answer_draft(item, False, by)
         self._save()
         return item
 
@@ -970,6 +1060,7 @@ class SandboxService:
             "correspondent": msg["correspondent"],
             "bossdesk": msg["bossdesk"],
             "boss_review": copy.deepcopy(self.reviews.get(mid)),
+            "mailbox": self.mailbox.list(message_id=mid),
             "pipeline": [h for h in msg["handoffs"]],
             "egress": {
                 "outbox": out,

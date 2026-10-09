@@ -122,33 +122,34 @@ class StandInBossDesk:
             )
         return actions
 
-    # ------------------------------------------------------------- signal inbox
-    def consume_signals(
-        self, message_id: str, signals: list[dict], attachments: list[str]
-    ) -> dict | None:
-        """Open a review case from ``possible_attack`` signals on the signal channel.
+    # ------------------------------------------------------------- mailbox inbox
+    def read_forward(self, entry: dict) -> dict | None:
+        """Open a review case from a ``hostile_forward`` mailbox entry.
 
-        The Desk looks at the signals only (kind, attack_class, priority), never at the
-        message text or the Correspondent's other output. Returns ``None`` when the
-        message carried no pending attack signal.
+        The Desk reads the mailbox entry only (its payload), never the Correspondent's
+        result object or the message store. Returns ``None`` for other entry kinds.
         """
-        attacks = [
-            s
-            for s in signals
-            if s.get("kind") == "possible_attack" and s.get("state") != "dismissed"
-        ]
-        if not attacks:
+        if entry.get("kind") != "hostile_forward":
             return None
-        classes = sorted({s.get("attack_class", "other") for s in attacks})
+        pl = entry["payload"]
+        attacks = pl.get("signals", [])
+        classes = sorted(pl.get("attack_classes") or ["other"])
         order = ["low", "normal", "high", "critical"]
-        top = max((s["priority"] for s in attacks), key=order.index)
+        top = max(
+            (s.get("priority", "normal") for s in attacks),
+            key=order.index,
+            default="high",
+        )
         return {
-            "message_id": message_id,
+            "message_id": entry["message_id"],
+            "thread_id": entry["thread_id"],
+            "forward_entry_id": entry["id"],
+            "decision_entry_id": None,
             "state": "pending",
             "attack_classes": classes,
             "priority": top,
-            "signals": [dict(s) for s in attacks],
-            "attachments": list(attachments),
+            "signals": [dict(x) for x in attacks],
+            "attachments": [ln["name"] for ln in pl.get("attachment_lanes", [])],
             "category": _CATEGORY.get(classes[0], "other")
             if len(classes) == 1
             else ("malware" if "malicious_attachment" in classes else "other"),

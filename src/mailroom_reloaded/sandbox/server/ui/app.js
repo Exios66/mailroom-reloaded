@@ -123,6 +123,25 @@ function reviewCard(c, withButtons) {
     withButtons ? el("div", {}, reason, " ", el("button", { class: "small primary", onclick: () => decide("legitimate") }, "Release (legitimate)"), " ",
       el("button", { class: "small danger", onclick: () => decide("quarantine") }, "Quarantine")) : null);
 }
+// ---------------------------------------------------------------- boss mailbox dock (always live)
+const mbx = { entries: [], last: 0, open: false, timer: null };
+async function pollMailbox() {
+  try {
+    const p = await api("/boss/pending");
+    const upd = await api("/boss/mailbox?limit=5000");  // statuses change, so re-read the whole queue
+    mbx.entries = upd.entries; mbx.last = upd.last_seq;
+    const pending = new Set(p.pending.map((c) => c.message_id));
+    $("mbx-badge").textContent = String(window.sbxMailbox.unread(mbx.entries, pending));
+    $("mbx-badge").className = "chip " + (pending.size ? "bad" : "");
+    if (mbx.open) $("mbx-body").replaceChildren(window.sbxMailbox.renderMailbox(mbx.entries, {
+      pending, onDecide: (mid, decision, reason) => guarded(async () => { await post("/boss/decisions", { message_id: mid, decision, reason }); await refreshAll(); await pollMailbox(); }),
+    }));
+  } catch (e) { /* offline or no token yet: keep the last view */ }
+}
+$("mbx-toggle").addEventListener("click", () => { mbx.open = !mbx.open; $("mbx-dock").classList.toggle("open", mbx.open); pollMailbox(); });
+mbx.timer = setInterval(pollMailbox, 2000);
+pollMailbox();
+
 async function bossView() {
   const p = await api("/boss/pending");
   const d = await api("/boss/decisions");

@@ -298,6 +298,40 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
             "fail": sum(r["verdict"] == "fail" for r in rows),
         }
 
+    @api.get("/boss/mailbox")
+    def boss_mailbox(
+        direction: Literal["correspondent->boss", "boss->correspondent"] | None = None,
+        role: Literal["correspondent", "boss"] | None = None,
+        thread: str | None = None,
+        message: str | None = None,
+        status: Literal["new", "read", "acted", "expired"] | None = None,
+        kind: str | None = None,
+        since: int = Query(default=0, ge=0),
+        limit: int = Query(default=500, ge=1, le=5000),
+    ) -> dict:
+        rows = service.mailbox.list(
+            direction=direction,
+            role=role,
+            thread_id=thread,
+            message_id=message,
+            status=status,
+            kind=kind,
+            since=since,
+            limit=limit,
+        )
+        return {
+            "entries": rows,
+            "count": len(rows),
+            "last_seq": rows[-1]["seq"] if rows else since,
+        }
+
+    @api.get("/boss/mailbox/{entry_id}")
+    def boss_mailbox_entry(entry_id: str) -> dict:
+        e = service.mailbox.get(entry_id)
+        if e is None:
+            raise HTTPException(404, f"unknown mailbox entry {entry_id}")
+        return {**e, "history": service.mailbox.history(entry_id)}
+
     @api.get("/boss/pending")
     def boss_pending() -> dict:
         rows = service.pending_reviews()
@@ -357,6 +391,10 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
     @app.get("/ui/app.js")
     def ui_js() -> FileResponse:
         return _static("app.js", "text/javascript")
+
+    @app.get("/ui/mailbox.js")
+    def ui_mailbox_js() -> FileResponse:
+        return _static("mailbox.js", "text/javascript")
 
     @app.get("/ui/app.css")
     def ui_css() -> FileResponse:
