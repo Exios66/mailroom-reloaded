@@ -140,6 +140,10 @@ def _span_rows(store: SpanStore, limit: int) -> list[_Row]:
     rows: list[_Row] = []
     for r in store.list_runs(limit):
         run_id = str(r["run_id"])
+        try:
+            parse_session_id(f"run:{run_id}")
+        except ValueError:
+            continue  # a hostile stored id never reaches the picker
         rows.append(
             _from_ns_row(
                 format_session_id("run", run_id),
@@ -285,13 +289,18 @@ def list_sessions(
                 merged[row.summary.id] = row
 
     span_store = _open_store(store)
+    span_count = 0
     if span_store is not None:
         try:
-            take(_span_rows(span_store, limit))
+            span_rows = _span_rows(span_store, limit)
+            span_count = len(span_rows)
+            take(span_rows)
         except Exception:
             logger.warning("replay_sessions_spans_failed", exc_info=True)
     try:
-        take(_audit_rows(engine or get_engine(), limit))
+        # each span-backed session can hide at most one audit duplicate, so over-fetch by
+        # that many before the final limit is applied
+        take(_audit_rows(engine or get_engine(), limit + span_count))
     except Exception:
         logger.warning("replay_sessions_audit_failed", exc_info=True)
 

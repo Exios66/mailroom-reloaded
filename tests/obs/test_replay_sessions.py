@@ -216,3 +216,34 @@ def test_hostile_stored_ids_are_skipped(engine, store) -> None:
     )
     ids = [r.id for r in list_sessions(store=store, engine=engine)]
     assert ids == ["run:ok-run"]
+
+
+def test_hostile_run_id_is_skipped(engine, store) -> None:
+    t0 = int(BASE.timestamp() * 1e9)
+    store.write(
+        [
+            _span("h1", "bad run <b>", None, t0, t0 + 1),
+            _span("h2", "ok-run", None, t0, t0 + 1),
+        ]
+    )
+    assert [r.id for r in list_sessions(store=store, engine=engine)] == ["run:ok-run"]
+
+
+def test_limit_is_applied_after_audit_duplicates_are_dropped(engine, store) -> None:
+    t0 = int((BASE - timedelta(days=10)).timestamp() * 1e9)
+    store.write(
+        [
+            _span("a", "run-a", None, t0 + 2, t0 + 3),
+            _span("b", "run-b", None, t0, t0 + 1),
+        ]
+    )
+    # audit copies of both span runs are the newest audit rows; the audit-only run
+    # sits between them and must not be crowded out of the page
+    _eval_row(engine, "run-a", "a.pdf", "da")
+    _audit(engine, "da", BASE)
+    _eval_row(engine, "run-b", "b.pdf", "db")
+    _audit(engine, "db", BASE - timedelta(hours=1))
+    _eval_row(engine, "run-c", "c.pdf", "dc")
+    _audit(engine, "dc", BASE - timedelta(days=1))
+    ids = [r.id for r in list_sessions(2, store=store, engine=engine)]
+    assert ids == ["run:run-c", "run:run-a"]

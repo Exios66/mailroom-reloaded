@@ -264,7 +264,9 @@ def timeline_from_spans(
                     else "running"
                     if row["span_id"] in running
                     else "ok",
-                    reason=_str(a.get(A.FAIL_REASON)),
+                    reason=A.failure_reason_for(_str(a.get(A.FAIL_REASON)))
+                    if failed
+                    else None,
                     tokens=max(0, _int(a["mailroom.tokens.used"]))
                     if "mailroom.tokens.used" in a
                     else None,
@@ -735,14 +737,26 @@ def build_timeline(
     from mailroom_reloaded.obs.replay.sessions import parse_session_id
 
     kind, key = parse_session_id(session_id)
-    if store is None:
-        from mailroom_reloaded.storage.span_store import (
-            SpanStore,
-            default_span_store_path,
-        )
+    if store is not None:
+        return _build(session_id, kind, key, from_s, to_s, store, engine)
+    from mailroom_reloaded.storage.span_store import SpanStore, default_span_store_path
 
-        store = SpanStore(default_span_store_path())
+    owned = SpanStore(default_span_store_path())
+    try:
+        return _build(session_id, kind, key, from_s, to_s, owned, engine)
+    finally:
+        owned.close()  # a store this call opened is never left to the garbage collector
 
+
+def _build(
+    session_id: str,
+    kind: str,
+    key: str,
+    from_s: float | None,
+    to_s: float | None,
+    store: Any,
+    engine: Any,
+) -> Timeline | None:
     watermark: Any = None
     path = getattr(store, "path", None)
     if not (isinstance(path, Path) and not path.exists()):

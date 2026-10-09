@@ -104,12 +104,13 @@ def test_failed_segment(tl: Timeline) -> None:
     )
 
 
-def test_long_reason_is_bounded() -> None:
+def test_free_text_reason_collapses_to_the_vocabulary() -> None:
     rows = F.failed()
     rows[-1]["attrs"]["mailroom.fail_reason"] = "x" * 1000
     out = timeline_from_spans(rows, "run", F.RUN)
     assert out is not None
-    assert max(len(s.reason or "") for s in out.segments) == 256
+    reasons = {s.reason for s in out.segments if s.reason}
+    assert reasons == {"unexpected"}
 
 
 def test_parked_and_boss_events(tl: Timeline) -> None:
@@ -267,7 +268,11 @@ def test_no_content_in_serialised_timeline(tl: Timeline) -> None:
     leaky = timeline_from_spans(rows, "run", F.RUN)
     assert leaky is not None
     assert "SECRET" not in leaky.model_dump_json()
-    assert all(not isinstance(s.value, (dict, list)) for s in leaky.scores if s.name != "review_causes")
+    assert all(
+        not isinstance(s.value, (dict, list))
+        for s in leaky.scores
+        if s.name != "review_causes"
+    )
     # the fixture really carries the content the builder must ignore
     rows = F.all_rows()
     assert any("llm.input_messages.0.message.content" in r["attrs"] for r in rows)
@@ -526,7 +531,11 @@ def test_cached_timeline_is_isolated_from_caller_mutation(tmp_path: Path) -> Non
     first.segments.clear()
     first.session.id = "tampered"
     again = build_timeline("run-1", store=store)
-    assert again is not None and len(again.segments) == n and again.session.id != "tampered"
+    assert (
+        again is not None
+        and len(again.segments) == n
+        and again.session.id != "tampered"
+    )
 
 
 def test_window_id_round_trips_between_sessions_and_timeline(tmp_path: Path) -> None:
@@ -535,3 +544,37 @@ def test_window_id_round_trips_between_sessions_and_timeline(tmp_path: Path) -> 
     store = _store(tmp_path)
     sid = format_session_id("window", f"{F.ns(0)}-{F.ns(3.5)}")
     assert build_timeline(sid, store=store) is not None
+
+
+def test_build_timeline_closes_a_store_it_opened(tmp_path: Path, monkeypatch) -> None:
+    from mailroom_reloaded.storage import span_store as mod
+
+    opened: list[SpanStore] = []
+    real = SpanStore
+
+    class Tracking(real):  # type: ignore[misc, valid-type]
+        def __init__(self, *a, **k) -> None:
+            super().__init__(*a, **k)
+            opened.append(self)
+
+    seeded = _store(tmp_path)
+    seeded.close()
+    monkeypatch.setattr(mod, "SpanStore", Tracking)
+    monkeypatch.setattr(mod, "default_span_store_path", lambda: tmp_path / "traces.db")
+    closed: list[bool] = []
+    orig_close = real.close
+    monkeypatch.setattr(
+        real, "close", lambda self: (closed.append(True), orig_close(self))[1]
+    )
+    out = build_timeline("run:run-1", engine=object())
+    assert out is not None and len(opened) == 1 and closed == [True]
+
+
+def test_build_timeline_leaves_a_supplied_store_open(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    try:
+        assert build_timeline("run:run-1", store=store) is not None
+        # still usable: the caller owns it
+        assert build_timeline("run:run-1", store=store) is not None
+    finally:
+        store.close()
