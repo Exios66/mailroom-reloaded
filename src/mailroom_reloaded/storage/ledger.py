@@ -102,6 +102,14 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _decode(r: Any) -> LedgerEntry | None:
+    """Decode a row for verification; ``None`` when it is malformed (counts as tampering)."""
+    try:
+        return _row_entry(r)
+    except (ValueError, TypeError):
+        return None
+
+
 def _row_entry(r: Any) -> LedgerEntry:
     return LedgerEntry(
         seq=r.seq,
@@ -126,12 +134,14 @@ class Ledger:
         row_cap: int = DEFAULT_ROW_CAP,
         max_pending_rows: int = 20000,
         batch_window_s: float = 0.05,
+        retry_base_s: float = 0.2,
     ) -> None:
         """Create the ledger; the writer thread starts on the first append."""
         self._engine = engine
         self.row_cap = row_cap
         self._max_pending_rows = max_pending_rows
         self._batch_window = batch_window_s
+        self._retry_base = retry_base_s
         self._cond = threading.Condition()
         self._items: deque[_Item] = deque()
         self._pending_rows = 0
@@ -142,9 +152,6 @@ class Ledger:
         # accessed by enqueuing threads under _cond; the writer under _cond too
         self._dropped: dict[str, int] = {}
         self._overflow_gap: set[str] = set()
-        # writer-thread only
-        self._rows: dict[str, int] = {}
-        self._cap_gap: set[str] = set()
 
     # ------------------------------------------------------------------ engine
     @property
@@ -271,21 +278,45 @@ class Ledger:
             try:
                 self._write(batch)
                 failures = 0
-            except Exception:
+            except Exception:  # keep the batch and retry; never kill the thread
                 failures += 1
                 logger.warning("ledger_write_failed", attempt=failures, exc_info=True)
-                if failures >= 5:
-                    logger.error("ledger_batch_dropped", items=len(batch))
-                    failures = 0
-                else:
-                    with self._cond:
-                        self._items.extendleft(reversed(batch))
-                        self._cond.wait(min(2.0, 0.2 * failures))
-                    continue
+                kept = self._shed_metrics(batch) if failures >= 5 else batch
+                with self._cond:
+                    self._items.extendleft(reversed(kept))
+                    self._cond.wait(min(30.0, self._retry_base * 2 ** min(failures, 8)))
+                continue
             with self._cond:
                 self._pending_rows -= sum(len(i.rows) for i in batch)
                 self._done += len(batch)
                 self._cond.notify_all()
+
+    def _shed_metrics(self, batch: list[_Item]) -> list[_Item]:
+        """After repeated write failures drop the batch's metric rows (never chain entries).
+
+        The loss is counted per run and surfaced as one ``gap`` (``write_failed``) per run
+        in the retained batch, so the omission is visible in the chain.
+        """
+        kept = [i for i in batch if i.kind is not None]
+        shed = [i for i in batch if i.kind is None]
+        if not shed:
+            return kept
+        lost: dict[str, int] = {}
+        for item in shed:
+            lost[item.run_id] = lost.get(item.run_id, 0) + len(item.rows)
+        logger.error("ledger_metric_rows_dropped", rows=sum(lost.values()))
+        with self._cond:
+            self._pending_rows -= sum(len(i.rows) for i in shed)
+            self._done += len(shed)
+            for run, n in lost.items():
+                self._dropped[run] = self._dropped.get(run, 0) + n
+        ts = _now()
+        for run, n in lost.items():
+            gap = sanitize_payload("gap", {"reason": "write_failed", "count": n})
+            kept.append(_Item(run, None, ts, kind="gap", payload=gap))
+            with self._cond:
+                self._enqueued += 1
+        return kept
 
     def _write(self, batch: list[_Item]) -> None:
         with self.engine.connect() as conn:
@@ -294,9 +325,13 @@ class Ledger:
                 last = conn.execute(
                     select(_t).order_by(_t.c.seq.desc()).limit(1)
                 ).first()
-                state = {
+                # per-transaction state: nothing here outlives a rollback
+                state: dict[str, Any] = {
                     "seq": last.seq if last else 0,
                     "prev": last.entry_hash if last else "",
+                    "rows": {},  # run_id -> stored metric rows (counted in this transaction)
+                    "dropped": {},  # run_id -> rows dropped by the cap in this transaction
+                    "gaps": set(),  # runs whose row_cap gap exists
                 }
                 for item in batch:
                     if item.kind is not None:
@@ -306,9 +341,10 @@ class Ledger:
                 conn.commit()
             except Exception:
                 conn.rollback()
-                self._rows.clear()  # counters may include rolled-back rows; reload lazily
-                self._cap_gap.clear()
                 raise
+        with self._cond:  # committed: only now do the drops count
+            for run, n in state["dropped"].items():
+                self._dropped[run] = self._dropped.get(run, 0) + n
 
     def _insert_entry(self, conn: Any, state: dict[str, Any], item: _Item) -> None:
         payload = item.payload
@@ -323,11 +359,23 @@ class Ledger:
             ]
             with self._cond:
                 dropped = self._dropped.get(item.run_id, 0)
+            dropped += state["dropped"].get(item.run_id, 0)
+            # a restart loses the in-memory count: the persisted gap counts are the floor
+            gap_floor = sum(
+                int(json.loads(r.payload).get("count", 0))
+                for r in conn.execute(
+                    select(_t.c.payload).where(
+                        _t.c.run_id == item.run_id, _t.c.kind == "gap"
+                    )
+                )
+            )
             payload = {
                 **payload,
                 "merkle_root": merkle_root(digests),
                 "docs": len(digests),
-                "dropped_rows": max(int(payload.get("dropped_rows", 0)), dropped),
+                "dropped_rows": max(
+                    int(payload.get("dropped_rows", 0)), dropped, gap_floor
+                ),
             }
         entry = LedgerEntry(
             seq=state["seq"] + 1,
@@ -357,11 +405,13 @@ class Ledger:
 
     def _insert_rows(self, conn: Any, state: dict[str, Any], item: _Item) -> None:
         run = item.run_id
-        if run not in self._rows:
-            self._rows[run] = conn.execute(
+        if (
+            run not in state["rows"]
+        ):  # recounted per transaction: other instances may have written
+            state["rows"][run] = conn.execute(
                 select(func.count()).select_from(_m).where(_m.c.run_id == run)
             ).scalar_one()
-        room = max(0, self.row_cap - self._rows[run])
+        room = max(0, self.row_cap - state["rows"][run])
         keep, drop = item.rows[:room], item.rows[room:]
         if keep:
             conn.execute(
@@ -379,11 +429,10 @@ class Ledger:
                     for r in keep
                 ],
             )
-            self._rows[run] += len(keep)
+            state["rows"][run] += len(keep)
         if drop:
-            with self._cond:
-                self._dropped[run] = self._dropped.get(run, 0) + len(drop)
-            if run not in self._cap_gap and not self._has_gap(conn, run, "row_cap"):
+            state["dropped"][run] = state["dropped"].get(run, 0) + len(drop)
+            if run not in state["gaps"] and not self._has_gap(conn, run, "row_cap"):
                 gap = _Item(
                     run,
                     None,
@@ -394,7 +443,7 @@ class Ledger:
                     ),
                 )
                 self._insert_entry(conn, state, gap)
-            self._cap_gap.add(run)
+            state["gaps"].add(run)
 
     @staticmethod
     def _has_gap(conn: Any, run_id: str, reason: str) -> bool:
@@ -482,7 +531,16 @@ class Ledger:
         merkle_ok: bool | None = None
         with self.engine.connect() as conn:
             for r in conn.execute(select(_t).order_by(_t.c.seq)):
-                e = _row_entry(r)
+                e = _decode(r)
+                if e is None:
+                    return LedgerVerify(
+                        ok=False,
+                        count=count,
+                        head_seq=head_seq,
+                        head_hash=prev or None,
+                        broken_at=r.seq,
+                        detail="undecodable entry",
+                    )
                 if e.seq != expected or e.prev_hash != prev or not self._entry_ok(e):
                     return LedgerVerify(
                         ok=False,
@@ -527,12 +585,25 @@ class Ledger:
         ) and closed.payload.get("docs") == len(digests)
 
     def _verify_run(self, run_id: str) -> LedgerVerify:
-        entries = self.entries(run_id=run_id, limit=10_000_000)
-        if not entries:
-            return LedgerVerify(ok=False, detail="unknown run")
-        digests: list[str] = []
-        merkle_ok: bool | None = None
         with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(_t).where(_t.c.run_id == run_id).order_by(_t.c.seq)
+            ).all()
+            if not rows:
+                return LedgerVerify(ok=False, detail="unknown run")
+            entries: list[LedgerEntry] = []
+            for r in rows:
+                e = _decode(r)
+                if e is None:
+                    return LedgerVerify(
+                        ok=False,
+                        count=len(rows),
+                        broken_at=r.seq,
+                        detail="undecodable entry",
+                    )
+                entries.append(e)
+            digests: list[str] = []
+            merkle_ok: bool | None = None
             for e in entries:
                 prev_row = (
                     conn.execute(

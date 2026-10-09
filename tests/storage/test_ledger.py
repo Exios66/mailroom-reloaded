@@ -446,12 +446,139 @@ def test_entries_filters_and_paging(ledger) -> None:
     assert [e.doc_id for e in ledger.entries(doc_id="doc1")] == ["doc1"]
     assert [e.seq for e in ledger.entries(limit=2, offset=1)] == [2, 3]
     assert ledger.entries(descending=True, limit=1)[0].seq == ledger.head().seq
-    assert [e.seq for e in ledger.entries(since_seq=7)] == [8, 9, 10][
-        : len(ledger.entries(since_seq=7))
-    ]
+    assert [e.seq for e in ledger.entries(since_seq=7)] == [8]
 
 
 def test_empty_ledger(ledger) -> None:
     assert ledger.head() is None
     v = ledger.verify()
     assert v.ok and v.count == 0
+
+
+def test_non_finite_numbers_in_payloads_are_dropped_not_raised() -> None:
+    clean = sanitize_payload(
+        "doc_closed",
+        {
+            "rows": float("inf"),
+            "duration_s": float("nan"),
+            "invocation": 2,
+            "usage_by_role": {"judge": {"cost_usd": float("inf"), "calls": 1}},
+        },
+    )
+    assert clean == {"invocation": 2, "usage_by_role": {"judge": {"calls": 1.0}}}
+
+
+def test_malformed_stored_payload_fails_verification_instead_of_raising(
+    ledger, engine
+) -> None:
+    _run(ledger, "r1")
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE ledger SET payload = 'not json' WHERE seq = 2"))
+    v = ledger.verify()
+    assert not v.ok and v.broken_at == 2 and v.detail == "undecodable entry"
+    v = ledger.verify("r1")
+    assert not v.ok and v.broken_at == 2 and v.detail == "undecodable entry"
+
+
+def test_row_cap_holds_across_two_instances_on_one_run(engine) -> None:
+    a, b = Ledger(engine, row_cap=10), Ledger(engine, row_cap=10)
+    try:
+        for i in range(4):
+            lg = a if i % 2 else b
+            lg.append_metrics("r1", "d", [MetricRow(f"m{j}", j) for j in range(4)])
+            assert lg.flush()
+        assert len(a.metric_rows("r1")) == 10
+        assert len(a.entries(run_id="r1", kind="gap")) == 1
+    finally:
+        a.close()
+        b.close()
+
+
+def test_a_rolled_back_batch_does_not_double_count_drops(engine, monkeypatch) -> None:
+    lg = Ledger(engine, row_cap=3)
+    real_insert = lg._insert_entry
+    calls = {"n": 0}
+
+    def failing_once(conn, state, item):
+        if item.kind == "run_closed" and calls["n"] == 0:
+            calls["n"] += 1
+            raise RuntimeError("disk hiccup")
+        return real_insert(conn, state, item)
+
+    monkeypatch.setattr(lg, "_insert_entry", failing_once)
+    try:
+        lg.append_metrics(
+            "r1", "d", [MetricRow(f"m{i}", i) for i in range(8)]
+        )  # 5 over the cap
+        lg.append("run_closed", "r1", payload={"closed_by": "completed"})
+        assert lg.flush(timeout=15)
+        closed = lg.entries(run_id="r1", kind="run_closed")[0]
+        assert closed.payload["dropped_rows"] == 5
+        assert len(lg.metric_rows("r1")) == 3
+    finally:
+        lg.close()
+
+
+def test_dropped_rows_survive_a_restart_through_the_gap_count(engine) -> None:
+    first = Ledger(engine, row_cap=2)
+    first.append_metrics(
+        "r1", "d", [MetricRow(f"m{i}", i) for i in range(6)]
+    )  # 4 dropped
+    first.close()
+    second = Ledger(engine, row_cap=2)
+    try:
+        second.append("run_closed", "r1", payload={"closed_by": "completed"})
+        assert second.flush()
+        assert (
+            second.entries(run_id="r1", kind="run_closed")[0].payload["dropped_rows"]
+            == 4
+        )
+    finally:
+        second.close()
+
+
+def test_persistent_write_failures_shed_metric_rows_but_never_chain_entries(
+    engine, monkeypatch
+) -> None:
+    lg = Ledger(engine, retry_base_s=0.001)
+    real_write = lg._write
+
+    def flaky(batch):
+        if any(i.kind is None for i in batch):  # metric rows can never be written
+            raise RuntimeError("database is locked")
+        return real_write(batch)
+
+    monkeypatch.setattr(lg, "_write", flaky)
+    try:
+        lg.append("run_opened", "r1", payload={"kind": "eval"})
+        lg.append_metrics("r1", "d", [MetricRow("m", 1)])
+        lg.append("doc_closed", "r1", doc_id="d", payload={"outcome": "completed"})
+        assert lg.flush(timeout=20)
+        kinds = [e.kind for e in lg.entries(run_id="r1")]
+        assert kinds.count("run_opened") == 1 and kinds.count("doc_closed") == 1
+        gaps = lg.entries(run_id="r1", kind="gap")
+        assert [g.payload["reason"] for g in gaps] == ["write_failed"]
+        assert lg.metric_rows("r1") == []
+        assert lg.verify().ok
+    finally:
+        lg.close()
+
+
+def test_chain_entries_are_retried_past_five_failures(engine, monkeypatch) -> None:
+    lg = Ledger(engine, retry_base_s=0.001)
+    real_write = lg._write
+    calls = {"n": 0}
+
+    def flaky(batch):
+        calls["n"] += 1
+        if calls["n"] <= 8:
+            raise RuntimeError("database is locked")
+        return real_write(batch)
+
+    monkeypatch.setattr(lg, "_write", flaky)
+    try:
+        lg.append("pinned", "r1", payload={"target": "r1"})
+        assert lg.flush(timeout=20)
+        assert [e.kind for e in lg.entries()] == ["pinned"] and calls["n"] == 9
+    finally:
+        lg.close()

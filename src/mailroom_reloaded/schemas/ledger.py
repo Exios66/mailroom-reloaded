@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Callable
 from typing import Any
@@ -106,13 +107,16 @@ def _label(value: Any) -> str | None:
 def _int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     return int(value)
 
 
 def _num(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return round(float(value), 6)
+    number = float(value)
+    return round(number, 6) if math.isfinite(number) else None
 
 
 def _bool(value: Any) -> bool | None:
@@ -216,7 +220,10 @@ _SPECS: dict[str, dict[str, Callable[[Any], Any]]] = {
         "route_trail": _names,
         "duration_s": _num,
     },
-    "gap": {"reason": _enum("row_cap", "queue_overflow"), "count": _int},
+    "gap": {
+        "reason": _enum("row_cap", "queue_overflow", "write_failed"),
+        "count": _int,
+    },
     "run_closed": {
         "counts": _counts,
         "docs": _int,
