@@ -508,3 +508,91 @@ def test_no_gt_leak_in_agent_requests(env, mock_provider, monkeypatch):
     assert len(filtered) < len(mock_provider.requests)
     assert filtered, "expected sorter/specialist requests"
     assert_no_gt(filtered, {"fields": [g.fields for g in gts.values()]})
+
+
+def test_eval_run_is_recorded_in_the_archive_ledger(env, mock_provider, monkeypatch):
+    """Verify an eval run writes run_opened, one doc_closed per document and a sealed run_closed."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+    sampled, gts = _sampled()
+    _script_pipeline(mock_provider, sampled, gts)
+
+    run_id = run_eval(
+        EvalConfig(local_dir=FIXTURES, per_class=2, seed=42, concurrency=4, judge_sample_rate=1.0)
+    )
+
+    ledger = get_ledger()
+    assert ledger.flush()
+    entries = ledger.entries(run_id=run_id, limit=100)
+    kinds = [e.kind for e in entries]
+    assert kinds[0] == "run_opened" and kinds[-1] == "run_closed"
+    assert kinds.count("doc_closed") == 10
+    assert entries[0].payload["kind"] == "eval" and entries[0].payload["posture_label"] == "pipeline"
+    closed = entries[-1].payload
+    assert closed["closed_by"] == "completed" and closed["expected"] == 10 and closed["docs"] == 10
+    assert all(e.payload["outcome"] == "completed" for e in entries if e.kind == "doc_closed")
+    assert all(e.payload["usage_by_role"]["grader"]["calls"] >= 0 for e in entries if e.kind == "doc_closed")
+    verdict = ledger.verify(run_id)
+    assert verdict.ok and verdict.merkle_ok is True
+
+
+def test_eval_error_rows_are_recorded_as_aborted_documents(env, monkeypatch):
+    """Verify a document that fails before the flow can record it still gets a doc_closed."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    async def exploding_kickoff(self, inputs=None, input_files=None, **kwargs):
+        raise RuntimeError("could not even configure")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", exploding_kickoff)
+    run_id = run_eval(
+        EvalConfig(local_dir=FIXTURES, per_class=1, seed=42, concurrency=2, judge_sample_rate=0.0)
+    )
+    ledger = get_ledger()
+    assert ledger.flush()
+    docs = ledger.entries(run_id=run_id, kind="doc_closed", limit=100)
+    assert len(docs) == 5
+    assert all(e.payload["outcome"] == "aborted" and e.payload["usage_complete"] is False for e in docs)
+    closed = ledger.entries(run_id=run_id, kind="run_closed")[0].payload
+    assert closed["expected"] == 5 and closed["docs"] == 5
+
+
+def test_eval_that_dies_closes_the_run_as_interrupted(env, monkeypatch):
+    """Verify an exception escaping the eval still seals the run."""
+    from mailroom_reloaded.eval import runner
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    async def broken_run_all(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner, "_run_all", broken_run_all)
+    with pytest.raises(KeyboardInterrupt):
+        run_eval(EvalConfig(local_dir=FIXTURES, per_class=1, seed=42, judge_sample_rate=0.0))
+    ledger = get_ledger()
+    assert ledger.flush()
+    closed = ledger.entries(kind="run_closed")
+    assert [e.payload["closed_by"] for e in closed] == ["interrupted"]
+
+
+def test_specialist_cell_documents_are_recorded(env, monkeypatch):
+    """Verify cell-mode rows (which never touch the flow) are recorded with the specialist's spend."""
+    from mailroom_reloaded.eval import runner
+    from mailroom_reloaded.llm.usage import Usage
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    def fake_extract(text, doc_type, doc_subclass, **kw):
+        return runner.ExtractResult(doc_type, {"a": 1}, True, None, 0.9, None, 1, Usage(7, 3, 0.0, 1))
+
+    monkeypatch.setattr(runner, "_extract", fake_extract)
+    run_id = run_eval(
+        EvalConfig(local_dir=FIXTURES, per_class=1, seed=42, mode="specialist_cell", judge_sample_rate=0.0)
+    )
+    ledger = get_ledger()
+    assert ledger.flush()
+    docs = ledger.entries(run_id=run_id, kind="doc_closed", limit=100)
+    assert len(docs) == 5 and all(e.payload["outcome"] == "completed" for e in docs)
+    roles = {r for e in docs for r in e.payload["usage_by_role"]}
+    assert roles and all(r.endswith("_specialist") for r in roles)
+    assert ledger.verify(run_id).ok

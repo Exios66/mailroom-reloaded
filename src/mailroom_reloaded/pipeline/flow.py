@@ -45,6 +45,7 @@ from mailroom_reloaded.ingest.clerk import ingest as _ingest
 from mailroom_reloaded.llm.usage import Usage, add_role_usage
 from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.obs.run_context import ensure_run_scope
+from mailroom_reloaded.pipeline import run_ledger
 from mailroom_reloaded.pipeline.archivist import archive_document
 from mailroom_reloaded.pipeline.guards import (
     NODE_DEADLINES,
@@ -400,6 +401,7 @@ class MailroomFlow(Flow[MailroomState]):
         """Fail the document: move to ``failed/``, update the manifest, audit, raise."""
         state = self.state
         state.status = "failed"
+        self._failure_reason = reason
         M.documents.add(1, {"stage": "pipeline", "status": "failed"})
         manifest = self._manifest
         manifest.status = "failed"
@@ -607,6 +609,7 @@ class MailroomFlow(Flow[MailroomState]):
         self._eval_ctx = eval_ctx
         self._resume_from = resume_from
         self._llm_calls = 0
+        self._failure_reason: str | None = None
         self._usage_sink: list[tuple[str, Usage]] = []
         self._gate = load_gate()
         self._tracer = trace.get_tracer("mailroom.pipeline")
@@ -652,11 +655,53 @@ class MailroomFlow(Flow[MailroomState]):
         return next_node(self._manifest, NODE_ORDER)
 
     def _drive(self) -> MailroomState:
-        """Open the per-document span and run the deterministic node walk under it."""
+        """Open the per-document span and run the deterministic node walk under it.
+
+        The archive ledger records one ``doc_closed`` per invocation in a ``finally``;
+        recording is best effort and never changes the outcome or masks an exception.
+        """
         state = self.state
-        with self._tracer.start_as_current_span("mailroom.document") as span:
-            span.set_attribute("mailroom.doc_id", state.doc_id)
-            return self._drive_nodes()
+        with _document_scope(self._eval_ctx) as scope:
+            ledger, base = self._ledger_begin(scope)
+            error: BaseException | None = None
+            try:
+                with self._tracer.start_as_current_span("mailroom.document") as span:
+                    span.set_attribute("mailroom.doc_id", state.doc_id)
+                    return self._drive_nodes()
+            except BaseException as exc:
+                error = exc
+                raise
+            finally:
+                self._ledger_end(ledger, scope, base, error)
+
+    def _ledger_begin(self, scope: Any) -> tuple[Any, Any]:
+        """Open the live run (eval runs are opened by ``run_eval``) and snapshot usage."""
+        try:
+            ledger = run_ledger.ledger_for(self._overrides)
+            run_ledger.ensure_live_run(ledger, scope)
+            return ledger, run_ledger.snapshot(self.state)
+        except Exception:
+            logger.warning("ledger_begin_failed", exc_info=True)
+            return None, None
+
+    def _ledger_end(self, ledger: Any, scope: Any, base: Any, error: BaseException | None) -> None:
+        """Write this invocation's ``doc_closed`` entry (best effort)."""
+        if ledger is None:
+            return
+        try:
+            if error is not None:
+                error._ledger_recorded = True  # type: ignore[attr-defined]
+            run_ledger.record_document(
+                ledger,
+                scope,
+                self.state,
+                base,
+                doc_type=self._effective_doc_type(),
+                failure=error if error is not None else getattr(self, "_failure_reason", None),
+                aborted=error is not None,
+            )
+        except Exception:
+            logger.warning("ledger_end_failed", exc_info=True)
 
     def _drive_nodes(self) -> MailroomState:
         """Deterministically walk the guarded nodes and gates to a terminal bin."""
@@ -767,6 +812,13 @@ class MailroomFlow(Flow[MailroomState]):
         return self.kickoff(inputs, input_files, **kwargs)
 
 
+def _document_scope(eval_ctx: Any | None):
+    """The run scope for one document: the active one, else the eval run or the live bucket."""
+    if eval_ctx is None:
+        return ensure_run_scope("watch")
+    return ensure_run_scope("eval", getattr(eval_ctx, "run_id", None))
+
+
 def _opt(value: float | None) -> float:
     """``value`` as a float, or 0.0 when ``None`` (gate feature default)."""
     return float(value) if value is not None else 0.0
@@ -832,6 +884,18 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
         {"elapsed_s": 0.0, "reconciled": True},
     )
     reconcile_catalog(bins, manifest)
+    try:
+        with ensure_run_scope("reconcile") as scope:
+            ledger = run_ledger.ledger_for(None)
+            run_ledger.ensure_live_run(ledger, scope)
+            run_ledger.record_reconciled(
+                ledger,
+                scope.run_id,
+                manifest.doc_id,
+                str(payload.get("doc_type") or sort.get("doc_type") or "unknown"),
+            )
+    except Exception:
+        logger.warning("ledger_reconcile_failed", doc_id=manifest.doc_id, exc_info=True)
     return True
 
 
@@ -852,7 +916,6 @@ def run_document(
     """
     flow = MailroomFlow()
     # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
-    eval_run_id = getattr(eval_ctx, "run_id", None) if eval_ctx is not None else None
-    with ensure_run_scope("eval" if eval_ctx is not None else "watch", eval_run_id):
+    with _document_scope(eval_ctx):
         flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
         return flow._drive()

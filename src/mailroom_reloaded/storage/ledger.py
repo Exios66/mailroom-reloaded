@@ -459,6 +459,26 @@ class Ledger:
             row = conn.execute(select(_t).order_by(_t.c.seq.desc()).limit(1)).first()
         return _row_entry(row) if row else None
 
+    def count(self, kind: str, run_id: str, doc_id: str | None = None) -> int:
+        """Committed entries of ``kind`` for a run (and optionally one document)."""
+        q = select(func.count()).select_from(_t).where(_t.c.kind == kind, _t.c.run_id == run_id)
+        if doc_id is not None:
+            q = q.where(_t.c.doc_id == doc_id)
+        with self.engine.connect() as conn:
+            return conn.execute(q).scalar_one()
+
+    def open_runs(self, kind: str | None = None) -> list[str]:
+        """Run ids that have a committed ``run_opened`` and no ``run_closed`` (oldest first)."""
+        closed = select(_t.c.run_id).where(_t.c.kind == "run_closed")
+        q = (
+            select(_t.c.run_id, _t.c.payload)
+            .where(_t.c.kind == "run_opened", _t.c.run_id.not_in(closed))
+            .order_by(_t.c.seq)
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(q).all()
+        return [r.run_id for r in rows if kind is None or json.loads(r.payload).get("kind") == kind]
+
     def entries(
         self,
         *,
@@ -652,11 +672,20 @@ _default_lock = threading.Lock()
 
 
 def get_ledger() -> Ledger:
-    """The process-wide ledger on the default engine (created lazily)."""
+    """The process-wide ledger on the default engine (created lazily).
+
+    If the default engine was replaced (a different ``base_dir``), the old ledger is
+    flushed and closed and a new one is bound, so a late write never lands in the
+    wrong database.
+    """
     global _default
+    engine = get_engine()
     with _default_lock:
+        if _default is not None and _default.engine is not engine:
+            _default.close()
+            _default = None
         if _default is None:
-            _default = Ledger()
+            _default = Ledger(engine)
             atexit.register(_default.close)
         return _default
 
