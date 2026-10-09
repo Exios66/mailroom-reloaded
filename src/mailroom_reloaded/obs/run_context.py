@@ -53,7 +53,7 @@ def current_run() -> RunScope | None:
 
 def _safe_run_id(run_id: str) -> str:
     """``run_id`` if it matches ``[A-Za-z0-9_-]{1,64}``, else a sanitised form."""
-    if _RUN_ID_RE.match(run_id):
+    if _RUN_ID_RE.fullmatch(run_id):
         return run_id
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", run_id)[:64]
     return cleaned or UNSCOPED
@@ -89,11 +89,19 @@ def environment_name() -> str:
 
 
 @contextmanager
-def ensure_run_scope(source: str = "watch") -> Iterator[RunScope]:
-    """Keep the active scope, or open the live daily-bucket scope when there is none."""
+def ensure_run_scope(source: str = "watch", run_id: str | None = None) -> Iterator[RunScope]:
+    """Keep the active scope, or open one when there is none.
+
+    With ``run_id`` (an eval run) the new scope is that run in the ``eval``
+    environment; otherwise it is the live daily-bucket scope.
+    """
     existing = _CURRENT.get()
     if existing is not None:
         yield existing
         return
-    with run_scope(live_run_id(), environment_name(), source) as scope:
+    if run_id:
+        opened = run_scope(run_id, "eval", source, session_id=f"eval-{run_id}")
+    else:
+        opened = run_scope(live_run_id(), environment_name(), source)
+    with opened as scope:
         yield scope

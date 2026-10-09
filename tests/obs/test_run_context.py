@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from openai import APIConnectionError, APITimeoutError, RateLimitError
@@ -43,6 +44,8 @@ def test_scope_restored_after_exception() -> None:
 def test_run_id_is_sanitised() -> None:
     with run_scope("a b/c:d\n") as scope:
         assert scope.run_id == "a_b_c_d_"
+    with run_scope("ok\n") as scope:  # a trailing newline must not slip past the pattern
+        assert scope.run_id == "ok_"
     with run_scope("") as scope:
         assert scope.run_id == "unscoped"
     with run_scope("x" * 200) as scope:
@@ -176,8 +179,8 @@ def test_run_document_opens_scope_inside_the_worker(monkeypatch: pytest.MonkeyPa
     assert out == ["state"] * 3
     assert {r for r, _, _ in seen} == {live_run_id()}
     assert {s for _, _, s in seen} == {"watch"}
-    flow_mod.run_document(tmp_path / "a.txt", worker_id="w", eval_ctx=object())
-    assert seen[-1][2] == "eval"
+    flow_mod.run_document(tmp_path / "a.txt", worker_id="w", eval_ctx=SimpleNamespace(run_id="abc123"))
+    assert seen[-1] == ("abc123", "eval", "eval")
     assert current_run() is None
 
 
