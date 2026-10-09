@@ -22,7 +22,7 @@ import json
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 __all__ = [
@@ -68,7 +68,7 @@ _REVIEW_REASON_KEYS = ("review_reason",)
 
 
 class DatasetIntegrityError(Exception):
-    """A blind document's ``content_sha256`` does not match its bytes."""
+    """A dataset document has invalid identity or content."""
 
 
 @dataclass(frozen=True)
@@ -262,6 +262,7 @@ def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
         declared = _metadata_sha(row)
     if not filename:
         raise DatasetIntegrityError("blind row is missing a filename")
+    validate_filename(filename)
     if declared is None:
         raise DatasetIntegrityError(f"{filename}: blind row is missing content_sha256")
     actual = sha256_text(text)
@@ -271,6 +272,21 @@ def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
             f"(declared {declared}, actual {actual})"
         )
     return BlindDoc(filename=filename, doc_text=text, content_sha256=actual)
+
+
+def validate_filename(filename: str) -> None:
+    """Require a relative document path without traversal on either platform."""
+    windows = PureWindowsPath(filename)
+    if (
+        not filename
+        or not Path(filename).parts
+        or Path(filename).is_absolute()
+        or windows.drive
+        or windows.root
+        or ".." in windows.parts
+        or "\x00" in filename
+    ):
+        raise DatasetIntegrityError(f"Unsafe document filename: {filename!r}")
 
 
 def _ground_truth_from_row(row: Any) -> GroundTruth:
@@ -426,6 +442,8 @@ def _load_labeled(
         gt = _ground_truth_from_row(row)
         text = str(_row_get(row, _TEXT_KEYS, "") or "")
         declared = _row_get(row, _SHA_KEYS)
+        if declared is None:
+            declared = _metadata_sha(row)
         docs.append(_blind_from_row(row, declared if declared is not None else sha256_text(text)))
         gts[gt.filename] = gt
     return docs, gts

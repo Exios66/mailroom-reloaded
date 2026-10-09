@@ -20,18 +20,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, inspect, text
 
 from mailroom_reloaded.agents.specialists import ExtractResult
 from mailroom_reloaded.agents.specialists import extract as _extract
 from mailroom_reloaded.eval.dataset import (
     DEFAULT_REVISION,
+    REPO,
     BlindDoc,
+    DatasetIntegrityError,
     EvalContext,
     GroundTruth,
     doc_id_for_sha,
     load_split,
     sample,
+    validate_filename,
 )
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs.run_context import run_scope
@@ -50,6 +53,7 @@ CREATE TABLE IF NOT EXISTS eval_docs (
     run_id TEXT NOT NULL,
     filename TEXT NOT NULL,
     doc_id TEXT,
+    content_sha256 TEXT,
     mode TEXT,
     status TEXT,
     doc_type TEXT,
@@ -79,6 +83,7 @@ _COLUMNS = (
     "run_id",
     "filename",
     "doc_id",
+    "content_sha256",
     "mode",
     "status",
     "doc_type",
@@ -165,6 +170,35 @@ def _ensure_table(engine: Engine) -> None:
     """Create the evaluation results table if it does not already exist."""
     with engine.begin() as conn:
         conn.execute(text(_EVAL_DDL))
+        if "content_sha256" not in {c["name"] for c in inspect(conn).get_columns("eval_docs")}:
+            conn.execute(text("ALTER TABLE eval_docs ADD COLUMN content_sha256 TEXT"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eval_runs (
+                run_id TEXT PRIMARY KEY,
+                dataset_repo TEXT NOT NULL,
+                dataset_config TEXT,
+                revision TEXT NOT NULL,
+                split TEXT NOT NULL,
+                local_dir TEXT
+            )
+        """))
+
+
+def _record_dataset(engine: Engine, run_id: str, cfg: EvalConfig) -> None:
+    """Persist the dataset selection before processing any run documents."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO eval_runs
+                (run_id, dataset_repo, dataset_config, revision, split, local_dir)
+            VALUES (:run_id, :repo, :config, :revision, :split, :local_dir)
+        """), {
+            "run_id": run_id,
+            "repo": cfg.dataset_repo or REPO,
+            "config": cfg.dataset_config,
+            "revision": cfg.revision,
+            "split": cfg.split,
+            "local_dir": str(cfg.local_dir.resolve()) if cfg.local_dir is not None else None,
+        })
 
 
 def _insert(engine: Engine, row: dict[str, Any]) -> None:
@@ -187,7 +221,11 @@ def _write_doc(doc: BlindDoc) -> Path:
     Some dataset filenames are nested paths (Enron ``owner/folder/n.``), so the
     inbox parent directory is created before writing.
     """
-    path = Bins(get_settings().base_dir).inbox / doc.filename
+    validate_filename(doc.filename)
+    inbox = Bins(get_settings().base_dir).inbox.resolve()
+    path = (inbox / doc.filename).resolve()
+    if not path.is_relative_to(inbox) or path == inbox:
+        raise DatasetIntegrityError(f"Document destination escapes inbox: {doc.filename!r}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(doc.doc_text, encoding="utf-8")
     return path
@@ -271,6 +309,7 @@ def _base_row(
         "run_id": run_id,
         "filename": doc.filename,
         "doc_id": doc_id_for_sha(doc.content_sha256),
+        "content_sha256": doc.content_sha256,
         "mode": mode,
         "status": "error",
         "doc_type": None,
@@ -540,6 +579,7 @@ def run_eval(cfg: EvalConfig) -> str:
     graded = select_graded(selected, cfg.judge_sample_rate, cfg.seed)
     engine = _engine()
     _ensure_table(engine)
+    _record_dataset(engine, run_id, cfg)
     # asyncio tasks (and to_thread) copy this context, so every eval document inherits the scope
     ledger = run_ledger.ledger_for(None)
     run_ledger.open_run(

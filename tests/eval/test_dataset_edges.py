@@ -247,3 +247,55 @@ def test_join_rejects_unmatched_filenames(blind_names, truth_names):
     truth = [{"filename": name, "expected": "contract"} for name in truth_names]
     with pytest.raises(DatasetIntegrityError, match="Filename mismatch"):
         _join(blind, truth)
+
+
+@pytest.mark.parametrize('metadata_json', [False, True])
+@pytest.mark.parametrize('valid', [False, True])
+def test_labeled_metadata_hash_is_verified(monkeypatch, metadata_json, valid):
+    from types import SimpleNamespace
+
+    metadata = {'content_sha256': sha256_text('hello' if valid else 'different')}
+    row = {'filename': 'fx.txt', 'doc_text': 'hello',
+           'metadata': json.dumps(metadata) if metadata_json else metadata}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    if valid:
+        docs, _ = load_split(config='fixtures')
+        assert docs[0].content_sha256 == sha256_text('hello')
+    else:
+        with pytest.raises(DatasetIntegrityError, match='content_sha256 mismatch'):
+            load_split(config='fixtures')
+
+
+@pytest.mark.parametrize('declared', [sha256_text('hello'), sha256_text('wrong')])
+def test_labeled_top_level_hash_takes_precedence(monkeypatch, declared):
+    from types import SimpleNamespace
+
+    row = {'filename': 'fx.txt', 'doc_text': 'hello', 'content_sha256': declared,
+           'metadata': {'content_sha256': sha256_text('different')}}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    if declared == sha256_text('hello'):
+        assert load_split(config='fixtures')[0][0].content_sha256 == declared
+    else:
+        with pytest.raises(DatasetIntegrityError, match='content_sha256 mismatch'):
+            load_split(config='fixtures')
+
+
+@pytest.mark.parametrize('config', [None, 'fixtures'])
+@pytest.mark.parametrize('filename', ['/outside.txt', '../outside.txt', 'owner/../../outside.txt',
+                                      r'C:\outside.txt', r'owner\..\outside.txt', '.'])
+def test_hub_loaders_reject_unsafe_filenames(monkeypatch, config, filename):
+    from types import SimpleNamespace
+
+    row = {'filename': filename, 'doc_text': 'hello', 'content_sha256': sha256_text('hello')}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    with pytest.raises(DatasetIntegrityError, match='Unsafe document filename'):
+        load_split(config=config)
+
+
+@pytest.mark.parametrize('config', [None, 'fixtures'])
+def test_hub_loaders_keep_nested_filenames(monkeypatch, config):
+    from types import SimpleNamespace
+
+    row = {'filename': 'owner/folder/1234.', 'doc_text': 'hello', 'content_sha256': sha256_text('hello')}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    assert load_split(config=config)[0][0].filename == row['filename']

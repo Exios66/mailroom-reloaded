@@ -222,6 +222,13 @@ uv run python scripts/jev_export_gate_features.py \
   --revision v9.2-reloaded --config fixtures
 ```
 
+The exporter requires the repository, config, revision, split and local dataset
+directory (if used) to match the run's selection in `eval_runs`. It also compares
+each document's full SHA-256 with `eval_docs.content_sha256` before attaching
+labels, and preserves the selected split in the output. Missing provenance or
+content mismatches abort the export. Runs created before these identity fields
+were recorded must be evaluated again before exporting.
+
 `eval/dataset.py` also parses the Hub `"true"`/`"false"` strings to `bool` and
 derives the two flags from `expected_stage == "review"` / a non-empty
 `expected_post_retry_state` when the booleans are absent or contradict them.

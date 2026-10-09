@@ -36,7 +36,12 @@ from typing import Any
 
 from sqlalchemy import text
 
-from mailroom_reloaded.eval.dataset import DEFAULT_REVISION, load_split
+from mailroom_reloaded.eval.dataset import (
+    DEFAULT_REVISION,
+    REPO,
+    DatasetIntegrityError,
+    load_split,
+)
 from mailroom_reloaded.storage import db
 
 DEFAULT_OUT = Path("/tmp/opencode/jev_gate_features.jsonl")
@@ -56,16 +61,38 @@ def _latest_run_id(engine: Any) -> str | None:
 
 
 def _load_run(engine: Any, run_id: str) -> list[dict[str, Any]]:
-    """Load one run's ``(filename, doc_type, gate_features)`` rows."""
+    """Load one run's document identities and gate features."""
     with engine.begin() as conn:
         result = conn.execute(
             text(
-                "SELECT filename, doc_type, gate_features FROM eval_docs "
+                "SELECT filename, content_sha256, doc_type, gate_features FROM eval_docs "
                 "WHERE run_id = :rid ORDER BY filename"
             ),
             {"rid": run_id},
         )
         return [dict(row._mapping) for row in result]
+
+
+def _verify_dataset(engine: Any, run_id: str, args: argparse.Namespace) -> None:
+    """Reject unrecorded or different dataset selections before loading labels."""
+    with engine.begin() as conn:
+        recorded = conn.execute(
+            text("SELECT * FROM eval_runs WHERE run_id = :rid"), {"rid": run_id}
+        ).mappings().first()
+    if recorded is None:
+        raise DatasetIntegrityError("Run has no dataset provenance; rerun evaluation")
+    selected = {
+        "dataset_repo": args.dataset_repo or REPO,
+        "dataset_config": args.config,
+        "revision": args.revision,
+        "split": args.split,
+        "local_dir": str(args.local_dir.resolve()) if args.local_dir is not None else None,
+    }
+    for key, value in selected.items():
+        if recorded[key] != value:
+            raise DatasetIntegrityError(
+                f"Dataset {key} mismatch: run recorded {recorded[key]!r}, selected {value!r}"
+            )
 
 
 def _as_flag(value: object) -> bool:
@@ -80,6 +107,7 @@ def _stage_rows(
     doc_type: str | None,
     gate: dict[str, Any],
     gt: Any,
+    split: str = DEFAULT_SPLIT,
 ) -> tuple[list[dict[str, Any]], int]:
     """Build the flat classify/extract rows for one document; count skips."""
     rows: list[dict[str, Any]] = []
@@ -98,7 +126,7 @@ def _stage_rows(
             skipped += 1
             continue
         row = {
-            "split": DEFAULT_SPLIT,
+            "split": split,
             "filename": filename,
             "stage": stage,
             "doc_type": block.get("doc_type") or doc_type,
@@ -167,13 +195,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        _, gts = load_split(
+        _verify_dataset(engine, run_id, args)
+        blind_docs, gts = load_split(
             args.revision,
             args.split,
             local_dir=args.local_dir,
             repo=args.dataset_repo,
             config=args.config,
         )
+        hashes = {doc.filename: doc.content_sha256 for doc in blind_docs}
+        for record in docs:
+            filename = record["filename"]
+            if not record["content_sha256"] or hashes.get(filename) != record["content_sha256"]:
+                raise DatasetIntegrityError(f"{filename}: run document content_sha256 mismatch")
     except Exception as exc:  # noqa: BLE001 - surface the exact Hub/dataset error
         print(
             f"FATAL: could not load ground truth {args.revision}/{args.split}: "
@@ -200,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         gt = gts.get(str(record["filename"]))
         rows, stage_skips = _stage_rows(
-            str(record["filename"]), record.get("doc_type"), gate, gt
+            str(record["filename"]), record.get("doc_type"), gate, gt, args.split
         )
         out_rows.extend(rows)
         skipped += stage_skips
