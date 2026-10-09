@@ -27,6 +27,11 @@ class ContentLock:
 
     @classmethod
     def read(cls, path: Path | str = DEFAULT_LOCK) -> ContentLock:
+        """Read the YAML pin, convert field values to strings, and validate it.
+
+        Raise LockError for file or YAML parsing errors, missing or extra fields,
+        or invalid digest/commit length. Non-mapping YAML may raise TypeError.
+        """
         try:
             data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError) as exc:
@@ -40,6 +45,10 @@ class ContentLock:
         return lock
 
     def validate(self) -> None:
+        """Require a 64-character lowercase hex digest and a 7–40-character commit.
+
+        Raise LockError on failure; commit characters and other fields are unchecked.
+        """
         sha = self.bundle_sha256
         if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
             raise LockError("bundle_sha256 must be 64 lowercase hex chars")
@@ -47,12 +56,16 @@ class ContentLock:
             raise LockError("commit must be a 7-40 char sha")
 
     def write(self, path: Path | str = DEFAULT_LOCK) -> None:
+        """Validate and overwrite the UTF-8 lock file without creating parent directories.
+
+        Validation raises LockError; filesystem errors propagate as OSError.
+        """
         self.validate()
-        lines = [f"{k}: {v!r}" if k == "schema_version" else f"{k}: {v}" for k, v in asdict(self).items()]
-        Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        Path(path).write_text(yaml.safe_dump(asdict(self), sort_keys=False), encoding="utf-8")
 
 
 def sha256_file(path: Path | str) -> str:
+    """Return the file's lowercase SHA-256 hex digest; propagate file access errors."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
