@@ -189,6 +189,14 @@ semconv `gen_ai.client.token.usage` / `gen_ai.client.operation.duration`.
   `mailroom.run_id`. The links' base URLs are the dashboards' hidden constants
   `public_url` (default `http://localhost:8000`) and `phoenix_url` (default
   `http://localhost:6006`); change them in the dashboard JSON for a non-local deploy.
+- **Link config (`GET /links`).** The UI's outbound links read a public config:
+  `MAILROOM_PUBLIC_URL` (default `http://localhost:8000`), `MAILROOM_PHOENIX_URL`
+  (default `http://localhost:6006`) and `MAILROOM_GRAFANA_URL` (default
+  `http://localhost:3000`); `phoenix_project` mirrors `MAILROOM_PHOENIX_PROJECT`
+  (default `mailroom-live`). `/ui` fetches it on load to set the header links and each
+  eval run's `grafana ↗` (`` `<grafana_url>/d/mailroom-quality?var-run_id=<run_id>` ``)
+  and `phoenix ↗` links, beside `replay ↗`; the replay viewer's `o`/`g` keys open the
+  same Phoenix / Grafana URLs. `/links` is public like `/health` and carries no secret.
 - **Decision counters.** `mailroom.retries{kind}`, `mailroom.escalations{to}` and
   `mailroom.review.causes{cause}` feed the Pipeline dashboard's *Decisions* row, the
   same retry / escalation / review-cause mix the replay's event ticker shows.

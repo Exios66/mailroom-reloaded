@@ -15,11 +15,12 @@ SQLite catalog and the hash-chained audit log:
 * ``GET /v1/runs`` / ``GET /v1/runs/{run_id}/cards`` — eval runs (SQLite) and
   card JSONs (empty until Task 21 lands).
 * ``GET /ui`` — a vanilla-JS page, no build step.
+* ``GET /links`` — public base URLs for the UI's Grafana/Phoenix deep links.
 
 Security (spec section 9): every ``/v1`` route requires the configured bearer
 token when ``MAILROOM_API_TOKEN`` is set; binding off loopback without a token
-refuses to start (:func:`assert_bind_allowed`). ``/health`` and ``/ui`` stay
-public so a load balancer and a browser can reach them.
+refuses to start (:func:`assert_bind_allowed`). ``/health``, ``/links`` and
+``/ui`` stay public so a load balancer and a browser can reach them.
 """
 
 from __future__ import annotations
@@ -821,6 +822,22 @@ def create_app() -> FastAPI:
     def health() -> dict:
         """Return the public liveness response."""
         return {"status": "ok", "service": "mailroom"}
+
+    @application.get("/links")
+    def links() -> dict:
+        """Public observability link config for the UI; never a secret.
+
+        The ``/ui`` header and per-run links, and the replay viewer's ``o``/``g``
+        keys, build their Grafana/Phoenix URLs from these values. ``phoenix_project``
+        mirrors the tracing resource attribute so a link can name the project.
+        """
+        settings = get_settings()
+        return {
+            "public_url": settings.public_url,
+            "phoenix_url": settings.phoenix_url,
+            "grafana_url": settings.grafana_url,
+            "phoenix_project": os.environ.get("MAILROOM_PHOENIX_PROJECT", "mailroom-live"),
+        }
 
     @application.get("/")
     def root() -> RedirectResponse:

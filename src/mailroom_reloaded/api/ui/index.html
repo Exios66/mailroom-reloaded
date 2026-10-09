@@ -34,8 +34,8 @@
   <header>
     <h1>mailroom · runs UI</h1>
     <a href="/tui">tui ↗</a>
-    <a href="http://localhost:6006" target="_blank" rel="noopener">Phoenix :6006</a>
-    <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana :3000</a>
+    <a id="phoenixLink" href="http://localhost:6006" target="_blank" rel="noopener">Phoenix :6006</a>
+    <a id="grafanaLink" href="http://localhost:3000" target="_blank" rel="noopener">Grafana :3000</a>
     <span class="grow"></span>
     <input id="token" type="password" placeholder="API token (if set)" autocomplete="off" />
     <button id="refresh">refresh</button>
@@ -70,7 +70,7 @@
 
     <section>
       <h2>Eval runs</h2>
-      <table id="runs"><thead><tr><th>run_id</th><th>documents</th><th>replay</th></tr></thead><tbody></tbody></table>
+      <table id="runs"><thead><tr><th>run_id</th><th>documents</th><th>replay</th><th>grafana</th><th>phoenix</th></tr></thead><tbody></tbody></table>
       <h2 style="margin-top:14px">Cards</h2>
       <pre id="cards" class="muted">run not selected</pre>
     </section>
@@ -84,6 +84,40 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
+
+  // Observability base URLs. The static defaults match the header's initial
+  // hrefs; loadLinks() replaces them from the public GET /links.
+  const LINKS = {
+    public_url: "http://localhost:8000",
+    phoenix_url: "http://localhost:6006",
+    grafana_url: "http://localhost:3000",
+    phoenix_project: "mailroom-live",
+  };
+
+  async function loadLinks() {
+    try {
+      const res = await fetch("/links", { headers: { Accept: "application/json" } });
+      if (!res.ok) return;
+      const body = await res.json();
+      for (const key of ["public_url", "phoenix_url", "grafana_url", "phoenix_project"]) {
+        if (typeof body[key] === "string" && body[key]) LINKS[key] = body[key];
+      }
+      $("phoenixLink").href = LINKS.phoenix_url;
+      $("grafanaLink").href = LINKS.grafana_url;
+    } catch (err) {
+      // Links are optional: keep the static defaults if /links is unreachable.
+    }
+  }
+
+  function externalLink(href, label, onClick) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = label;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.onclick = onClick;
+    return a;
+  }
 
   function headers() {
     const t = $("token").value.trim();
@@ -174,10 +208,24 @@
       replay.onclick = (ev) => ev.stopPropagation();
       replayCell.appendChild(replay);
       tr.appendChild(replayCell);
+      const grafanaCell = document.createElement("td");
+      grafanaCell.appendChild(
+        externalLink(
+          `${LINKS.grafana_url}/d/mailroom-quality?var-run_id=${encodeURIComponent(r.run_id)}`,
+          "grafana ↗",
+          (ev) => ev.stopPropagation()
+        )
+      );
+      tr.appendChild(grafanaCell);
+      const phoenixCell = document.createElement("td");
+      phoenixCell.appendChild(
+        externalLink(LINKS.phoenix_url, "phoenix ↗", (ev) => ev.stopPropagation())
+      );
+      tr.appendChild(phoenixCell);
       tr.onclick = () => loadCards(r.run_id);
       tb.appendChild(tr);
     }
-    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">no eval runs yet</td></tr>';
+    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="5" class="muted">no eval runs yet</td></tr>';
   }
 
   async function loadCards(runId) {
@@ -216,6 +264,7 @@
   }
 
   async function refresh() {
+    try { await loadLinks(); } catch (err) { /* static defaults are fine */ }
     try { await loadDocuments(); } catch (err) { setError("documents", err); }
     try { await loadReview(); } catch (err) { setError("review", err); }
     try { await loadRuns(); } catch (err) { setError("runs", err); }

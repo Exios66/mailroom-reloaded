@@ -42,7 +42,8 @@ DESCRIPTION
     full-screen text viewer. A bare run id means run:<id>. --at starts paused at
     that second; --speed is one of 0.5 1 2 4 8 16. The 'l' panel reads
     GET /v1/ledger and /v1/ledger/verify for the run, only when first opened.
-    With prefers-reduced-motion the viewer starts paused.
+    GET /links supplies the Phoenix and Grafana base URLs; 'o' and 'g' open the
+    run in a new tab. With prefers-reduced-motion the viewer starts paused.
 
 KEYS
     space        play / pause           left/right   step -/+5s (shift: 30s)
@@ -50,6 +51,7 @@ KEYS
     0-9          seek to 0%..90%        up/down j/k  select document
     Enter or i   toggle inspector       l            toggle ledger panel
     p            cycle insight panels   e            jump to next event
+    o / g        open Phoenix / Grafana
     Esc or q     quit (Ctrl+C aborts)
     The view is text only; every value is shown literally.`,
 };
@@ -102,6 +104,22 @@ function reducedMotion() {
   }
 }
 
+/**
+ * The run's outbound observability URLs from the GET /links config. Both are
+ * null when the config is missing or the session is not a run, so the `o`/`g`
+ * keys degrade to a no-op.
+ */
+function externalUrls(links, id) {
+  const cfg = links && typeof links === 'object' ? links : {};
+  const phoenix = typeof cfg.phoenix_url === 'string' && cfg.phoenix_url ? cfg.phoenix_url : null;
+  const grafana = typeof cfg.grafana_url === 'string' && cfg.grafana_url ? cfg.grafana_url : null;
+  const run = typeof id === 'string' && id.startsWith('run:') ? id.slice(4) : null;
+  return {
+    phoenix,
+    grafana: grafana && run ? `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}` : null,
+  };
+}
+
 async function openViewer(ctx, arg, flags) {
   const id = normalizeSessionId(arg);
   if (!id) return ctx.out.line('replay: invalid session id', 'error');
@@ -135,6 +153,8 @@ async function openViewer(ctx, arg, flags) {
   let sel = -1;
   let ledger = null; // null until first requested
   let ledgerVersion = 0;
+  let links = null; // null until GET /links resolves (or fails)
+  let linksVersion = 0;
   let lastKey = null;
   let view = null;
   let timer = null;
@@ -154,17 +174,31 @@ async function openViewer(ctx, arg, flags) {
     if (closed || !view) return;
     const ck = clock.state();
     const st = model.stateAt(ck.t);
-    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}`;
+    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}|${linksVersion}`;
     if (!force && key === lastKey) return;
     lastKey = key;
     const size = ctx.gridSize?.() ?? { cols: 100, rows: 30 };
     try {
-      view.draw(renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel }));
+      view.draw(renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel, links }));
     } catch {
       // A frame that cannot be drawn ends the viewer rather than leaving it blank and wedged.
       close();
       ctx.out.line('replay: could not draw this timeline', 'error');
     }
+  };
+
+  const loadLinks = () => {
+    Promise.resolve()
+      .then(() => ctx.api.get('/links', undefined, { signal: ctx.signal() }))
+      .then((body) => {
+        if (closed) return;
+        links = body && typeof body === 'object' ? body : null;
+        linksVersion += 1;
+        redraw();
+      })
+      .catch(() => {
+        // No config: the viewer still opens; o/g become no-ops.
+      });
   };
 
   const loadLedger = () => {
@@ -199,6 +233,11 @@ async function openViewer(ctx, arg, flags) {
 
   const docCount = () => (Array.isArray(model.entities) ? model.entities.length : 0);
 
+  const openExternal = (url) => {
+    if (!url) return;
+    (ctx.open ?? globalThis.open)?.(url, '_blank', 'noopener');
+  };
+
   // none -> metrics -> tokens -> decisions -> latency -> fields -> none.
   // From the inspector or ledger, p starts the insight cycle at its first panel.
   const cyclePanel = () => {
@@ -232,6 +271,8 @@ async function openViewer(ctx, arg, flags) {
       panel = panel === 'ledger' ? 'none' : 'ledger';
       if (panel === 'ledger' && (ledger === null || ledger.unavailable)) loadLedger();
     } else if (k === 'p') cyclePanel();
+    else if (k === 'o') openExternal(externalUrls(links, id).phoenix);
+    else if (k === 'g') openExternal(externalUrls(links, id).grafana);
     else if (k === 'e') {
       const t = clock.state().t;
       const next = (model.eventsBetween(t, dur) || []).find((x) => x && typeof x.t === 'number' && x.t > t);
@@ -245,6 +286,7 @@ async function openViewer(ctx, arg, flags) {
 
   view = ctx.takeover({ onKey, label: `replay ${id}` });
   if (!view) return ctx.out.line('replay: another viewer is already open', 'error');
+  loadLinks();
 
   const sig = ctx.signal();
   const onAbort = () => {

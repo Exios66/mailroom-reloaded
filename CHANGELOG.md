@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- UI observability deep links (outbound direction): `settings.py` gains `public_url` / `phoenix_url` / `grafana_url` (`MAILROOM_PUBLIC_URL` / `MAILROOM_PHOENIX_URL` / `MAILROOM_GRAFANA_URL`) and the public `GET /links` returns them plus `phoenix_project`; `/ui` fetches it for the header links and each eval run's `grafana ↗` (`/d/mailroom-quality?var-run_id=<id>`) and `phoenix ↗` links beside `replay ↗`; the replay viewer fetches `/links` on open, lists the Phoenix and Grafana URLs in the inspector, and binds `o`/`g` to open them in a new tab.
 - TUI replay panels: `api/tui/replay/panels.js` adds a pluggable `registerPanel({id, title, key, render})` registry (the f1-race-replay "pit wall window" counterpart) with five built-ins — `metrics`, `tokens`, `decisions`, `latency`, `fields` — cycled with `p` in the replay viewer; `grid.js`/`commands/replay.js` resolve a registered panel id and hostile strings stay literal text.
 - Trace replay stack 13: the `replay` viewer — `api/tui/replay/{clock,model,grid,stations}.js` (pure playback clock, timeline model, character-grid renderer), the `ctx.takeover` full-screen hook in `terminal.js`, and `commands/replay.js` (list sessions or open a run on a scrubbable timeline with inspector and ledger panels).
 - Trace replay stack 14: `/ui` gains a per-eval-run `replay ↗` link and `/tui#replay=run:<id>` deep link (`api/tui/deeplink.js`).

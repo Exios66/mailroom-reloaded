@@ -224,6 +224,12 @@ class Settings(BaseSettings):
     anchor_key: _JevStr = Field(default=None, repr=False)
     anchor_key_file: _OptPath = None
     gpu_usd_per_hour: float = 0.80
+    # Public base URLs for the UI's outbound observability links (GET /links). With the
+    # ``MAILROOM_`` env prefix these read ``MAILROOM_PUBLIC_URL`` / ``MAILROOM_PHOENIX_URL``
+    # / ``MAILROOM_GRAFANA_URL``. No secret is stored here.
+    public_url: str = "http://localhost:8000"
+    phoenix_url: str = "http://localhost:6006"
+    grafana_url: str = "http://localhost:3000"
 
 
 @lru_cache(maxsize=1)

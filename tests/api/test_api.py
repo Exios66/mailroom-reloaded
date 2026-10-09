@@ -269,6 +269,38 @@ def test_ui_served(client):
     assert "3000" in text  # Grafana link
     assert '"/tui#replay=run:" + encodeURIComponent(r.run_id)' in text  # per-run replay link
     assert "ev.stopPropagation()" in text  # the link must not also open the cards
+    assert "/d/mailroom-quality?var-run_id=" in text  # per-run Grafana link expression
+    assert "phoenix ↗" in text  # per-run Phoenix link
+    assert "/links" in text  # the header links are refreshed from the public config
+
+
+def test_links_public(client, monkeypatch):
+    """Verify /links returns the observability base URLs from the settings."""
+    monkeypatch.setenv("MAILROOM_PUBLIC_URL", "https://mailroom.example")
+    monkeypatch.setenv("MAILROOM_PHOENIX_URL", "https://phoenix.example")
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://grafana.example")
+    monkeypatch.setenv("MAILROOM_PHOENIX_PROJECT", "proj-x")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    resp = client.get("/links")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "public_url": "https://mailroom.example",
+        "phoenix_url": "https://phoenix.example",
+        "grafana_url": "https://grafana.example",
+        "phoenix_project": "proj-x",
+    }
+
+
+def test_links_public_without_token(client, monkeypatch):
+    """Verify /links stays public while every /v1 route requires the token."""
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    assert client.get("/v1/documents").status_code == 401
+    assert client.get("/links").status_code == 200
 
 
 def test_runs_shape(client):

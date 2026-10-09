@@ -49,8 +49,12 @@ Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
 jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
 demand, with a chain-verify line), `p` cycles insight panels (metrics, tokens,
 decisions, latency, fields — pluggable via `registerPanel` in `replay/panels.js`),
-`e` next event, `q`/Esc quit. Ctrl+C always
+`e` next event, `o` opens the run's Phoenix project and `g` the Grafana quality
+dashboard in a new tab, `q`/Esc quit. Ctrl+C always
 releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
+The viewer fetches `GET /links` once on open for the Phoenix and Grafana base URLs;
+the inspector lists both URLs for the run (the Grafana one carries `var-run_id`), and
+`o`/`g` are a no-op when the config or a browser opener is unavailable.
 The viewer needs a physical keyboard (the input stays read-only while it is open).
 
 ### `jev` and gate decisions
@@ -86,7 +90,9 @@ runs table links each eval run this way. Only ids that `replay` itself accepts b
 anything else prints `replay: invalid deep link`. The fragment stays in the browser, and the API
 token is still taken from this tab's session storage, never from the URL: when a token is
 configured, type `auth <token>` first and re-run the replay command, since `/ui` does not
-pass its token on.
+pass its token on. The same `/ui` row also carries outbound `grafana ↗` and `phoenix ↗`
+links (built from `GET /links`), and inside the viewer `o`/`g` open the run's Phoenix /
+Grafana URLs directly.
 
 ## Themes
 
