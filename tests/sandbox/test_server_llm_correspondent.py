@@ -214,6 +214,7 @@ def test_llm_correspondent_runs_in_the_service_end_to_end(tmp_path, mock):
     from mailroom_reloaded.sandbox.server.service import SandboxService
 
     guard = NetworkGuard().install()
+    svc = None
     try:
         svc = SandboxService(
             load_sandbox_content(),
@@ -221,7 +222,8 @@ def test_llm_correspondent_runs_in_the_service_end_to_end(tmp_path, mock):
             guard=guard,
             correspondent="llm",
             correspondent_options={"base_url": mock.base_url},
-        ).start(worker=False)
+        )
+        svc.start(worker=False)
         svc.inject(["A1_status_inquiry", "E1_lookalike_wire_change"])
         svc.wait_idle()
         e1 = [
@@ -233,6 +235,9 @@ def test_llm_correspondent_runs_in_the_service_end_to_end(tmp_path, mock):
         assert attack["correspondent"]["drafts"] == []  # hostile still gets nothing
         assert attack["id"] in svc.reviews  # and is on the Boss mailbox
         assert svc.evaluation("E1_lookalike_wire_change")["verdict"] == "pass"
-        svc.stop()
     finally:
-        guard.uninstall()
+        try:
+            if svc is not None:
+                svc.stop()
+        finally:
+            guard.uninstall()
