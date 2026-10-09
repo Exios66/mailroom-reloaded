@@ -108,6 +108,17 @@ semconv `gen_ai.client.token.usage` / `gen_ai.client.operation.duration`.
   (`deploy/otel-collector.yaml:1-62`). Prometheus scrapes `otel-collector:8889`.
 - **Grafana dashboards** (provisioned): `Pipeline`, `Serving & GPU`, `Quality`
   (`deploy/grafana/dashboards/`).
+- **`run_id` on every metric.** Each data point carries `run_id` and `environment`
+  (`obs/metrics.py`): an eval run is one `run_id`, live traffic is one daily bucket
+  `live-<YYYYMMDD>` (or `MAILROOM_RUN_ID`). `doc_id` is never a label. Pick one run in
+  the `run_id` variable and the `replay ↗` dashboard link (and the per-run table's row
+  links) open it in the `/tui` viewer; `phoenix ↗` opens Phoenix, where spans filter on
+  `mailroom.run_id`. The links' base URLs are the dashboards' hidden constants
+  `public_url` (default `http://localhost:8000`) and `phoenix_url` (default
+  `http://localhost:6006`); change them in the dashboard JSON for a non-local deploy.
+- **Decision counters.** `mailroom.retries{kind}`, `mailroom.escalations{to}` and
+  `mailroom.review.causes{cause}` feed the Pipeline dashboard's *Decisions* row, the
+  same retry / escalation / review-cause mix the replay's event ticker shows.
 - **GPU profile** adds local vLLM (`:8001`) and `dcgm-exporter` (`:9400`);
   Modal / remote vLLM `/metrics` is scraped through `VLLM_METRICS_URLS`
   (`docker-compose.yml:81-102`, `deploy/README.md:34`).
