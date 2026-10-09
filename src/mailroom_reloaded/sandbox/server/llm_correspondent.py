@@ -155,6 +155,12 @@ class LLMCorrespondent(StandInCorrespondent):
         return out  # type: ignore[no-any-return]
 
     def _triage_hook(self, msg, text, feats, tri, tools) -> Triage | None:
+        """Use model triage when valid; return ``None`` to retain rule scoring on failure.
+
+        Model confidence below 0.5 forces review regardless of its review flag.
+        """
+        if tri.intent in {"disclosure_request", "spam_or_phishing"}:
+            return None
         out = self._ask(msg, tools)
         if out is None:
             return None

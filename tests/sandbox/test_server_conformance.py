@@ -107,6 +107,9 @@ def test_lofo_single_family_has_no_training_rate():
     rep = lofo(rows)
     assert [f["training_rate"] for f in rep["folds"]] == [1.0, 0.5]
     assert "n/a" not in format_lofo(rep)
+    assert format_lofo(rep).endswith(
+        "macro mean held-out rate 0.750; micro pass rate 0.667"
+    )
 
 
 def test_lofo_empty_rows_returns_none_rates():
@@ -116,3 +119,15 @@ def test_lofo_empty_rows_returns_none_rates():
     assert rep["macro_mean_held_out_rate"] is None
     assert rep["micro_pass_rate"] is None
     assert "n/a" in format_lofo(rep)
+
+
+def test_lofo_empty_input_has_unavailable_aggregate_rates():
+    from mailroom_reloaded.sandbox.server.conformance import format_lofo, lofo
+
+    rep = lofo([])
+    assert rep["folds"] == []
+    assert rep["macro_mean_held_out_rate"] is None
+    assert rep["micro_pass_rate"] is None
+    assert format_lofo(rep).endswith(
+        "macro mean held-out rate n/a; micro pass rate n/a"
+    )
