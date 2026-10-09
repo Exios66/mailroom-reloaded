@@ -371,6 +371,87 @@ def run_cards_endpoint(run_id: str) -> dict:
     return {"run_id": run_id, "cards": cards}
 
 
+def _pruned_run_ids() -> set[str]:
+    """Run ids whose spans retention removed; empty when the ledger is unreadable."""
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.ledger import Ledger
+    from mailroom_reloaded.storage.retention import pruned_runs
+
+    try:
+        # a throwaway reader: the process-wide ledger would install the external anchor hook
+        return pruned_runs(Ledger(get_engine()))
+    except Exception:  # the picker still works without the marker
+        logger.warning("replay_pruned_lookup_failed", exc_info=True)
+        return set()
+
+
+def _replay_timeline(session_id: str, from_s: float | None, to_s: float | None):
+    """The timeline of ``session_id`` or an HTTP error (400 bad id, 404 none, 410 pruned)."""
+    from mailroom_reloaded.obs.replay.sessions import parse_session_id
+    from mailroom_reloaded.obs.replay.timeline import build_timeline
+    from mailroom_reloaded.storage.db import get_engine
+
+    try:
+        kind, key = parse_session_id(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID") from None
+    pruned = kind == "run" and key in _pruned_run_ids()
+    try:
+        tl = build_timeline(session_id, from_s=from_s, to_s=to_s, engine=get_engine())
+    except Exception:
+        logger.warning("replay_timeline_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Timeline unavailable") from None
+    if tl is None:
+        if pruned:
+            raise HTTPException(status_code=410, detail="data pruned")
+        raise HTTPException(status_code=404, detail="No such session")
+    if pruned:
+        tl.session.data_pruned = True
+    return tl
+
+
+@api.get("/replay/sessions")
+def replay_sessions_endpoint(limit: int = Query(50, ge=1, le=500)) -> dict:
+    """Replayable sessions, newest first; runs retention pruned carry ``data_pruned``."""
+    from mailroom_reloaded.obs.replay.sessions import list_sessions
+    from mailroom_reloaded.storage.db import get_engine
+
+    try:
+        sessions = list_sessions(limit, engine=get_engine())
+    except Exception:
+        logger.warning("replay_sessions_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sessions unavailable") from None
+    pruned = _pruned_run_ids()
+    for sm in sessions:
+        if sm.kind == "run" and sm.id.removeprefix("run:") in pruned:
+            sm.data_pruned = True
+    return {"sessions": [sm.model_dump(mode="json") for sm in sessions]}
+
+
+@api.get("/replay/sessions/{session_id}/timeline")
+def replay_timeline_endpoint(
+    session_id: str,
+    from_s: float | None = Query(None, ge=0, allow_inf_nan=False),
+    to_s: float | None = Query(None, ge=0, allow_inf_nan=False),
+) -> dict:
+    """The ``replay/v1`` timeline of a session, optionally windowed (seconds)."""
+    if from_s is not None and to_s is not None and from_s > to_s:
+        raise HTTPException(status_code=422, detail="from_s must not exceed to_s")
+    return _replay_timeline(session_id, from_s, to_s).model_dump(mode="json")
+
+
+@api.get("/replay/sessions/{session_id}/export")
+def replay_export_endpoint(session_id: str) -> Response:
+    """The full timeline as a downloadable ``<session>.replay.json``."""
+    tl = _replay_timeline(session_id, None, None)
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", session_id)
+    return Response(
+        content=tl.model_dump_json(),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{name}.replay.json"'},
+    )
+
+
 def _eval_runs() -> list[dict]:
     """Distinct ``run_id``s with document counts from the ``eval_docs`` table."""
     from mailroom_reloaded.storage.db import get_engine

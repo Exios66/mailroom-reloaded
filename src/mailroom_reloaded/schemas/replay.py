@@ -60,6 +60,8 @@ class Session(BaseModel):
     approx: bool = False
     window: Window = Field(default_factory=Window)
     links: dict[str, str] = Field(default_factory=dict)
+    #: Retention removed this run's spans; only the archive ledger (and audit) remains.
+    data_pruned: bool = False
 
 
 class StationInfo(BaseModel):
@@ -210,3 +212,5 @@ class SessionSummary(BaseModel):
     started_at: str = ""
     duration_s: float = 0.0
     source: Literal["spans", "audit"] = "spans"
+    #: Retention removed this run's spans; only the archive ledger remains.
+    data_pruned: bool = False
