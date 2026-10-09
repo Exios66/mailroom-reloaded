@@ -52,12 +52,14 @@ def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None)
 
 
 def transcribe_pages(pdf_path: Path, usage_out: list[Usage] | None = None) -> str:
-    """Transcribe every rendered page (up to ``vision.max_pages``; 0 = all) of a scanned PDF.
+    """Transcribe every rendered page of a scanned PDF up to ``vision.max_pages``.
 
-    One ``pdf_transcriber`` call per page, joined in page order. Raises on render
-    failure or when no page yields text, so the caller can record an error. Each
-    page's usage is appended to ``usage_out`` as soon as the call returns, so the
-    caller keeps the spend of the pages done before a later page raises.
+    A nonpositive page limit includes all pages. Make one ``pdf_transcriber`` call
+    per page and join stripped, nonempty responses in page order with blank lines.
+    Raise ``RuntimeError`` if no pages render or no page yields text; configuration,
+    rendering and LLM call errors propagate, including ``LengthFinishReasonError``.
+    When supplied, ``usage_out`` receives each page's usage as soon as its call
+    returns, including empty responses, and retains it if a later call raises.
     """
     pdf_path = Path(pdf_path)
     cap, dpi = _vision_cfg()

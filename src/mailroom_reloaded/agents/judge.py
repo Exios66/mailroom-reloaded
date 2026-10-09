@@ -148,7 +148,14 @@ def judge_verify(text: str, doc_type: str, data: dict | None, ctx: ToolContext) 
 
 
 def judge_grade(text: str, doc_type: str, data: dict | None, ctx: ToolContext) -> JudgeGrade:
-    """Eval grading against ground truth; requires ``ctx.eval_mode``."""
+    """Return field and classification grades against tool-accessible ground truth.
+
+    Raise ``ValueError`` unless ``ctx.eval_mode`` is enabled and the ground-truth
+    tool is available through ``ctx.ground_truth``. Configuration, crew execution,
+    output validation and usage conversion errors also propagate.
+    Usage is returned on ``JudgeGrade`` and emitted as ``grader`` metrics;
+    it is not appended to ``ctx.usage_sink``.
+    """
     if not ctx.eval_mode:
         raise ValueError("judge_grade requires ctx.eval_mode (ground truth is eval-only)")
     tools = tools_for(ROLE, ctx)
