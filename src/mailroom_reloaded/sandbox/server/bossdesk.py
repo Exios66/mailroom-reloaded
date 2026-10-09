@@ -54,6 +54,8 @@ class StandInBossDesk:
                 }
             )
 
+        kinds = {x["kind"] for x in res.signals if x["state"] != "dismissed"}
+        attack = "possible_attack" in kinds
         for tok in re.split(r"\s\+\s|\s*\+\s*(?![^()]*\))", row.get("boss_action", "")):
             m = _TOKEN.match(tok)
             if not m:
@@ -63,6 +65,8 @@ class StandInBossDesk:
                 continue
             if name == "task_correspondent" and not res.drafts:
                 continue
+            if attack and name == "dismiss_signal":
+                continue  # an attack is escalated, never folded into the digest
             if name == "release_attachments":
                 continue  # human-only, after approval
             add(name, params)
@@ -87,9 +91,20 @@ class StandInBossDesk:
             sig
             and sig["state"] != "dismissed"
             and res.issue_class not in _ATTACK_ISSUES
+            and not attack
             and sig["kind"] not in {"legal_notice", "privacy_request", "payment_change"}
         ):
             add("ack_signal")
+        if attack:
+            add("request_human_review", why="attack signal escalates to a human")
+        if "urgent" in kinds or res.intent == "legal_notice":
+            add("raise_priority", why="deadline or legal window")
+        if "urgent" in kinds or "privacy_request" in kinds:
+            add("request_human_review", why="deadline or privacy matter needs a human")
+        if "needs_review" in res.flags:
+            add("request_human_review", why="low-confidence classification")
+        if "annotate" in res.flags:
+            add("annotate_document", why="note recorded against the document")
         if res.drafts:
             add(
                 "approve_outbound",
