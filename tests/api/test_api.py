@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 
 import pytest
 from fakes.openai_server import FakeOpenAI
@@ -528,3 +529,35 @@ def test_jev_status_requires_token(env, monkeypatch):
     with TestClient(app) as c:
         assert c.get("/v1/jev").status_code == 401
         assert c.get("/v1/jev", headers={"Authorization": "Bearer t0k"}).status_code == 200
+
+
+def test_startup_runs_retention_and_survives_failure(env, monkeypatch):
+    """`maintain` runs at startup (when the span store is enabled); a failure never blocks it."""
+    from mailroom_reloaded.api.app import app
+    from mailroom_reloaded.obs import tracing
+    from mailroom_reloaded.storage import retention
+
+    calls: list[int] = []
+
+    def boom() -> None:
+        calls.append(1)
+        raise RuntimeError("prune exploded")
+
+    monkeypatch.setattr(tracing, "span_store_enabled", lambda: True)
+    monkeypatch.setattr(retention, "maintain", boom)
+    with TestClient(app) as c:
+        assert c.get("/health").status_code == 200
+        for _ in range(200):
+            if calls:
+                break
+            time.sleep(0.01)
+    assert calls == [1]
+
+
+def test_startup_skips_retention_under_pytest(env, monkeypatch):
+    from mailroom_reloaded.api.app import app
+    from mailroom_reloaded.storage import retention
+
+    monkeypatch.setattr(retention, "maintain", lambda: pytest.fail("must not run"))
+    with TestClient(app) as c:
+        assert c.get("/health").status_code == 200

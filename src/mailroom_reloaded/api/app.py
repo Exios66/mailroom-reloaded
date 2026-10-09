@@ -457,6 +457,34 @@ def _embed_watcher_enabled() -> bool:
     }
 
 
+_RETENTION_INTERVAL_S = 86400
+
+
+async def _start_retention() -> asyncio.Task | None:
+    """Prune soon after startup, then daily, in a background task; never fails startup.
+
+    Skipped under pytest (same predicate as the span store) unless a store path is set.
+    """
+    from mailroom_reloaded.obs.tracing import span_store_enabled
+
+    if not span_store_enabled():
+        return None
+    from mailroom_reloaded.storage import retention
+
+    async def run_once() -> None:
+        try:
+            await asyncio.to_thread(retention.maintain)
+        except Exception:
+            logger.warning("retention_maintain_failed", exc_info=True)
+
+    async def loop() -> None:
+        while True:
+            await run_once()
+            await asyncio.sleep(_RETENTION_INTERVAL_S)
+
+    return asyncio.get_running_loop().create_task(loop())
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Create the bins and, when asked, run the watcher in-process.
@@ -467,6 +495,7 @@ async def lifespan(application: FastAPI):
     """
     _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)
+    retention_task = await _start_retention()
     watcher = None
     watcher_thread = None
     if _embed_watcher_enabled():
@@ -510,6 +539,8 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
+        if retention_task is not None:
+            retention_task.cancel()
         if watcher is not None:
             watcher.stop()
         if watcher_thread is not None:
