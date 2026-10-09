@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import (
     Column,
     Engine,
+    Float,
     Index,
     Integer,
     MetaData,
@@ -48,6 +49,38 @@ catalog_table = Table(
     Column("updated_at", String, nullable=False),
 )
 Index("ix_catalog_status", catalog_table.c.status)
+
+# Archive ledger (see storage/ledger.py): one global hash chain over every run, plus the
+# flat metric rows captured for those runs. Separate from the per-document audit_log.
+ledger_table = Table(
+    "ledger",
+    metadata,
+    Column("seq", Integer, primary_key=True, autoincrement=False),
+    Column("kind", String, nullable=False),
+    Column("run_id", String, nullable=False),
+    Column("doc_id", String),
+    Column("ts", String, nullable=False),
+    Column("payload", Text, nullable=False),
+    Column("digest", String, nullable=False),
+    Column("prev_hash", String, nullable=False),
+    Column("entry_hash", String, nullable=False),
+)
+Index("ix_ledger_run", ledger_table.c.run_id, ledger_table.c.seq)
+Index("ix_ledger_kind", ledger_table.c.kind)
+
+ledger_metrics_table = Table(
+    "ledger_metrics",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", String, nullable=False),
+    Column("doc_id", String),
+    Column("tier", Integer, nullable=False),
+    Column("name", String, nullable=False),
+    Column("value", Float),
+    Column("span_id", String),
+    Column("ts", String, nullable=False),
+)
+Index("ix_ledger_metrics_run", ledger_metrics_table.c.run_id, ledger_metrics_table.c.doc_id)
 
 _default_engine: Engine | None = None
 _lock = threading.Lock()
