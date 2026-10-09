@@ -76,9 +76,7 @@ def test_run_id_variable_reads_a_label_that_is_emitted(name) -> None:
     dash = _load(name)
     run_var = next(v for v in dash["templating"]["list"] if v["name"] == "run_id")
     assert run_var["query"]["query"] == "label_values(mailroom_documents_total, run_id)"
-    assert "mailroom_documents_total" in _prometheus_names() | {
-        "mailroom_documents_total"
-    }
+    assert "mailroom_documents_total" in _prometheus_names()
 
 
 @pytest.mark.parametrize("name", OURS)
