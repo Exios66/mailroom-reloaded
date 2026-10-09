@@ -1,5 +1,6 @@
 """Loader layouts, schema diagnostics, and smoke manifest integrity."""
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -116,6 +117,47 @@ def test_manifest_collects_missing_and_tampered_files(tmp_path):
         load_content(root, strict=True)
 
 
+@pytest.mark.parametrize("directory,example,attribute", [
+    ("scenarios", "scenario_A1.yaml", "scenarios"),
+    ("personas/behavior", "persona_behavior.yaml", "personas"),
+    ("gen", "gen_spec.yaml", "gen_specs"),
+])
+@pytest.mark.parametrize("malformed", [False, True])
+def test_smoke_excludes_unlisted_yaml(tmp_path, directory, example, attribute, malformed):
+    """Exclude unlisted recursive YAML files before parsing and reject strict loads."""
+    root = tmp_path / "smoke"
+    shutil.copytree(loader.SMOKE_DIR, root)
+    relative = f"{directory}/nested/unlisted.yaml"
+    path = root / relative
+    path.parent.mkdir(parents=True)
+    path.write_text("[" if malformed else (Path(__file__).parent / "examples" / example).read_text())
+
+    content = load_content(root)
+    assert "unlisted" not in getattr(content, attribute)
+    assert f"manifest: unlisted file {relative}" in content.report.errors
+    with pytest.raises(ValueError, match=f"manifest: unlisted file {relative}"):
+        load_content(root, strict=True)
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_smoke_excludes_unlisted_registry(tmp_path, malformed):
+    """Require a manifest digest for the registry before parsing or returning it."""
+    root = tmp_path / "smoke"
+    shutil.copytree(loader.SMOKE_DIR, root)
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["files"]["registry.yaml"]
+    manifest_path.write_text(json.dumps(manifest))
+    if malformed:
+        (root / "registry.yaml").write_text("[")
+
+    content = load_content(root)
+    assert content.registry == {}
+    assert "manifest: unlisted file registry.yaml" in content.report.errors
+    with pytest.raises(ValueError, match="manifest: unlisted file registry.yaml"):
+        load_content(root, strict=True)
+
+
 def test_smoke_generation_specs_use_gen_directory(tmp_path):
     """Load smoke generation specifications directly from the gen directory."""
     root = tmp_path / "smoke"
@@ -123,6 +165,10 @@ def test_smoke_generation_specs_use_gen_directory(tmp_path):
     (root / "gen").mkdir()
     example = Path(__file__).parent / "examples/gen_spec.yaml"
     shutil.copyfile(example, root / "gen/vendor.yaml")
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"]["gen/vendor.yaml"] = hashlib.sha256(example.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
     assert load_content(root, strict=True).gen_specs["vendor"]["pool"] == "free_pool"
 
 
