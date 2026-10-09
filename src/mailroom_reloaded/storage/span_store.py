@@ -363,6 +363,30 @@ class SpanStore:
                 delete(_t).where(_t.c.run_id.in_(list(run_ids)))
             ).rowcount
 
+    def spans_older_than(
+        self, older_than_ns: int, *, exclude_runs: Collection[str] = ()
+    ) -> list[tuple[str | None, str]]:
+        """``(run_id, span_id)`` of the spans :meth:`prune` would delete with the same arguments."""
+        cond = _t.c.start_ns < older_than_ns
+        if exclude_runs:
+            cond = cond & (_t.c.run_id.is_(None) | _t.c.run_id.not_in(list(exclude_runs)))
+        with self.engine.connect() as conn:
+            return [
+                (r.run_id, r.span_id)
+                for r in conn.execute(select(_t.c.run_id, _t.c.span_id).where(cond))
+            ]
+
+    def delete_spans(self, span_ids: Collection[str]) -> int:
+        """Delete exactly these spans (chunked to stay under SQLite's variable limit)."""
+        ids = list(span_ids)
+        removed = 0
+        with self._lock, self.engine.begin() as conn:
+            for i in range(0, len(ids), 500):
+                removed += conn.execute(
+                    delete(_t).where(_t.c.span_id.in_(ids[i : i + 500]))
+                ).rowcount
+        return removed
+
     def prune(self, *, keep_runs: Collection[str], older_than_ns: int) -> int:
         """Delete spans that started before ``older_than_ns`` unless their run is in ``keep_runs``."""
         cond = _t.c.start_ns < older_than_ns

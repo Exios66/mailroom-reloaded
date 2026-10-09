@@ -83,13 +83,18 @@ class RunScopeSpanProcessor(SpanProcessor):
         return True
 
 
+def span_store_enabled() -> bool:
+    """False under pytest unless ``MAILROOM_TRACE_STORE_PATH`` is set (tests use their own stores)."""
+    return not ("pytest" in sys.modules and get_settings().trace_store_path is None)
+
+
 def _span_store_exporter() -> SpanExporter | None:
     """The local span store exporter, or ``None`` when it should not be attached.
 
     Under pytest the store is skipped unless ``MAILROOM_TRACE_STORE_PATH`` is set, for
     the same reason the default OTLP exporter is (tests install their own exporters).
     """
-    if "pytest" in sys.modules and get_settings().trace_store_path is None:
+    if not span_store_enabled():
         return None
     try:
         from mailroom_reloaded.storage.span_store import SqliteSpanExporter

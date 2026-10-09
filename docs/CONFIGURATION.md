@@ -26,6 +26,7 @@ taxonomy or a model map you must restart the process: `load_taxonomy` and
 | `MAILROOM_EMBED_WATCHER` | `api/app.py:339-346` | off in dev, `1` in compose | `1/true/yes/on` runs the watcher inside the API process. |
 | `MAILROOM_TRACE_MASK` | `settings.py:134` | `0` (false) | When true, prompt/completion span attributes are replaced with `<masked>` (`obs/tracing.py:67-99`, `obs/tracing.py:197-209`). |
 | `MAILROOM_TRACE_STORE_PATH` | `settings.py` | `<base_dir>/traces.db` | SQLite file of the local span store (`storage/span_store.py`): allow-listed spans for replay, never prompts, completions or document text (`llm.*messages`, LLM `input/output.value`, `exception.message` are dropped whether or not `MAILROOM_TRACE_MASK` is set). Skipped under pytest unless this variable is set. |
+| `MAILROOM_TRACE_KEEP` | `settings.py` | `pinned` | Which runs' spans survive the startup and daily prune (`storage/retention.py`): `pinned` (pinned runs plus the four built-in showcase runs), `recent:<N>` (those plus the N newest runs, 1-1000) or `all` (never prune). Spans of other runs older than 3 days are deleted; ledger rows never are. A `policy` ledger entry overrides this value. Blank or invalid means `pinned`. |
 | `MAILROOM_GPU_USD_PER_HOUR` | `settings.py:135` (`gpu_usd_per_hour`) | `0.80` | Default GPU-hour price for cost cards; `mailroom eval --gpu-usd-per-hour` overrides. |
 
 ### Providers
