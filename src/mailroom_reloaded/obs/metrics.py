@@ -1,6 +1,6 @@
 """OpenTelemetry metrics (spec section 8, "Live OTel metrics").
 
-``M`` is a lazy namespace over the twelve instruments in the spec. Instruments
+``M`` is a lazy namespace over the spec's instruments (plus the decision counters). Instruments
 are created on first access against the current meter provider, so a test that
 calls :func:`setup_metrics` with an ``InMemoryMetricReader`` collects them, while
 a run with no provider configured is a harmless no-op. ``setup_metrics`` clears
@@ -12,10 +12,12 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from typing import Any
 
 from opentelemetry import metrics
 
+from mailroom_reloaded.obs.run_context import UNSCOPED, current_run
 from mailroom_reloaded.obs.tracing import build_resource
 
 __all__ = ["M", "setup_metrics"]
@@ -38,9 +40,72 @@ _SPECS: dict[str, tuple[str, str, str]] = {
     "inflight": ("mailroom.inflight", "gauge", "{document}"),
     "token_usage": ("gen_ai.client.token.usage", "histogram", "{token}"),
     "operation_duration": ("gen_ai.client.operation.duration", "histogram", "s"),
+    # decision counters (the replay's ticker as time series)
+    "retries": ("mailroom.retries", "counter", "{retry}"),
+    "escalations": ("mailroom.escalations", "counter", "{escalation}"),
+    "review_causes": ("mailroom.review.causes", "counter", "{cause}"),
 }
 
 _PROVIDER: Any = None
+
+
+def run_labels() -> dict[str, str]:
+    """``run_id`` / ``environment`` of the current run scope (``unscoped`` outside any scope).
+
+    Bounded by design: eval run ids plus one daily live bucket. ``doc_id`` is never a label.
+    """
+    scope = current_run()
+    if scope is None:
+        return {"run_id": UNSCOPED, "environment": UNSCOPED}
+    return {"run_id": scope.run_id, "environment": scope.environment}
+
+
+class _Instrument:
+    """An OTel instrument whose data points always carry the current run's labels."""
+
+    def __init__(self, inner: Any) -> None:
+        """Wrap ``inner`` (a counter, histogram or gauge)."""
+        self._inner = inner
+
+    def _merge(self, attributes: Mapping[str, Any] | None) -> dict[str, Any]:
+        merged = run_labels()
+        if attributes:
+            merged.update(attributes)  # an explicit label wins
+        return merged
+
+    def add(
+        self,
+        amount: float,
+        attributes: Mapping[str, Any] | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Counter ``add`` with the run labels merged in."""
+        self._inner.add(amount, self._merge(attributes), *args, **kwargs)
+
+    def record(
+        self,
+        amount: float,
+        attributes: Mapping[str, Any] | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Histogram ``record`` with the run labels merged in."""
+        self._inner.record(amount, self._merge(attributes), *args, **kwargs)
+
+    def set(
+        self,
+        amount: float,
+        attributes: Mapping[str, Any] | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """Gauge ``set`` with the run labels merged in."""
+        self._inner.set(amount, self._merge(attributes), *args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        """Anything else is the wrapped instrument's."""
+        return getattr(self._inner, name)
 
 
 class _Metrics:
@@ -59,7 +124,7 @@ class _Metrics:
             raise AttributeError(name)
         instruments = object.__getattribute__(self, "_instruments")
         if name not in instruments:
-            instruments[name] = self._create(spec)
+            instruments[name] = _Instrument(self._create(spec))
         return instruments[name]
 
     @staticmethod

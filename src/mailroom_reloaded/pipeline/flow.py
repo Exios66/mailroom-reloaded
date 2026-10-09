@@ -573,12 +573,18 @@ class MailroomFlow(Flow[MailroomState]):
         """Record a routing transition as a ``mailroom.route`` span event."""
         trace_capture.emit_event("route", **{"from": frm, "to": to, "reason": reason})
 
+    def _escalation(self, to: str, reason: str) -> None:
+        """Record an escalation (to the boss or to human review) as an event and a counter."""
+        M.escalations.add(1, {"to": to})
+        trace_capture.emit_event("escalation", to=to, reason=reason)
+
     def _retry_event(self, kind: str, attempt: int, result: Any) -> None:
         """Record a gate retry and tag the next sort/extract span with its ``retry_kind``.
 
         ``attempt`` is one-based. Omit the maximum if its taxonomy lookup fails.
         """
         self._retry_kind = kind
+        M.retries.add(1, {"kind": kind})
         try:
             max_attempts = load_taxonomy().confidence_for(self._effective_doc_type()).retry_max
         except Exception:  # noqa: BLE001
@@ -827,7 +833,7 @@ class MailroomFlow(Flow[MailroomState]):
                     self._resume_done.discard("sort")
                     node = "sort"
                 else:
-                    trace_capture.emit_event("escalation", to="human_review", reason="classify_human_review")
+                    self._escalation("human_review", "classify_human_review")
                     return self._park("classify_human_review")
             elif node == "gate_extract":
                 state.route_trail.append("gate_extract")
@@ -855,15 +861,15 @@ class MailroomFlow(Flow[MailroomState]):
                         self._resume_done.discard("extract")
                         node = "extract"
                     elif arbiter_route == "do_boss":
-                        trace_capture.emit_event("escalation", to="boss", reason="arbiter_escalate")
+                        self._escalation("boss", "arbiter_escalate")
                         node = "boss"
                     else:
                         node = "report_catalog_archive"
                 elif route == "do_boss":
-                    trace_capture.emit_event("escalation", to="boss", reason="extract_gate")
+                    self._escalation("boss", "extract_gate")
                     node = "boss"
                 else:
-                    trace_capture.emit_event("escalation", to="human_review", reason="extract_human_review")
+                    self._escalation("human_review", "extract_human_review")
                     return self._park("extract_human_review")
             elif node == "boss":
                 state.route_trail.append("boss")
@@ -878,7 +884,7 @@ class MailroomFlow(Flow[MailroomState]):
                     self._resume_done.discard("extract")
                     node = "extract"
                 elif action == "human_review":
-                    trace_capture.emit_event("escalation", to="human_review", reason="boss_human_review")
+                    self._escalation("human_review", "boss_human_review")
                     return self._park("boss_human_review")
                 else:
                     node = "report_catalog_archive"

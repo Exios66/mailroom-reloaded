@@ -2,7 +2,7 @@
   "uid": "mailroom-pipeline",
   "title": "Mailroom Pipeline",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "30s",
   "time": {
@@ -35,6 +35,44 @@
           "selected": true,
           "text": "All",
           "value": "$__all"
+        }
+      },
+      {
+        "name": "public_url",
+        "label": "public_url",
+        "type": "constant",
+        "query": "http://localhost:8000",
+        "hide": 2,
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:8000",
+            "value": "http://localhost:8000"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "http://localhost:8000",
+          "value": "http://localhost:8000"
+        }
+      },
+      {
+        "name": "phoenix_url",
+        "label": "phoenix_url",
+        "type": "constant",
+        "query": "http://localhost:6006",
+        "hide": 2,
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:6006",
+            "value": "http://localhost:6006"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "http://localhost:6006",
+          "value": "http://localhost:6006"
         }
       }
     ]
@@ -249,9 +287,136 @@
           "legendFormat": "USD per hour"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "Decisions",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "title": "Retries by kind",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (kind) (increase(mailroom_retries_total{run_id=~\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Escalations by target",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 25,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (to) (increase(mailroom_escalations_total{run_id=~\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "{{to}}"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Review causes",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (cause) (increase(mailroom_review_causes_total{run_id=~\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "{{cause}}"
+        }
+      ]
     }
   ],
   "annotations": {
     "list": []
-  }
+  },
+  "links": [
+    {
+      "title": "replay ↗",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true,
+      "tooltip": "Open this run in the mailroom replay viewer (needs the run_id variable set to one run)",
+      "url": "${public_url}/tui#replay=run:${run_id}"
+    },
+    {
+      "title": "phoenix ↗",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true,
+      "tooltip": "Open Phoenix; filter spans on mailroom.run_id = the run_id variable",
+      "url": "${phoenix_url}"
+    }
+  ]
 }

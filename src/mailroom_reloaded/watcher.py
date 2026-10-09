@@ -19,6 +19,7 @@ cannot strand a document.
 
 from __future__ import annotations
 
+import contextvars
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -28,7 +29,7 @@ from typing import Any
 import structlog
 
 from mailroom_reloaded.obs.metrics import M
-from mailroom_reloaded.obs.run_context import live_run_id
+from mailroom_reloaded.obs.run_context import ensure_run_scope, live_run_id
 from mailroom_reloaded.pipeline import flow as _flow
 from mailroom_reloaded.pipeline import run_ledger as _run_ledger
 from mailroom_reloaded.schemas.manifest import Manifest
@@ -130,7 +131,8 @@ class Watcher:
         """Adjust the in-flight count and publish it, atomically."""
         with self._inflight_lock:
             self._inflight += delta
-            M.inflight.set(self._inflight, {"worker": self.worker_id})
+            with ensure_run_scope():  # the gauge belongs to the live run bucket, not "unscoped"
+                M.inflight.set(self._inflight, {"worker": self.worker_id})
 
     # ------------------------------------------------------------- startup
     def resume_processing(self) -> int:
@@ -201,13 +203,19 @@ class Watcher:
         if not self._startup_done and self._lock is not None:
             self.resume_processing()
         files = [f for f in sorted(self.bins.inbox.iterdir()) if _is_processable(f)]
-        M.queue_depth.set(len(files), {"bin": "inbox"})
+        with ensure_run_scope():
+            M.queue_depth.set(len(files), {"bin": "inbox"})
         if not files:
             return 0
         if self.concurrency <= 1:
             return sum(1 for f in files if self._process(f))
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
-            results = list(pool.map(self._process, files))
+            # each worker gets its own copy of the caller's context so run_scope survives the hop
+            futures = [
+                pool.submit(contextvars.copy_context().run, self._process, f)
+                for f in files
+            ]
+            results = [fut.result() for fut in futures]
         return sum(1 for r in results if r)
 
     def _process(self, path: Path) -> bool:

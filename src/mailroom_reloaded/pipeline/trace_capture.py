@@ -22,6 +22,7 @@ from mailroom_reloaded import __version__
 from mailroom_reloaded.llm.client import cost_for
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs import attrs as A
+from mailroom_reloaded.obs.metrics import M
 from mailroom_reloaded.obs.reconsideration import (
     collect_review_causes,
     should_reconsider,
@@ -361,6 +362,8 @@ def _reconsideration(
         verdict=verdict,
         floor=floor,
     )
+    for cause in causes:
+        M.review_causes.add(1, {"cause": cause})
     emit_score(span, "review_causes", causes)
     emit_score(
         span,
