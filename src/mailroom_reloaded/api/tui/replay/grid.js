@@ -173,10 +173,29 @@ function metricsRow({ model, st, cols }) {
   return clip(segs, cols);
 }
 
-function inspectorRows({ model, st, clock, sel, cols }) {
+/** The run's outbound observability URLs, one text row each (links may be null). */
+function externalLinkRows({ sess, links, cols }) {
+  const cfg = links && typeof links === 'object' ? links : {};
+  const phoenix = typeof cfg.phoenix_url === 'string' ? cfg.phoenix_url : '';
+  const grafana = typeof cfg.grafana_url === 'string' ? cfg.grafana_url : '';
+  const id = sess && typeof sess.id === 'string' ? sess.id : '';
+  const run = id.startsWith('run:') ? id.slice(4) : null;
+  const out = [];
+  if (phoenix) {
+    out.push(clip([[' phoenix  ', 'dim'], [truncate(phoenix, cols - 10), 'info']], cols));
+  }
+  if (grafana && run) {
+    const url = `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}`;
+    out.push(clip([[' grafana  ', 'dim'], [truncate(url, cols - 10), 'info']], cols));
+  }
+  return out;
+}
+
+function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
   const docs = Array.isArray(st.docs) ? st.docs : [];
   const d = sel >= 0 && sel < docs.length ? docs[sel] : null;
   const out = [clip([[' ─ inspector ' + '─'.repeat(cols), 'dim']], cols)];
+  out.push(...externalLinkRows({ sess, links, cols }));
   if (!d) {
     out.push(clip([[' no document selected (j/k)', 'dim']], cols));
     return out;
@@ -274,7 +293,7 @@ function resolvePanel(panel, ctx) {
   return Array.isArray(rows) ? rows : [];
 }
 
-export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none' } = {}) {
+export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none', links = null } = {}) {
   const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
   const R = clamp(Math.floor(num(rows)) || 30, MIN_ROWS, MAX_ROWS);
   const m = model && typeof model === 'object' ? model : {};
@@ -282,7 +301,7 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const ck = clock && typeof clock === 'object' ? clock : { t: 0, duration: 0, speed: 1, playing: false };
   const sess = m.session && typeof m.session === 'object' ? m.session : {};
   const selIdx = Number.isInteger(sel) ? sel : -1;
-  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess };
+  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links };
 
   const head = clip(headerRow(ctxo), C);
   const scrub = clip(scrubRow(ctxo), C);

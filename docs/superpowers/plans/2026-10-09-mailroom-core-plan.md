@@ -247,6 +247,15 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 - **R-16 Dev seed (old Task 12).** [ ] Add a replay eval seed (retry, failure, parked, boss) to `scripts/tui_dev.sh` using `scripts/tui_seed*/`.
 - **R-17 Anchor staging run.** Owner Supabase project. [ ] Run `deploy/anchor/mailroom_anchor.sql` against staging; verify DDL, grants, trigger and key header per `docs/OPERATIONS.md`; record result there.
 
+#### Observability UI links (new workstream)
+
+- **R-19 Grafana & Phoenix deep links in the UI.** The Grafana dashboards already link *into* the viewer (Task 4 `replay ↗`/`phoenix ↗`, tested in `tests/deploy/test_grafana_links.py`), but neither `/ui` nor the replay viewer links *out* to Grafana or Phoenix, and the two `/ui` header links hardcode `localhost`. Files: `settings.py`, `api/app.py` (`GET /links`), `api/ui/index.html`, `api/tui/replay/grid.js` + `commands/replay.js`, `docs/OPERATIONS.md`, `docs/TUI.md`, `CHANGELOG.md`.
+  - [x] Link config: `MAILROOM_PUBLIC_URL` / `MAILROOM_PHOENIX_URL` / `MAILROOM_GRAFANA_URL` (defaults `http://localhost:8000|6006|3000`) exposed by a public `GET /links`; `/ui` header and per-run links build from it.
+  - [x] `/ui` runs table: add `grafana ↗` (`` `${grafana_url}/d/mailroom-quality?var-run_id=<id>` ``) and `phoenix ↗` per run beside `replay ↗`.
+  - [x] Replay viewer: the inspector shows the run's `phoenix ↗` / `grafana ↗`; `o` / `g` open them (noopener).
+  - [x] Tests: `tests/api/test_api.py` (`/links` + per-run links), `tests/tui/js/replay-command.test.mjs` (viewer links/keys); docs + CHANGELOG.
+  - Decisions (assumed unless the owner says otherwise): link-out (not embed); Grafana target dashboard `mailroom-quality`; URLs from env with localhost defaults.
+
 ### Phase 4: content pack to v1.0 (`mailroom-sandbox-content`)
 
 - **C-01 Dataset join (old 3.1).** [ ] Where huggingface.co is reachable: `python3 tools/build_attachments.py --hf --counts --select 3`; fills the 54 `rows_unverified` rows in `taxonomy/strata.csv` via the generator, never by hand.
