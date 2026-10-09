@@ -58,7 +58,7 @@ from sqlalchemy import text
 from mailroom_reloaded import __version__
 from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS
 from mailroom_reloaded.intake import gmail as gmail_intake
-from mailroom_reloaded.review import resolve_review
+from mailroom_reloaded.review import ReviewRequestError, resolve_review
 from mailroom_reloaded.settings import get_settings
 from mailroom_reloaded.storage import audit_log, catalog
 from mailroom_reloaded.storage.bins import Bins, load_manifest
@@ -317,13 +317,16 @@ def jev_status_endpoint() -> dict:
 @api.post("/review/{doc_id}/resolve")
 def resolve_review_endpoint(doc_id: str, payload: ReviewResolve) -> dict:
     """Disposition a parked document (approve / correct / reject)."""
-    state = resolve_review(
-        doc_id,
-        payload.action,
-        doc_type=payload.doc_type,
-        doc_subclass=payload.doc_subclass,
-        reviewer=payload.reviewer,
-    )
+    try:
+        state = resolve_review(
+            doc_id,
+            payload.action,
+            doc_type=payload.doc_type,
+            doc_subclass=payload.doc_subclass,
+            reviewer=payload.reviewer,
+        )
+    except ReviewRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if state is None:
         raise HTTPException(
             status_code=404, detail=f"No parked document with id {doc_id}"
