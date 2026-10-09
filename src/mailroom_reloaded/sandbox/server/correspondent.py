@@ -107,6 +107,7 @@ class CorrespondentResult:
     summary: str
     reasons: list[str]
     llm_calls: int = 0
+    flags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Serialize the result and its nested dataclasses as a dictionary."""
@@ -224,6 +225,44 @@ _CTA = re.compile(
     r"(review and sign|sign here|sign in|click (here|the link|below)|open the link|view (the )?document online)",
     re.IGNORECASE,
 )
+_FORWARDED = re.compile(
+    r"(forwarded message|^\s*>|^fwd:)", re.IGNORECASE | re.MULTILINE
+)
+_ADVISORY = re.compile(
+    r"(is this legit|is this real|scam|phishing|suspicious (email|message))",
+    re.IGNORECASE,
+)
+_PRIVACY_Q = re.compile(
+    r"(who can see|(share|disclose|give)\w* my (information|data|documents))",
+    re.IGNORECASE,
+)
+_MISSING = re.compile(
+    r"(still (need|missing)|what (else )?(is|are) (missing|needed)|missing (document|page|exhibit))",
+    re.IGNORECASE,
+)
+_EXFIL_IN_TEXT = re.compile(
+    r"(forward|send|export|email)\b.{0,60}\b(documents|files|records)",
+    re.IGNORECASE | re.DOTALL,
+)
+_ANOMALY = re.compile(
+    r"((outside|unlike|different from)\b.{0,30}\b(normally|usually|typically)|which matter (this|it) should)",
+    re.IGNORECASE | re.DOTALL,
+)
+_COURT_URGENT = re.compile(
+    r"(court|closing is today|deadline (is )?today|filing)", re.IGNORECASE
+)
+_EN_STOP = frozenset(
+    "the and to of a in is it you that for with this be are on as at have not we your i from or my can me".split()
+)
+
+
+def _non_english(text: str) -> bool:
+    toks = re.findall(r"[a-zA-Z\u00c0-\u024f']+", text.lower())
+    if len(toks) < 8:
+        return False
+    return sum(t in _EN_STOP for t in toks) / len(toks) < 0.12
+
+
 _NO_CHANGE = re.compile(r"\bno (changes?|updates?) (to|in|on)\b", re.IGNORECASE)
 _CONFIRM = re.compile(r"(confirm|acknowledg)", re.IGNORECASE)
 _VENDOR = re.compile(
@@ -535,7 +574,19 @@ class StandInCorrespondent:
                         "attack_class": "injection",
                         "priority": "critical",
                         "state": "pending",
-                    }
+                    },
+                    *(
+                        [
+                            {
+                                "kind": "possible_attack",
+                                "attack_class": "exfiltration",
+                                "priority": "high",
+                                "state": "pending",
+                            }
+                        ]
+                        if _EXFIL_IN_TEXT.search(text)
+                        else []
+                    ),
                 ],
                 attachment_lanes=lanes(
                     "quarantine", "attachments of a flagged message"
@@ -681,7 +732,7 @@ class StandInCorrespondent:
                     {
                         "kind": "possible_attack",
                         "attack_class": "malicious_attachment",
-                        "priority": "high",
+                        "priority": "critical",
                         "state": "pending",
                     }
                 ],
@@ -729,7 +780,7 @@ class StandInCorrespondent:
                 "urgent_deadline",
                 "urgent_deadline",
                 "urgent",
-                "high",
+                "critical" if _COURT_URGENT.search(text) else "high",
             )
         elif _UNRELATED.search(text) and not has_att:
             intent, issue, sig, pri = "unrelated", "spam_or_phishing", "fyi", "low"
@@ -751,7 +802,7 @@ class StandInCorrespondent:
             intent, issue, sig, pri = (
                 "correction_or_amendment",
                 "document_submission",
-                "doc_relation",
+                "correction",
                 "normal",
             )
         elif (
@@ -853,6 +904,14 @@ class StandInCorrespondent:
             sig = "doc_relation"
         if trust == "unverified" and sig == "doc_relation":
             sig = "new_info"
+        flags: list[str] = []
+        if sig == "fyi" and intent == "general_question":
+            if _ADVISORY.search(text):
+                pri = (
+                    "low"  # a client asking whether a message is genuine: advisory only
+                )
+            elif trust == "verified":
+                sig = "new_info"  # a verified client conveying information
         signals = [
             {
                 "kind": sig,
@@ -860,6 +919,28 @@ class StandInCorrespondent:
                 "state": "dismissed" if intent == "unrelated" else "pending",
             }
         ]
+
+        def extra(kind: str, priority: str) -> None:
+            if all(x["kind"] != kind for x in signals):
+                signals.append({"kind": kind, "priority": priority, "state": "pending"})
+
+        if intent != "unrelated" and trust == "verified":
+            if intent == "complaint" and re.search(
+                r"(third|nobody|no one|sitting for|again)", text, re.IGNORECASE
+            ):
+                extra("urgent", "high")  # an aged, repeated request is escalated
+            if _PRIVACY_Q.search(text):
+                extra("privacy_request", "high")
+            if (has_att or _FORWARDED.search(msg.body)) and sig != "new_info":
+                extra("new_info", "normal")
+            if _MISSING.search(text):
+                extra("missing_doc", "normal")
+        if intent == "general_question" and _non_english(msg.body):
+            flags.append("needs_review")
+        if _ANOMALY.search(text) and has_att:
+            flags.append("annotate")
+        if intent == "correction_or_amendment":
+            flags.append("annotate")
         drafts = self._drafts(msg, intent, trust, lane_list, relations, tools, entities)
         return result(
             intent=intent,
@@ -869,6 +950,7 @@ class StandInCorrespondent:
             relations=relations,
             drafts=drafts,
             callback=callback,
+            flags=flags,
             summary=f"{intent} from {trust} sender; {len(drafts)} draft(s), {len(lane_list)} attachment(s).",
         )
 

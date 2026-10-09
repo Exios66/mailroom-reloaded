@@ -134,6 +134,10 @@ class StandInBossDesk:
             add("raise_priority", why="deadline or legal window")
         if "urgent" in kinds or "privacy_request" in kinds:
             add("request_human_review", why="deadline or privacy matter needs a human")
+        if "needs_review" in res.flags:
+            add("request_human_review", why="low-confidence classification")
+        if "annotate" in res.flags:
+            add("annotate_document", why="note recorded against the document")
         if res.drafts:
             add(
                 "approve_outbound",
