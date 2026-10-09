@@ -49,7 +49,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
@@ -455,6 +455,159 @@ def replay_export_endpoint(session_id: str) -> Response:
         content=tl.model_dump_json(),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{name}.replay.json"'},
+    )
+
+
+#: ``GET /v1/replay/live`` tunables (read once per request; see ``_live_*`` helpers).
+_LIVE_POLL_DEFAULT_S = 1.0
+_LIVE_HEARTBEAT_DEFAULT_S = 15.0
+_LIVE_MAX_FRAMES_DEFAULT = 0
+
+
+def _live_float(name: str, default: float) -> float:
+    """A positive float env tunable, or ``default`` when unset/blank/unparseable."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _live_int(name: str, default: int) -> int:
+    """A non-negative int env tunable, or ``default`` when unset/blank/unparseable."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+def _sse(event: str, data: dict) -> str:
+    """One SSE frame, exactly ``event: <name>\\ndata: <json>\\n\\n``."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _live_items(tl):
+    """``(event_name, item, seen_key)`` for one timeline snapshot, in a stable order."""
+    for i, seg in enumerate(tl.segments):
+        yield "segment", seg, f"segment:{seg.span_id or i}"
+    for gen in tl.generations:
+        yield "generation", gen, f"generation:{gen.span_id}"
+    for ev in tl.events:
+        yield "event", ev, f"event:{ev.t}:{ev.doc_id}:{ev.kind}:{ev.station}"
+    for sc in tl.scores:
+        yield "score", sc, f"score:{sc.span_id}:{sc.name}:{sc.doc_id}"
+
+
+def _item_time(item) -> float:
+    """The item's timeline instant: ``t0`` for segments/generations, else ``t``."""
+    t = getattr(item, "t0", None)
+    if t is None:
+        t = getattr(item, "t", None)
+    return float(t) if isinstance(t, (int, float)) else 0.0
+
+
+@api.get("/replay/live")
+def replay_live_endpoint(
+    request: Request,
+    session: str | None = Query(None),
+    since: float | None = Query(None, ge=0, allow_inf_nan=False),
+) -> StreamingResponse:
+    """Follow a session's timeline as Server-Sent Events (``text/event-stream``).
+
+    Resolves ``session`` (a bad id is 400), else the newest session; with none it
+    streams a single ``error`` frame. Otherwise: ``ready`` once, then one
+    ``segment``/``generation``/``event``/``score`` frame per item not seen before,
+    a ``heartbeat`` keepalive, and an ``error`` when the timeline disappears. The
+    client bounds the stream with ``MAILROOM_REPLAY_LIVE_MAX_FRAMES``.
+    """
+    from mailroom_reloaded.obs.replay.sessions import list_sessions, parse_session_id
+    from mailroom_reloaded.obs.replay.timeline import build_timeline
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.span_store import SpanStore, default_span_store_path
+
+    if session is not None:
+        try:
+            parse_session_id(session)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid session ID") from None
+        sid: str | None = session
+    else:
+        try:
+            sessions = list_sessions(1, engine=get_engine())
+        except Exception:
+            logger.warning("replay_live_sessions_failed", exc_info=True)
+            sessions = []
+        sid = sessions[0].id if sessions else None
+
+    poll = _live_float("MAILROOM_REPLAY_LIVE_POLL_S", _LIVE_POLL_DEFAULT_S)
+    heartbeat = _live_float(
+        "MAILROOM_REPLAY_LIVE_HEARTBEAT_S", _LIVE_HEARTBEAT_DEFAULT_S
+    )
+    max_frames = _live_int(
+        "MAILROOM_REPLAY_LIVE_MAX_FRAMES", _LIVE_MAX_FRAMES_DEFAULT
+    )
+
+    async def gen():
+        if sid is None:
+            yield _sse("error", {"detail": "no sessions"})
+            return
+        store = SpanStore(default_span_store_path())
+        frames = 0
+        try:
+            yield _sse("ready", {"version": "replay/v1", "session": sid})
+            frames += 1
+            if max_frames and frames >= max_frames:
+                return
+            seen: set[str] = set()
+            first = True
+            # Seed the clock so the first pass sends a keepalive before a large
+            # initial item burst, bounding a health probe with few frames.
+            last_hb = time.monotonic() - heartbeat
+            while True:
+                now = time.monotonic()
+                if now - last_hb >= heartbeat:
+                    yield _sse("heartbeat", {"t": time.time()})
+                    frames += 1
+                    last_hb = now
+                    if max_frames and frames >= max_frames:
+                        return
+                try:
+                    tl = build_timeline(sid, store=store, engine=get_engine())
+                except Exception:
+                    logger.warning("replay_live_timeline_failed", exc_info=True)
+                    yield _sse("error", {"detail": "no timeline"})
+                    return
+                if tl is None:
+                    yield _sse("error", {"detail": "no timeline"})
+                    return
+                for name, item, item_key in _live_items(tl):
+                    if item_key in seen:
+                        continue
+                    seen.add(item_key)
+                    if first and since is not None and _item_time(item) < since:
+                        continue
+                    yield _sse(name, item.model_dump(mode="json"))
+                    frames += 1
+                    if max_frames and frames >= max_frames:
+                        return
+                first = False
+                if await request.is_disconnected():
+                    return
+                await asyncio.sleep(poll)
+        finally:
+            store.close()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

@@ -12,7 +12,7 @@ function cleanDuration(d) {
  * @param {{duration: number, speed?: number}} opts
  */
 export function createClock({ duration, speed = 1 } = {}) {
-  const total = cleanDuration(duration);
+  let total = cleanDuration(duration);
   let t = 0;
   let playing = false;
   let anchor = null; // ms of the last processed timestamp while playing
@@ -83,6 +83,14 @@ export function createClock({ duration, speed = 1 } = {}) {
     return setSpeed(next, nowMs);
   }
 
+  // Replace the total without moving `t`: a follow-live run grows, so the playhead
+  // must be allowed past the old end. `t` is left as-is and clamped on the next
+  // seek/tick; a playing clock with a larger total simply keeps playing.
+  function setDuration(d) {
+    total = cleanDuration(d);
+    return total;
+  }
+
   function state() {
     return {
       t,
@@ -99,6 +107,7 @@ export function createClock({ duration, speed = 1 } = {}) {
     toggle,
     seek,
     step,
+    setDuration,
     setSpeed,
     faster: (nowMs) => shift(1, nowMs),
     slower: (nowMs) => shift(-1, nowMs),
