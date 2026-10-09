@@ -631,3 +631,47 @@ def test_startup_skips_retention_under_pytest(env, monkeypatch):
     monkeypatch.setattr(retention, "maintain", lambda: pytest.fail("must not run"))
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200
+
+
+def _watcher_claims_on_publish(monkeypatch, base):
+    """Simulate a watcher that claims each visible inbox name the moment it appears.
+
+    Returns the list of bytes the watcher read from every file it claimed.
+    """
+    import os
+    from pathlib import Path
+
+    bins = Bins(base)
+    inbox = bins.inbox.resolve()
+    seen: list[bytes] = []
+
+    def on_publish(dest):
+        dest = Path(dest)
+        if dest.parent.resolve() == inbox and not dest.name.startswith("."):
+            seen.append(bins.claim(dest, "watcher").read_bytes())
+
+    real_open, real_link = os.open, os.link
+
+    def open_hook(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if flags & os.O_EXCL:
+            on_publish(path)
+        return fd
+
+    def link_hook(src, dst, *args, **kwargs):
+        real_link(src, dst, *args, **kwargs)
+        on_publish(dst)
+
+    monkeypatch.setattr(os, "open", open_hook)
+    monkeypatch.setattr(os, "link", link_hook)
+    return seen
+
+
+def test_upload_is_claimable_only_after_complete_write(client, env, monkeypatch):
+    import hashlib
+
+    seen = _watcher_claims_on_publish(monkeypatch, env)
+    response = client.post("/v1/documents", files={"file": ("letter.txt", LETTER)})
+    assert response.status_code == 202
+    assert seen == [LETTER]
+    assert response.json()["doc_id"] == hashlib.sha256(LETTER).hexdigest()[:16]

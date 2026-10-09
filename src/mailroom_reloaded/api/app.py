@@ -26,6 +26,7 @@ refuses to start (:func:`assert_bind_allowed`). ``/health``, ``/links`` and
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -59,7 +60,7 @@ from mailroom_reloaded.intake import gmail as gmail_intake
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.settings import get_settings
 from mailroom_reloaded.storage import audit_log, catalog
-from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
+from mailroom_reloaded.storage.bins import Bins, load_manifest
 
 logger = structlog.get_logger(__name__)
 
@@ -214,7 +215,7 @@ push_api = APIRouter(prefix="/v1", dependencies=[Depends(require_push_auth)])
 async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     """Write an upload to ``inbox/`` and return its content-addressed ``doc_id``."""
     filename = Path((file.filename or "").replace("\\", "/")).name
-    if not filename or filename.startswith("."):
+    if not filename or filename.startswith(".") or "\x00" in filename:
         raise HTTPException(status_code=400, detail="Invalid file name")
     suffix = Path(filename).suffix.lower()
     if suffix not in _ACCEPTED_EXTENSIONS:
@@ -230,23 +231,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    inbox = _bins().inbox
-    stem = Path(filename).stem
-    dest = inbox / filename
-    counter = 0
-    # Hard-link/concurrent-safe: an exclusive create avoids clobbering a
-    # same-named document already queued (the watcher keys claims by name).
-    while True:
-        try:
-            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-            break
-        except FileExistsError:
-            counter += 1
-            dest = inbox / f"{stem}-{counter}{suffix}"
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(content)
-
-    doc_id = doc_id_for(dest)
+    dest = _bins().enqueue(content, filename)
+    doc_id = hashlib.sha256(content).hexdigest()[:16]
     logger.info("document_uploaded", doc_id=doc_id, file=dest.name, size=len(content))
     return {"doc_id": doc_id, "file": dest.name, "status": "accepted"}
 

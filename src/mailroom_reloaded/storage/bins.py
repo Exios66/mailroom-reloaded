@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -79,6 +80,40 @@ class Bins:
         except FileNotFoundError:
             return None
         return dest
+
+    def enqueue(self, content: bytes, filename: str) -> Path:
+        """Publish a complete upload atomically without replacing queued files.
+
+        Hidden staging files are ignored by the watcher. Linking the closed file
+        publishes it exclusively, so a concurrent watcher can claim it immediately.
+        Callers must derive document identity from content, never reopen the path.
+        Publication uses ``os.link``, so the inbox must be on a filesystem that
+        supports hard links (some bind mounts and network shares do not); there is
+        no copy fallback, and the error propagates to the caller.
+        """
+        if (not filename or filename.startswith(".") or "\x00" in filename
+                or "/" in filename or "\\" in filename):
+            raise ValueError("Invalid file name")
+        inbox = self.inbox
+        stem, suffix = Path(filename).stem, Path(filename).suffix
+        fd, name = tempfile.mkstemp(prefix=".upload-", dir=inbox)
+        staging = Path(name)
+        try:
+            os.fchmod(fd, 0o644)  # mkstemp creates 0600; match the previous 0644 uploads
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            counter = 0
+            while True:
+                dest = inbox / (filename if counter == 0 else f"{stem}-{counter}{suffix}")
+                try:
+                    os.link(staging, dest)
+                    return dest
+                except FileExistsError:
+                    counter += 1
+        finally:
+            staging.unlink(missing_ok=True)
 
     def move(self, path: Path, bin_name: str) -> Path:
         """Move a file into a named bin under a uuid-prefixed name and return the new path.
