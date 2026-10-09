@@ -491,7 +491,13 @@ def run_eval(cfg: EvalConfig) -> str:
     """Run one eval posture and return its ``run_id``.
 
     Loads and verifies the split, samples it, runs every document under a
-    concurrency semaphore, and writes one ``eval_docs`` row per document.
+    concurrency semaphore, and writes one ``eval_docs`` row per selected
+    document. Tasks share an ``eval`` run scope with session ID
+    ``eval-<run_id>``; the caller's scope is restored on exit.
+
+    Pipeline/extraction exceptions are recorded as error rows. Dataset loading
+    and integrity errors, inbox write errors, and database errors propagate.
+    Raises ``RuntimeError`` if called from a thread with a running event loop.
     """
     run_id = uuid.uuid4().hex[:12]
     docs, gts = load_split(cfg.revision, cfg.split, local_dir=cfg.local_dir)
