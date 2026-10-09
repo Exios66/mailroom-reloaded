@@ -89,6 +89,7 @@ class DocClass(BaseModel):
 
     @property
     def schema(self) -> str:  # type: ignore[override]
+        """Return the schema name stored under the taxonomy YAML ``schema`` key."""
         return self.schema_name
 
 
@@ -118,6 +119,11 @@ class RunConditions(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Validate run conditions, accepting positional values in field order.
+
+        Positional values override matching keyword arguments; surplus positional
+        values are ignored. Invalid field values raise Pydantic ``ValidationError``.
+        """
         # Positional construction: RunConditions(24000, 8192, 0.7, 2, "frozen")
         if args:
             kwargs.update(zip(type(self).model_fields, args))
@@ -144,6 +150,10 @@ class Taxonomy(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
     def confidence_for(self, doc_type: str | None) -> Thresholds:
+        """Return global thresholds with any overrides for ``doc_type`` applied.
+
+        ``None`` and unknown classes use the global defaults.
+        """
         base = self.confidence
         merged = {k: base[k] for k in ("low", "high", "judge_band_high", "retry_max")}
         if doc_type is not None:
@@ -151,13 +161,20 @@ class Taxonomy(BaseModel):
         return Thresholds(**merged)
 
     def agent(self, name: str) -> AgentCfg:
+        """Return the named agent configuration; raise ``KeyError`` if absent."""
         return self.agents[name]
 
     def specialist_conditions(self, doc_type: str) -> RunConditions:
+        """Return conditions for ``doc_type``; raise ``KeyError`` if absent."""
         return self.conditions[doc_type]
 
 
 def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
+    """Validate a decoded taxonomy mapping and retain it in ``raw``.
+
+    Missing required keys raise ``KeyError``; invalid model fields raise
+    Pydantic ``ValidationError``.
+    """
     classes = {d["key"]: DocClass(**d) for d in data["doc_classes"]}
     return Taxonomy(
         classes=classes,
@@ -171,6 +188,11 @@ def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
 
 @lru_cache(maxsize=1)
 def load_taxonomy() -> Taxonomy:
+    """Load and cache the packaged YAML taxonomy as a shared instance.
+
+    Resource read errors, YAML parsing errors, missing keys, and Pydantic
+    validation errors propagate to the caller.
+    """
     text = (resources.files("mailroom_reloaded") / "config" / "taxonomy.yaml").read_text("utf-8")
     return _build_taxonomy(yaml.safe_load(text))
 
@@ -257,6 +279,10 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return cached settings loaded from environment variables and ``.env``.
+
+    Invalid settings raise Pydantic ``ValidationError``.
+    """
     return Settings()
 
 

@@ -82,8 +82,10 @@ def validate_triage(raw: dict) -> dict:
 def validate_intake(result: dict, text: str) -> dict:
     """Clamp an intake answer to the live contracts.
 
-    Sections are kept only with integer in-bounds offsets, monotonic and
-    non-overlapping, catalog roles, at most 40. Invalid sections are dropped.
+    Section offsets are converted to integers and checked against ``text``
+    (start inclusive, end exclusive, in characters). Keep at most 40 sections
+    in start order, dropping invalid or overlapping spans and mapping unknown
+    roles to ``other``.
     """
     text = text or ""
     raw_triage = result.get("triage")

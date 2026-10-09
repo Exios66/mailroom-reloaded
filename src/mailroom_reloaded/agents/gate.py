@@ -73,7 +73,14 @@ class BandGate:
         return self.taxonomy.confidence_for(doc_type)
 
     def decide(self, f: GateFeatures) -> GateDecision:
-        """Apply the classify/extract band rules in order."""
+        """Choose an action from confidence bands, retry counts, and hard rules.
+
+        Classification disagreements trigger one re-sort. Classification below
+        ``high`` retries until ``attempts >= retry_max``, then goes to human review.
+        Length-capped or invalid extractions retry, then go to human review.
+        Extraction confidence below ``low`` retries, then goes to ``boss``.
+        Threshold equality belongs to the upper band.
+        """
         t = self.thresholds(f.doc_type)
         if f.stage == "classify":
             if f.doc_type_disagree and not f.resorted:
@@ -129,7 +136,11 @@ class LearnedGate:
     """
 
     def __init__(self, band: BandGate, coef_path: Path) -> None:
-        """Load and validate the per-stage coefficients from ``coef_path``."""
+        """Load stage models from a JSON coefficient file with ``band`` as fallback.
+
+        Unknown features or mismatched coefficient counts raise ``ValueError``.
+        File errors, JSON decoding errors, and missing model keys propagate.
+        """
         self.band = band
         self.models: dict = json.loads(Path(coef_path).read_text("utf-8"))
         for stage, m in self.models.items():
@@ -146,7 +157,12 @@ class LearnedGate:
         return float(1.0 / (1.0 + np.exp(-np.clip(z, -500, 500))))
 
     def decide(self, f: GateFeatures) -> GateDecision:
-        """Override the band decision only inside the medium confidence band."""
+        """Apply the learned escalation threshold inside the stage's medium band.
+
+        Preserve hard-rule decisions and use band decisions outside the medium
+        band or when no model exists for the stage. Equality with the model
+        threshold escalates.
+        """
         base = self.band.decide(f)
         m = self.models.get(f.stage)
         if m is None or base.source == "rule":
@@ -167,7 +183,11 @@ class LearnedGate:
 
 
 def load_gate() -> RouteGate:
-    """Gate selection: a calibrated Jev gate when enabled, else learned, else bands."""
+    """Gate selection: a calibrated Jev gate when enabled, else learned, else bands.
+
+    An unusable Jev calibration is ignored with a warning. Errors loading or
+    validating an existing ``models/route_gate.json`` propagate.
+    """
     from mailroom_reloaded.agents.jev import load_jev_gate
 
     band = BandGate(load_taxonomy())

@@ -39,11 +39,16 @@ _sleep: Callable[[float], None] = time.sleep
 
 
 def _status_code(exc: Exception) -> int | None:
+    """Return an integer status code from the exception, or ``None`` if absent."""
     code = getattr(exc, "status_code", None)
     return code if isinstance(code, int) else None
 
 
 def _retry_after_seconds(exc: Exception) -> float | None:
+    """Read numeric Retry-After seconds, clamping negative values to zero.
+
+    Missing or unparseable values, including HTTP dates, return ``None``.
+    """
     headers = getattr(getattr(exc, "response", None), "headers", None) or {}
     try:
         raw = headers.get("Retry-After") or headers.get("retry-after")
@@ -53,10 +58,16 @@ def _retry_after_seconds(exc: Exception) -> float | None:
 
 
 def _is_json_mode_400(exc: Exception) -> bool:
+    """Recognize a BadRequestError asking for the word json in the prompt."""
     return isinstance(exc, BadRequestError) and any(m in str(exc) for m in _JSON_MODE_400_MARKERS)
 
 
 def is_transient_error(exc: Exception) -> bool:
+    """Return whether an OpenAI error is eligible for transport retry.
+
+    Connection, timeout, rate-limit, 429/500/502/503/504 errors and the known
+    JSON-prompt 400 are retryable; other errors are not.
+    """
     if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
         return True
     if isinstance(exc, APIStatusError):

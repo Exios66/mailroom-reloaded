@@ -38,6 +38,7 @@ class BertVerdict:
 
 
 def _unavailable(reason: Reason) -> BertVerdict:
+    """Return a verdict with no prediction and the supplied unavailability reason."""
     return BertVerdict(available=False, reason=reason)
 
 
@@ -52,6 +53,12 @@ def classify_primary(
     falls back to the legacy ``classify_document`` callable if the installed
     package predates it. ``filename`` is threaded through so the classifier
     can derive its window title.
+
+    Uses taxonomy BERT settings when ``cfg`` is omitted. Disabled BERT, missing
+    dependencies or models, non-dict results, and caught exceptions produce
+    unavailable verdicts. Text longer than ``WINDOW_CHARS`` times
+    ``max(max_trusted_windows, 1)`` characters is rejected before inference;
+    text exactly at the cap is accepted.
     """
     try:
         cfg = cfg if cfg is not None else load_taxonomy().bert
@@ -125,6 +132,10 @@ class Handoff:
 
 
 def _prior(v: BertVerdict, cfg: BertCfg) -> str:
+    """Format the BERT class prior, including a subclass hint only when enabled.
+
+    Return an empty string when the verdict is unavailable or lacks a class.
+    """
     if not v.available or not v.doc_type:
         return ""
     parts: list[Any] = [f"BERT predicts class {v.doc_type}"]
@@ -136,7 +147,12 @@ def _prior(v: BertVerdict, cfg: BertCfg) -> str:
 
 
 def decide_handoff(v: BertVerdict, cfg: BertCfg) -> Handoff:
-    """Apply the spec section 5 rules in order."""
+    """Apply the spec section 5 rules in order.
+
+    Lock the class only for available fast-path predictions outside deferred
+    classes and within the trusted window count. Missing or zero window counts
+    are treated as one; other verdicts use full sorting with any available prior.
+    """
     if not v.available or not v.doc_type:
         return Handoff(SortMode.FULL, None, "", f"bert_unavailable:{v.reason}")
     prior = _prior(v, cfg)

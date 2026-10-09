@@ -133,6 +133,10 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def _parse_json(content: str) -> dict | None:
+    """Parse a JSON object from plain, fenced, or prefixed response text.
+
+    Return ``None`` when parsing fails or the parsed value is not an object.
+    """
     text = content.strip()
     fenced = _FENCE.search(text)
     if fenced:
@@ -179,6 +183,11 @@ def _label_logprob(logprobs: Any) -> float | None:
 def _build_request(
     r: ResolvedModel, role: str, messages: list[dict[str, Any]], sampling: dict[str, Any]
 ) -> dict[str, Any]:
+    """Build completion arguments using role defaults and sampling overrides.
+
+    Server-specific options go in ``extra_body``; vLLM thinking is disabled,
+    and OpenRouter receives any configured reasoning effort.
+    """
     cfg = load_taxonomy().agent(role)
     params: dict[str, Any] = {"temperature": cfg.temperature}
     if cfg.max_tokens is not None:
@@ -394,9 +403,10 @@ def _call_structured(
     Returns content, a parsed JSON object (or ``None`` if none can be parsed),
     aggregate usage, finish reason, optional label logprob and tool-round count.
     Emits usage metrics. Raises ``LengthFinishReasonError`` with accumulated
-    usage for a capped tool call or final answer. Unknown roles or extraction
-    schemas raise ``KeyError``; invalid provider configuration raises
-    ``ValueError``. Unhandled provider errors propagate after transport retries.
+    usage for a capped tool call or final answer; a length cap on a draft reply
+    that makes no tool call is ignored. Unknown roles or extraction schemas raise
+    ``KeyError``; invalid provider configuration raises ``ValueError``.
+    Unhandled provider errors propagate after transport retries.
     """
     if response_format is None and schema_doc_type is not None:
         from mailroom_reloaded.schemas.extraction import response_format as _rf
