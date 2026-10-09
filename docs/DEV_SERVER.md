@@ -14,6 +14,8 @@ scripts/dev.sh logs
 scripts/dev.sh down        # or: make dev-down
 ```
 
+The offline sandbox ingress simulation (Correspondent stand-in + pipeline on a mock LLM, mail captured only) is a separate, much smaller stack: `scripts/sandbox.sh up|run`, see [SANDBOX_SERVER.md](SANDBOX_SERVER.md).
+
 No Docker? `scripts/tui_dev.sh up` runs a host-only mock stack for the `/tui` browser terminal; see [TUI.md](TUI.md).
 
 ## What `scripts/dev.sh up` does, step by step

@@ -1,0 +1,196 @@
+clients:
+  brightwater:
+    callback:
+      contact: T. Reyes
+      phone: +1-555-0133
+    display_name: Brightwater Property Group
+    normal_send_hours: 09:00-17:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    - phone
+    usual_mix:
+      contract: 0.6
+      corporate_record: 0.15
+      correspondence: 0.1
+      insurance_claim: 0.15
+    verified_addresses:
+    - treyes@brightwaterpg.sandbox.invalid
+    verified_domains:
+    - brightwaterpg.sandbox.invalid
+  cedarridge:
+    callback:
+      contact: Dispatch
+      phone: +1-555-0166
+    display_name: Cedar Ridge Adjusting
+    normal_send_hours: 06:00-18:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    usual_mix:
+      correspondence: 0.1
+      insurance_claim: 0.9
+    verified_addresses:
+    - dpark@cedarridge.sandbox.invalid
+    verified_domains:
+    - cedarridge.sandbox.invalid
+  harlowpryce:
+    callback:
+      contact: Front desk
+      phone: +1-555-0142
+    display_name: Harlow & Pryce LLP
+    normal_send_hours: 07:00-19:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: HP-YYYY-NNNN
+    usual_channels:
+    - email
+    - phone
+    usual_mix:
+      contract: 0.4
+      corporate_record: 0.25
+      correspondence: 0.1
+      merger_agreement: 0.25
+    verified_addresses:
+    - dwhitcomb@harlowpryce.sandbox.invalid
+    verified_domains:
+    - harlowpryce.sandbox.invalid
+  lakeshore:
+    callback:
+      contact: Billing office
+      phone: +1-555-0178
+    display_name: Lakeshore Medical Billing
+    normal_send_hours: 08:00-17:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    - portal
+    usual_mix:
+      insurance_claim: 1.0
+    verified_addresses:
+    - nnguyen@lakeshore.sandbox.invalid
+    verified_domains:
+    - lakeshore.sandbox.invalid
+    - lakeshorebilling.sandbox.invalid
+  northstar:
+    callback:
+      contact: Front desk
+      phone: +1-555-0107
+    display_name: Northstar Advisory Partners
+    normal_send_hours: 08:00-18:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: NA-YYYY-NNNN
+    usual_channels:
+    - email
+    usual_mix:
+      contract: 0.25
+      corporate_record: 0.3
+      merger_agreement: 0.45
+    verified_addresses:
+    - jlin@northstar.sandbox.invalid
+    - rmukherjee@northstar.sandbox.invalid
+    verified_domains:
+    - northstar-advisory.sandbox.invalid
+    - northstar.sandbox.invalid
+  okafor:
+    callback:
+      contact: A. Okafor
+      phone: +1-555-0151
+    display_name: Okafor Freight Lines
+    normal_send_hours: 06:00-20:00 America/Chicago
+    reference_formats:
+      claim: CL-NNNNNN
+      matter: null
+    usual_channels:
+    - email
+    - phone
+    usual_mix:
+      correspondence: 0.3
+      insurance_claim: 0.7
+    verified_addresses:
+    - aokafor@okaforfreight.sandbox.invalid
+    verified_domains:
+    - okaforfreight.sandbox.invalid
+  prairielabs:
+    callback:
+      contact: A. Garcia
+      phone: +1-555-0119
+    display_name: Prairie Labs Inc.
+    normal_send_hours: 09:00-17:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    usual_mix:
+      contract: 0.2
+      corporate_record: 0.8
+    verified_addresses:
+    - agarcia@prairielabs.sandbox.invalid
+    verified_domains:
+    - prairielabs.sandbox.invalid
+  stateca:
+    callback:
+      contact: Duty officer
+      phone: +1-555-0190
+    display_name: State Consumer Affairs Office
+    normal_send_hours: 08:00-17:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    usual_mix:
+      correspondence: 0.3
+      off_taxonomy: 0.7
+    verified_addresses:
+    - rpatel@stateca.sandbox.invalid
+    verified_domains:
+    - stateca.sandbox.invalid
+  tricountytitle:
+    callback:
+      contact: Front desk
+      phone: +1-555-0142
+    display_name: Tri-County Title & Escrow
+    normal_send_hours: 07:30-17:30 America/Chicago
+    reference_formats:
+      claim: null
+      matter: TC-YYYY-NNNN
+    usual_channels:
+    - email
+    - phone
+    usual_mix:
+      contract: 0.3
+      corporate_record: 0.5
+      correspondence: 0.2
+    verified_addresses:
+    - kalvarado@tricountytitle.sandbox.invalid
+    verified_domains:
+    - tricountytitle.sandbox.invalid
+  vega:
+    callback:
+      contact: Marisol Vega
+      phone: +1-555-0184
+    display_name: Marisol Vega
+    normal_send_hours: 09:00-21:00 America/Chicago
+    reference_formats:
+      claim: null
+      matter: null
+    usual_channels:
+    - email
+    - phone
+    usual_mix:
+      correspondence: 0.2
+      insurance_claim: 0.8
+    verified_addresses:
+    - marisol.vega@vega.sandbox.invalid
+    verified_domains:
+    - vega.sandbox.invalid
+version: 1

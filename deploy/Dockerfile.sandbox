@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# mailroom-reloaded SANDBOX image (ingress simulation server, fully offline).
+#
+# Small on purpose: the `sandbox` extra only (jsonschema, zstandard, jinja2), no
+# ModernBERT, no dev tools, no observability stack. The source is COPIED in (no
+# bind mount) so the image is self-contained and deployable on a dev server.
+# Build context is the repository root.
+
+ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+
+FROM ${PYTHON_IMAGE}
+COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /usr/local/bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    CREWAI_DISABLE_TELEMETRY=true \
+    OTEL_SDK_DISABLED=true
+
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --extra sandbox --no-install-project
+COPY src ./src
+COPY schemas ./schemas
+COPY sandbox ./sandbox
+RUN uv sync --frozen --extra sandbox
+
+ARG APP_UID=1000
+RUN test "$APP_UID" -gt 0 \
+    && useradd --create-home --uid "$APP_UID" app \
+    && mkdir -p /state \
+    && chown -R app:app /state /app
+USER app
+
+EXPOSE 8100
+CMD ["mailroom", "sandbox", "serve", "--host", "0.0.0.0", "--port", "8100", "--data-dir", "/state"]
