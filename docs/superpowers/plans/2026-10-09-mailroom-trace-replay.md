@@ -15,6 +15,8 @@
 > 9. **Per-run row cap.** About 5,000 `ledger_metrics` rows per run; beyond that one `gap` entry and a dropped counter in `run_closed`.
 > 10. **External anchor, user-selectable.** `MAILROOM_ANCHOR=none (default) | export | postgres | supabase` pushes the ledger head `(seq, entry_hash)` off-host so truncation and rewrite are detectable. Postgres and Supabase are first-class; `export` is for manual operator pinning.
 > 11. **Showcase runs** shipped for new users: a clean run; one with retries and a boss escalation; one with parked and failed documents; one heavy on the judge and arbiter.
+> 12. **Complete LLM usage.** Judge, boss, arbiter, vision (and eval grading) usage is captured per role, flows into `usage_total`, metrics, the report, `eval_docs`, the audit ledger and the replay (Task 19). `usage_complete` is true unless a node raised mid-call.
+> 13. **Anchor defaults to HTTPS.** Supabase over PostgREST/httpx is the recommended backend; Postgres stays optional behind the locked `anchor` extra. `anchor_key` can come from an environment variable or a secrets file (`MAILROOM_ANCHOR_KEY_FILE`).
 > 7. **`replay ↗` link in `/ui`** on each eval run, plus a `/tui#replay=run:<id>` deep link that actually opens the viewer.
 
 **Goal:** Add `replay`, an alternative viewer launched from `/tui`. It plays a mailroom pipeline session back from captured OpenTelemetry spans (falling back to the audit log) as a live, interactive, scrubbable visualisation. It has play/pause, speed and seek, a station "track" with documents moving along it, a document leaderboard, an event ticker, a per-document inspector, pluggable insight panels, and a follow-live mode.
@@ -254,7 +256,7 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 | kind | When | Payload (allow-list only; bounded strings; no document text, filenames, judge notes, prompts or completions) |
 | --- | --- | --- |
 | `run_opened` | run/session starts | run_id, kind (eval/live), mode, posture_label, model, prompt_set, config_sha, environment, pid. Fixes the missing run header (`eval_docs` stores only `run_id` and `mode`). |
-| `doc_closed` | one per document invocation | doc_id, invocation, outcome (completed/failed/parked/aborted/reconciled), doc_type, `audit_head` ({seq, entry_hash} of that document's `audit_log` chain at write time, which links the two chains), metrics digest, rows, `usage_complete` |
+| `doc_closed` | one per document invocation | doc_id, invocation, outcome (completed/failed/parked/aborted/reconciled), doc_type, `audit_head` ({seq, entry_hash} of that document's `audit_log` chain at write time, which links the two chains), metrics digest, rows, `usage_by_role` {sorter, specialist, judge, arbiter, boss, vision, grader: prompt/completion tokens, calls, cost_usd}, `usage_complete`, `usage_partial_nodes` |
 | `gap` | row cap reached or queue overflow | reason, count |
 | `run_closed` | run ends | counts, `expected` (eval: selected count; live: null), `merkle_root`, dropped_rows, closed_by (completed/interrupted/reconcile) |
 | `checkpoint` | every 100 documents or at rollover | open runs' heads |
@@ -266,7 +268,7 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 - `flow._drive`: try/finally. Usage is snapshotted at entry and per-invocation **deltas** are taken at exit, because `_configure` restores `usage_total` from the manifest on resume (`flow.py:585-590`). It accumulates from `_record_node`, `_audit_gate` and `_fail_node`. `reconcile_archived` writes `reconciled`.
 - `eval.run_eval`: opens before the gather and closes in `finally` with `expected`. The eval exception path and `specialist_cell` rows (`runner.py:429-466`, which never touch the flow) are recorded explicitly.
 - `watcher`: lazy rollover. The first document of a new day or process closes the previous bucket as `interrupted`; `resume_processing` runs the closeout. The manifest `processing` status is the open marker, so there is no `doc_open` entry.
-- Judge, boss, arbiter and vision usage is dropped today (`judge.py:136`, `boss.py:54`, `arbiter.py:61`, `ingest/vision.py:76`), so spend is a lower bound and `usage_complete=false` says so.
+- LLM usage is captured for **every** role (Decision 12, Task 19), so `doc_closed` carries `usage_by_role` and `usage_complete`. It is false only when a node raised mid-call and its sub-call usage was lost; that node is named in `usage_partial_nodes`.
 - `failure_reason` uses a bounded enum, because today's strings embed filenames and exception text (`clerk.py:156-168`, `flow.py:164`).
 
 **API (token-gated like the rest of `/v1`; static routes declared before path-param routes)**
@@ -291,9 +293,10 @@ mailroom@floor:~$ ledger --run 3fa9c1d20b7e
 ### External anchor (Decision 10)
 
 `storage/anchor.py` (one module, drivers imported lazily) pushes `(seq, entry_hash)` of the **ledger head**. Nothing else is hashed; timestamps are never hashed (the stored `ts` uses `+00:00` while the pydantic dump uses `Z`).
-- **Toggle** `MAILROOM_ANCHOR` = `none` (default) | `export` | `postgres` | `supabase`. Settings: `anchor`, `anchor_url` (Supabase project URL or Postgres DSN), `anchor_key`. Secrets are plain `str` with `repr=False`. Blanks normalise to unset through an extended `_empty_to_none`. Configuration is validated lazily, so a bad value never crashes startup or the pipeline; it shows in `ledger verify --external` and health.
+- **Toggle** `MAILROOM_ANCHOR` = `none` (default) | `export` | `postgres` | `supabase`. Settings: `anchor`, `anchor_url` (Supabase project URL or Postgres DSN), `anchor_key`, `anchor_key_file`. Secrets are plain `str` with `repr=False`. Blanks normalise to unset through an extended `_empty_to_none`. Configuration is validated lazily, so a bad value never crashes startup or the pipeline; it shows in `ledger verify --external` and health.
 - **Remote table:** `mailroom_anchor(seq bigint PRIMARY KEY, entry_hash text NOT NULL, anchored_at timestamptz NOT NULL DEFAULT now())` plus a `BEFORE INSERT` trigger that rejects `seq <= max(seq)`; the writer role gets INSERT and SELECT only; `REVOKE UPDATE, DELETE, TRUNCATE`. On Supabase also revoke from `anon`, `authenticated` and `service_role`: `service_role` bypasses RLS, so grants are the real control.
-- **Transport:** Supabase over PostgREST with httpx (no new dependency, works with proxied HTTPS egress). Postgres through `psycopg` in a **locked** optional extra `anchor` (needs TCP egress; the Dockerfile's `uv sync --frozen` ignores an unlocked extra). `export` prints or writes the head for off-host operator pinning.
+- **Transport (decided):** HTTPS is the primary path. Supabase over PostgREST with httpx needs no new dependency and works with proxied HTTPS egress. Postgres through `psycopg` stays available in a **locked** optional extra `anchor` for deployments with direct TCP egress (the Dockerfile's `uv sync --frozen` ignores an unlocked extra). `export` prints or writes the head for off-host operator pinning.
+- **Secrets file (decided):** `anchor_key` may come from `MAILROOM_ANCHOR_KEY` or from a file named by `MAILROOM_ANCHOR_KEY_FILE` (Docker/Kubernetes secrets style). The file is read at use time, stripped, size-capped, never logged, and a world-readable file produces a warning in `ledger verify --external`. The environment variable wins if both are set. Same rule for the Postgres DSN password via `anchor_url`.
 - **Duplicates** are resolved by read-back (same hash = success, different hash = conflict), never by relying on a 409 or `Prefer: resolution=ignore-duplicates`, which returns 201 without a row.
 - **Triggers:** after `run_closed`, after `pinned/unpinned/policy/pruned`, at startup, and `mailroom audit anchor`. A coalesced flag drives a daemon thread (3 attempts at 1/4/16 s, 5 s timeouts). The pipeline never waits on or raises from a push. Errors are logged with the DSN and key redacted by literal replacement. "Pending" is derived (local head seq greater than the store head), so there is no state file.
 - **`mailroom audit verify [--run ID] [--external]`:** exit 0 ok, 1 tamper (`TRUNCATED`, `REWRITTEN` or chain broken), 3 store unreachable (never reported as ok), 4 not configured. Exit code 2 is avoided because Click uses it for usage errors. `STALE` is raised only when the oldest unanchored entry is older than 24 h, so idle systems do not alarm.
@@ -318,6 +321,7 @@ There is no precedent in the originals (llm-mailroom, The-Mailroom and llm-dojo-
 | `MAILROOM_ANCHOR` | `none` | `none` \| `export` \| `postgres` \| `supabase` |
 | `MAILROOM_ANCHOR_URL` | unset | Supabase project URL or Postgres DSN |
 | `MAILROOM_ANCHOR_KEY` | unset | Supabase key or Postgres password (never logged) |
+| `MAILROOM_ANCHOR_KEY_FILE` | unset | Path to a secrets file holding the key (env var wins if both are set) |
 | `MAILROOM_PUBLIC_URL` | `http://localhost:8000` | Grafana links to the viewer |
 
 Constants, documented in `docs/CONFIGURATION.md` rather than environment variables: the per-run row cap (5,000), the 3-day live span window, the default displayed tier (T1), and the idempotent showcase seed. Dropped env vars from revision 3: `MAILROOM_LEDGER`, `MAILROOM_TRACE_STORE`, `MAILROOM_RUN_BUCKET`, `MAILROOM_REPLAY_TIER`, `MAILROOM_SEED_SHOWCASE`, `MAILROOM_TRACE_LIVE_DAYS`.
@@ -419,7 +423,8 @@ src/mailroom_reloaded/
   obs/replay/{__init__,timeline,sessions,otlp_import}.py   (new)
   schemas/replay.py           (new)    Pydantic replay/v1 models
   pipeline/flow.py            (modify) root/node attributes, decision events, scores
-  llm/client.py, llm/retry.py (modify) role/prompt/cost/served-model/retry attributes and events
+  llm/client.py, llm/retry.py (modify) role/prompt/cost/served-model/retry attributes and events; record_usage()/cost_for() for CrewAI-routed roles
+  llm/usage.py, tools.py, agents/{judge,arbiter,boss}.py, ingest/{vision,clerk}.py, pipeline/{state,report}.py (modify) per-role usage capture (Task 19)
   eval/runner.py              (modify) run context, GT attrs, grading scores on spans
   watcher.py                  (modify) live run context
   settings.py                 (modify) trace_keep, anchor, anchor_url, anchor_key, public_url; _empty_to_none extended
@@ -793,11 +798,39 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 
 ### Task 18: External anchor (Postgres / Supabase / export)
 
-**Files:** Create `storage/anchor.py`, `tests/storage/test_anchor.py`; modify `settings.py` (`anchor`, `anchor_url`, `anchor_key`, extended `_empty_to_none`), `cli.py` (`audit` sub-app: `verify`, `anchor`, `export-head`, lazy imports like `gmail_app`), `pyproject.toml` and `uv.lock` (optional `anchor` extra with `psycopg[binary]`), `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `docs/ARCHITECTURE.md` (about lines 132-149), the `audit_log.py` docstring, `.env.example`, `CHANGELOG.md`.
+**Files:** Create `storage/anchor.py`, `tests/storage/test_anchor.py`; modify `settings.py` (`anchor`, `anchor_url`, `anchor_key`, `anchor_key_file`, extended `_empty_to_none`), `cli.py` (`audit` sub-app: `verify`, `anchor`, `export-head`, lazy imports like `gmail_app`), `pyproject.toml` and `uv.lock` (optional `anchor` extra with `psycopg[binary]`), `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `docs/ARCHITECTURE.md` (about lines 132-149), the `audit_log.py` docstring, `.env.example`, `CHANGELOG.md`.
 
-- [ ] **Step 1: Failing tests (offline).** Real SQLite via `init_db` plus the ledger; `httpx.MockTransport` fakes in the style of `tests/agents/test_jev.py`; the Postgres table is exercised on `sqlite://` for conflict and idempotency. Cover: ok; unanchored tail; truncated; rewritten; store unreachable (exit 3); not configured (exit 4); Supabase non-2xx with read-back; duplicate-seq conflict; the pipeline append succeeds when a push raises; blank env means `none`; secrets hidden from `repr` and from error text; idle system is not `STALE`; two concurrent pushers.
+- [ ] **Step 1: Failing tests (offline).** Real SQLite via `init_db` plus the ledger; `httpx.MockTransport` fakes in the style of `tests/agents/test_jev.py`; the Postgres table is exercised on `sqlite://` for conflict and idempotency. Cover: ok; unanchored tail; truncated; rewritten; store unreachable (exit 3); not configured (exit 4); Supabase non-2xx with read-back; duplicate-seq conflict; the pipeline append succeeds when a push raises; blank env means `none`; the key is read from the secrets file when only `anchor_key_file` is set and the env var wins when both are set; an unreadable or oversized key file fails closed with exit 4; a world-readable key file warns; secrets hidden from `repr` and from error text; idle system is not `STALE`; two concurrent pushers.
 - [ ] **Step 2:** Implement with lazy driver imports; document that the plpgsql trigger, grants, RLS and the Supabase key header need a manual run against a staging project.
 - [ ] **Step 3: Commit** `feat(anchor): optional postgres/supabase/export anchor for the ledger head`.
+
+### Task 19: Complete LLM usage capture (judge, boss, arbiter, vision, grader)
+
+**Why.** Today only the sorter and the class specialist reach `state.usage_total` (`flow.py:190`, `:211`). The judge, arbiter and boss run through CrewAI (`agents/judge.py:_run`, `arbiter.py`, `boss.py`) and discard `result.token_usage`; the existing `_usage()` helper at `agents/judge.py:82` is used only by eval-only `judge_grade`. Vision transcription calls `call_structured` once per page (`ingest/vision.py:53-89`) and drops each `res.usage`. The CrewAI paths also never reach `_record_usage_metrics` (`llm/client.py:210`), so `mailroom.llm_calls`, token and cost metrics miss them, `report.py:_cost_usd` prices everything at the sorter's rates, and `eval_docs` undercounts.
+
+**Files:** Modify `llm/client.py`, `llm/usage.py`, `tools.py` (`ToolContext`), `agents/{judge,arbiter,boss}.py`, `ingest/{vision,clerk}.py`, `pipeline/{state,flow,report}.py`, `eval/runner.py`; tests `tests/agents/test_usage_capture.py`, `tests/ingest/test_vision_usage.py`, `tests/pipeline/test_usage_roles.py`.
+
+**Interfaces**
+- `llm/usage.py`: add `Usage.__sub__` (clamped at zero) for per-invocation deltas, and `RoleUsage = dict[str, Usage]` with an `add(role, usage)` helper.
+- `llm/client.py`: a public `record_usage(role, usage)` that resolves the role's model and emits the same metrics `_record_usage_metrics` does (calls, tokens, duration where known, `cost_usd`), plus `cost_for(role, usage)` built on `_token_cost`. `call_structured` keeps its behavior and now calls the shared helper.
+- `tools.py`: `ToolContext` gains a mutable `usage_sink` (a small list the agent functions append to), so the agent function signatures and return types stay unchanged.
+- `agents/judge.py`, `arbiter.py`, `boss.py`: after `kickoff()`, convert `result.token_usage` with the existing `_usage()` helper, append it to `ctx.usage_sink` under the agent's role, and call `record_usage`. `judge_grade` does the same under role `grader`.
+- `ingest/clerk.py` and `vision.py`: `IngestResult` gains `usage: Usage` (default empty); `transcribe_pages` sums every page's `res.usage` and records it under role `vision`; `_node_ingest` adds it to `state.usage_total`.
+- `pipeline/state.py`: `MailroomState.usage_by_role: dict[str, Usage]` (default empty, so existing manifests load). `flow.py`: `_node_verify` and `_node_boss` drain the sink into `usage_total` and `usage_by_role`; the sorter and specialist add themselves by role; `_node_grade` records `grader`.
+- `pipeline/report.py`: `_cost_usd` sums `cost_for(role, usage)` per role instead of the sorter's price.
+- `eval/runner.py`: `eval_docs` token and call columns now include all roles; grading usage is stored as separate columns or in the existing JSON field so it does not inflate the pipeline totals.
+- Ledger/replay: `doc_closed.usage_by_role`, per-node segment tokens/cost/calls in the timeline, and the inspector's usage section show every role. A node that raises keeps whatever its sink already collected and is listed in `usage_partial_nodes`; `usage_complete` is false only in that case.
+
+- [ ] **Step 1: Failing tests.**
+  - Fake `CrewOutput.token_usage` objects for judge, arbiter, boss and grader land in `usage_by_role`, `usage_total` and the right metrics (`llm_calls`, token usage, `cost_usd` labelled with the role's model).
+  - A 3-page scanned PDF with a fake `call_structured` adds three calls and the summed tokens to the ingest result and to `usage_total`.
+  - A resumed document reports only this invocation's delta (the restored manifest usage is not double-counted).
+  - A node that raises after one sub-call keeps that partial usage and is flagged in `usage_partial_nodes`.
+  - `compile_report` cost equals the sum of per-role costs; `eval_docs` tokens equal the sum of all roles and exclude grader usage from the pipeline totals.
+  - Token-budget guards (`_guard_node`) see the larger totals and still pass for nodes with budget 0.
+  - Manifests written before the change still load (default `usage_by_role`).
+- [ ] **Step 2:** Run (FAIL), implement, run (PASS). Check what CrewAI's `token_usage` reports for this `base_url` and whether a litellm success callback is a better single capture point; if the object is empty for some providers, record `usage_complete=false` rather than guessing.
+- [ ] **Step 3: Commit** `feat(usage): capture judge, arbiter, boss, vision and grader usage per role`.
 
 ## Phasing
 
@@ -805,7 +838,7 @@ Execution order (revision 4). Task numbers refer to the detailed tasks above; Ta
 
 | Phase | Tasks | Result |
 | --- | --- | --- |
-| **0. Capture, ledger, anchor, metrics** (start here; useful on its own) | 1, 13, 14, 3, 2, 4, 18 | Run scope and vocabulary; the ledger recording every run with its Merkle root; the span store; full span and score capture; `run_id` metric labels, decision counters and Grafana links; the optional external anchor. |
+| **0. Capture, ledger, anchor, metrics** (start here; useful on its own) | 1, 19, 13, 14, 3, 2, 4, 18 | Run scope and vocabulary; complete per-role LLM usage; the ledger recording every run with its Merkle root; the span store; full span and score capture; `run_id` metric labels, decision counters and Grafana links; the optional external anchor. |
 | **1. Replay MVP** | 5, 15, 7 (routes), 16, 8, 9, 10, 17, 12 | Timeline from spans (with the `eval_docs` approximate fallback), retention with four shipped showcase runs, the ledger API and TUI, the viewer, the `/ui` replay link, the dev seed and docs. |
 | **2. Live** | 7 (SSE), 11 | Follow dev or production traffic as it happens. |
 | **3. Portability** | 6 (OTLP file import) | Replay traces from another host. |
@@ -824,10 +857,11 @@ Execution order (revision 4). Task numbers refer to the detailed tasks above; Ta
 
 Resolved: brand tokens (role aliases `--term-station-judge` / `--term-station-review`), The-Mailroom compatibility (Exios66/The-Mailroom#39), live `run_id` granularity (daily bucket for metric labels, per-document in the ledger), retention (Decision 5), hosted-judge equivalence (in-pipeline `verify` stays authoritative; `score_late` reserved), the `/ui` link, showcase selection (four runs), row cap (5,000 with a `gap`), and the anchor target (Postgres and Supabase, with a toggle).
 
+Decided after review: the anchor uses HTTPS (Supabase over PostgREST) by default with Postgres optional; `anchor_key` also comes from a secrets file (`MAILROOM_ANCHOR_KEY_FILE`); and judge, boss, arbiter, vision and grader usage is captured in full (Task 19) for the audit ledger, visualization and replay.
+
 Still open:
-1. Where can the Postgres backend run (TCP egress from the deployment)? Supabase over HTTPS is the fallback.
-2. Should `anchor_key` also be readable from a secrets file instead of an environment variable?
-3. Should judge, boss, arbiter and vision usage be captured now (fixing today's undercount in `eval_docs`), or only flagged with `usage_complete=false` for the first release?
+1. What does CrewAI's `token_usage` report for each provider configured in `taxonomy.yaml`? Task 19 checks this first; where a provider reports nothing, the entry says `usage_complete=false` instead of guessing.
+2. Should the Supabase key be a dedicated insert-only database role (recommended) or the service key? The doc recommends the role; the service key bypasses RLS, so grants are the real control.
 
 ## Design review (revision 4)
 
@@ -836,7 +870,7 @@ The decisions above come from three proposer and three adversarial-reviewer pass
 - An eval hook placed on `run_document` never fires: eval reaches `_drive` directly. Hooks sit in `_drive`'s `finally`, `run_eval` and the cell path.
 - Copying metrics back from a document chain mixes runs, because `doc_id` is the content sha and chains are shared. Metrics come from the invocation's own accumulator, as deltas.
 - Anchoring "the global head" had nothing to anchor before the ledger existed; the ledger head is now the single anchored chain, and `doc_closed` pins each document chain head.
-- Several claims were wrong and are corrected above: the wheel ships only `src/mailroom_reloaded`; `psycopg` is not locked; `SecretStr` is unused; `ts` strings differ between the hash and the column; exit code 2 collides with Click; per-run Phoenix projects fight the tracing singleton; `quality.json` queries metrics that are not emitted.
+- Several claims were wrong and are corrected above: the wheel ships only `src/mailroom_reloaded`; `psycopg` is not locked (so HTTPS/Supabase is the default path); `SecretStr` is unused; `ts` strings differ between the hash and the column; exit code 2 collides with Click; per-run Phoenix projects fight the tracing singleton; `quality.json` queries metrics that are not emitted.
 
 ## Self-review
 
@@ -856,3 +890,4 @@ The decisions above come from three proposer and three adversarial-reviewer pass
   - Archive ledger (Decision 6): the Archive ledger section and Tasks 13, 14 and 16. No ledger row is ever pruned, and prune is a ledger event.
   - `/ui` link and deep link (Decision 7): Task 17.
 - **Decisions 8-11** (revision 4): reuse-first and the budget (Archive ledger section, `audit_log.py` untouched), the row cap (Task 13), the external anchor (Task 18), and the four showcase runs (Task 15).
+- **Decisions 12-13** (revision 4, after review): complete LLM usage capture (Task 19, feeding the ledger `usage_by_role`, metrics, the report and the replay inspector) and the HTTPS-first anchor with a secrets-file key (Task 18).
