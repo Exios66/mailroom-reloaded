@@ -231,8 +231,9 @@ def test_submission_draft_uses_one_named_relation_per_attachment_and_target(
     )
     assert len(drafts) == 1
     body = drafts[0].body
-    assert body.count("It appears to supersedes original.pdf;") == 2
-    assert body.count("It appears to supersedes other.pdf;") == 1
-    assert body.count("It appears to references context.pdf;") == 1
-    assert body.count("It appears to") == 4
+    assert body.count("It appears that new.pdf supersedes original.pdf;") == 1
+    assert body.count("It appears that second.pdf supersedes original.pdf;") == 1
+    assert body.count("It appears that new.pdf supersedes other.pdf;") == 1
+    assert body.count("It appears that new.pdf references context.pdf;") == 1
+    assert body.count("It appears that") == 4
     assert len(relations) == 7
