@@ -50,7 +50,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from mailroom_reloaded import __version__
@@ -371,15 +371,20 @@ def run_cards_endpoint(run_id: str) -> dict:
     return {"run_id": run_id, "cards": cards}
 
 
-def _pruned_run_ids() -> set[str]:
-    """Run ids whose spans retention removed; empty when the ledger is unreadable."""
+def _read_ledger():
+    """A throwaway read-only ledger: the process-wide one would install the external anchor hook."""
     from mailroom_reloaded.storage.db import get_engine
     from mailroom_reloaded.storage.ledger import Ledger
+
+    return Ledger(get_engine())
+
+
+def _pruned_run_ids() -> set[str]:
+    """Run ids whose spans retention removed; empty when the ledger is unreadable."""
     from mailroom_reloaded.storage.retention import pruned_runs
 
     try:
-        # a throwaway reader: the process-wide ledger would install the external anchor hook
-        return pruned_runs(Ledger(get_engine()))
+        return pruned_runs(_read_ledger())
     except Exception:  # the picker still works without the marker
         logger.warning("replay_pruned_lookup_failed", exc_info=True)
         return set()
@@ -450,6 +455,179 @@ def replay_export_endpoint(session_id: str) -> Response:
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{name}.replay.json"'},
     )
+
+
+def _ledger_run_id(run_id: str | None) -> str | None:
+    """``run_id`` when it is a valid run id (or absent); otherwise a 400."""
+    from mailroom_reloaded.storage.retention import is_valid_run_id
+
+    if run_id is not None and not is_valid_run_id(run_id):
+        raise HTTPException(status_code=400, detail="Invalid run ID")
+    return run_id
+
+
+@api.get("/ledger")
+def ledger_entries_endpoint(
+    run_id: str | None = Query(None),
+    kind: str | None = Query(None),
+    since_seq: int = Query(0, ge=0, le=2**63 - 1),
+    limit: int = Query(50, ge=1, le=500),
+    descending: bool = True,
+) -> dict:
+    """Ledger entries (newest first by default) plus the chain head."""
+    from mailroom_reloaded.schemas.ledger import KINDS
+
+    run_id = _ledger_run_id(run_id)
+    if kind is not None and kind not in KINDS:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+    try:
+        ledger = _read_ledger()
+        entries = ledger.entries(
+            run_id=run_id,
+            kind=kind,
+            since_seq=since_seq,
+            limit=limit,
+            descending=descending,
+        )
+        head = ledger.head()
+    except Exception:
+        logger.warning("ledger_entries_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "entries": [e.model_dump(mode="json") for e in entries],
+        "head": {"seq": head.seq, "entry_hash": head.entry_hash} if head else None,
+    }
+
+
+@api.get("/ledger/head")
+def ledger_head_endpoint() -> dict:
+    """The newest committed entry (or ``null``) and the chain length."""
+    try:
+        ledger = _read_ledger()
+        head = ledger.head()
+        count = ledger.total()
+    except Exception:
+        logger.warning("ledger_head_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "head": (
+            {
+                "seq": head.seq,
+                "entry_hash": head.entry_hash,
+                "ts": head.ts,
+                "kind": head.kind,
+            }
+            if head
+            else None
+        ),
+        "count": count,
+    }
+
+
+@api.get("/ledger/verify")
+def ledger_verify_endpoint(run_id: str | None = Query(None)) -> dict:
+    """Verify the whole chain, or one run's entries. Sync: runs on the threadpool."""
+    run_id = _ledger_run_id(run_id)
+    try:
+        return _read_ledger().verify(run_id).model_dump()
+    except Exception:
+        logger.warning("ledger_verify_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+
+
+@api.get("/ledger/keep")
+def ledger_keep_endpoint() -> dict:
+    """The effective keep policy, where it came from, and the pinned and showcase runs."""
+    from mailroom_reloaded.storage.retention import (
+        SHOWCASE_RUN_IDS,
+        effective_policy,
+        pinned_runs,
+        policy_source,
+    )
+
+    try:
+        ledger = _read_ledger()
+        policy = effective_policy(ledger)
+        source = policy_source(ledger)
+        pinned = sorted(pinned_runs(ledger))
+    except Exception:
+        logger.warning("ledger_keep_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "policy": f"recent:{policy.n}" if policy.mode == "recent" else policy.mode,
+        "source": source,
+        "pinned": pinned,
+        "showcase": list(SHOWCASE_RUN_IDS),
+    }
+
+
+class LedgerRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(max_length=120)
+
+
+class LedgerPolicyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(max_length=120)
+
+
+def _ledger_write(action, *args) -> dict:
+    """Run a retention write on the process-wide ledger and flush so a following read sees it."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    try:
+        ledger = get_ledger()
+        accepted = action(ledger, *args)
+        flushed = ledger.flush()
+    except ValueError:
+        raise
+    except Exception:
+        logger.warning("ledger_write_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    if accepted is False or not flushed:  # None is a no-op (already in that state)
+        raise HTTPException(status_code=500, detail="Ledger unavailable")
+    return {"ok": True}
+
+
+@api.post("/ledger/pin")
+def ledger_pin_endpoint(body: LedgerRunBody) -> dict:
+    """Pin a run so retention keeps its spans."""
+    from mailroom_reloaded.storage.retention import pin
+
+    _ledger_run_id(body.run_id)
+    try:
+        return _ledger_write(pin, body.run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run ID") from None
+
+
+@api.post("/ledger/unpin")
+def ledger_unpin_endpoint(body: LedgerRunBody) -> dict:
+    """Unpin a run; showcase runs are always kept."""
+    from mailroom_reloaded.storage.retention import SHOWCASE_RUN_IDS, unpin
+
+    _ledger_run_id(body.run_id)
+    if body.run_id in SHOWCASE_RUN_IDS:
+        raise HTTPException(status_code=400, detail="Showcase runs cannot be unpinned")
+    try:
+        return _ledger_write(unpin, body.run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Showcase runs cannot be unpinned"
+        ) from None
+
+
+@api.post("/ledger/policy")
+def ledger_policy_endpoint(body: LedgerPolicyBody) -> dict:
+    """Record a keep policy (``pinned``, ``all`` or ``recent:<N>``) overriding the env default."""
+    from mailroom_reloaded.storage.retention import set_policy
+
+    try:
+        return _ledger_write(set_policy, body.value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid policy") from None
 
 
 def _eval_runs() -> list[dict]:

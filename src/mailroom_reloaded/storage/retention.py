@@ -31,10 +31,12 @@ __all__ = [
     "SHOWCASE_RUN_IDS",
     "KeepPolicy",
     "effective_policy",
+    "is_valid_run_id",
     "maintain",
     "parse_policy",
     "pin",
     "pinned_runs",
+    "policy_source",
     "prune",
     "pruned_runs",
     "seed_showcase",
@@ -87,12 +89,34 @@ def _entries(ledger: Ledger, kind: str) -> list[Any]:
         since = page[-1].seq
 
 
-def effective_policy(ledger: Ledger, settings: Settings | None = None) -> KeepPolicy:
-    """The latest ``policy`` ledger entry's value, else ``settings.trace_keep``."""
+def _policy_override(ledger: Ledger) -> str | None:
+    """The latest ``policy`` ledger entry's value, or ``None`` when none was recorded."""
     latest = ledger.entries(kind="policy", descending=True, limit=1)
     if latest and isinstance(latest[0].payload.get("value"), str):
-        return parse_policy(latest[0].payload["value"])
+        return latest[0].payload["value"]
+    return None
+
+
+def effective_policy(ledger: Ledger, settings: Settings | None = None) -> KeepPolicy:
+    """The latest ``policy`` ledger entry's value, else ``settings.trace_keep``."""
+    override = _policy_override(ledger)
+    if override is not None:
+        return parse_policy(override)
     return parse_policy((settings or get_settings()).trace_keep)
+
+
+def policy_source(ledger: Ledger) -> Literal["ledger", "env"]:
+    """``ledger`` when a ``policy`` entry overrides the ``MAILROOM_TRACE_KEEP`` default."""
+    return "env" if _policy_override(ledger) is None else "ledger"
+
+
+def is_valid_run_id(run_id: str) -> bool:
+    """Whether ``pin``/``unpin`` would accept ``run_id``."""
+    try:
+        _checked_run_id(run_id)
+    except ValueError:
+        return False
+    return True
 
 
 def pinned_runs(ledger: Ledger) -> set[str]:
@@ -127,26 +151,36 @@ def _checked_run_id(run_id: str) -> str:
     return key
 
 
-def pin(ledger: Ledger, run_id: str, actor: str = "user") -> None:
-    """Pin a run so its spans survive pruning. Raises ``ValueError`` for an invalid run id."""
+def pin(ledger: Ledger, run_id: str, actor: str = "user") -> bool | None:
+    """Pin a run so its spans survive pruning. Raises ``ValueError`` for an invalid run id.
+
+    Returns True when queued, None when the run is already pinned (nothing written), False if the ledger refused.
+    """
     run_id = _checked_run_id(run_id)
-    ledger.append("pinned", run_id, payload={"target": run_id, "actor": actor})
+    if run_id in pinned_runs(ledger):
+        return None
+    return ledger.append("pinned", run_id, payload={"target": run_id, "actor": actor})
 
 
-def unpin(ledger: Ledger, run_id: str, actor: str = "user") -> None:
-    """Unpin a run. Raises ``ValueError`` for an invalid id or a showcase run."""
+def unpin(ledger: Ledger, run_id: str, actor: str = "user") -> bool | None:
+    """Unpin a run. Raises ``ValueError`` for an invalid id or a showcase run.
+
+    Returns True when queued, None when the run is not pinned (nothing written), False if the ledger refused.
+    """
     run_id = _checked_run_id(run_id)
     if run_id in SHOWCASE_RUN_IDS:
         raise ValueError("showcase runs are always kept")
-    ledger.append("unpinned", run_id, payload={"target": run_id, "actor": actor})
+    if run_id not in pinned_runs(ledger):
+        return None
+    return ledger.append("unpinned", run_id, payload={"target": run_id, "actor": actor})
 
 
-def set_policy(ledger: Ledger, value: str, actor: str = "user") -> None:
+def set_policy(ledger: Ledger, value: str, actor: str = "user") -> bool:
     """Record a keep policy that overrides ``MAILROOM_TRACE_KEEP``. Raises ``ValueError`` if invalid."""
     text = str(value).strip().lower()
     if normalize_trace_keep(text) != text:
         raise ValueError("invalid keep policy: use pinned, all or recent:<N> (1-1000)")
-    ledger.append("policy", POLICY_RUN_ID, payload={"value": text, "actor": actor})
+    return ledger.append("policy", POLICY_RUN_ID, payload={"value": text, "actor": actor})
 
 
 def prune(

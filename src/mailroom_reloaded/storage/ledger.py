@@ -492,6 +492,11 @@ class Ledger:
             row = conn.execute(select(_t).order_by(_t.c.seq.desc()).limit(1)).first()
         return _row_entry(row) if row else None
 
+    def total(self) -> int:
+        """Committed entries in the whole chain (a cheap COUNT)."""
+        with self.engine.connect() as conn:
+            return conn.execute(select(func.count()).select_from(_t)).scalar_one()
+
     def count(self, kind: str, run_id: str, doc_id: str | None = None) -> int:
         """Committed entries of ``kind`` for a run (and optionally one document)."""
         q = select(func.count()).select_from(_t).where(_t.c.kind == kind, _t.c.run_id == run_id)

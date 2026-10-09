@@ -34,7 +34,7 @@ export function validRunId(id) {
   );
 }
 
-function text(value) {
+export function text(value) {
   if (value === null || value === undefined || value === '') return '—';
   if (typeof value === 'object') {
     try {
@@ -50,7 +50,7 @@ function text(value) {
  * Print an api failure in the plan's wording. Returns true when handled;
  * unknown errors are rethrown so the engine prints `<cmd>: <message>`.
  */
-function fail(ctx, cmd, err, { notFound } = {}) {
+export function fail(ctx, cmd, err, { notFound } = {}) {
   const kind = err && err.kind;
   if (kind === 'aborted') return;
   if (kind === 'offline') {
@@ -67,6 +67,9 @@ function fail(ctx, cmd, err, { notFound } = {}) {
 }
 
 const enc = encodeURIComponent;
+
+const KEEP_RE = /^(pinned|all|recent:[1-9]\d{0,2}|recent:1000)$/;
+const RUNS_USAGE = 'runs: usage: runs | runs pin <run_id> | runs unpin <run_id> | runs keep [set <pinned|all|recent:N>]';
 
 const GATE_ACTION_CLASS = { proceed: 'success', verify: 'warn', park: 'warn', human_review: 'warn', reject: 'error' };
 
@@ -91,12 +94,12 @@ function gateEntries(entries) {
   return (Array.isArray(entries) ? entries : []).filter((e) => e && e.event === 'gate_decision');
 }
 
-function flagText(flags, name) {
+export function flagText(flags, name) {
   const v = flags[name];
   return typeof v === 'string' ? v : undefined;
 }
 
-function parseIntFlag(flags, name, min, max) {
+export function parseIntFlag(flags, name, min, max) {
   if (flags[name] === undefined) return { value: undefined };
   const raw = flags[name];
   const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -220,13 +223,21 @@ DESCRIPTION
     POSTs to /v1/review/{doc_id}/resolve. 'correct' needs --type <doc_type>.
     Prints the resulting status and route trail.`,
   runs: `NAME
-    runs — list eval runs
+    runs — list eval runs, pin or unpin them
 
 SYNOPSIS
     runs
+    runs pin <run_id>
+    runs unpin <run_id>
+    runs keep
+    runs keep set <pinned|all|recent:N>
 
 DESCRIPTION
-    Reads GET /v1/runs: run_id and document count. Empty before the first eval run.`,
+    Bare 'runs' reads GET /v1/runs: run_id and document count. Empty before the
+    first eval run. 'pin' and 'unpin' POST to /v1/ledger/pin and /unpin so a run's
+    spans survive pruning (showcase runs cannot be unpinned). 'keep' reads
+    GET /v1/ledger/keep: policy, its source, pinned and showcase runs. 'keep set'
+    changes the policy (recent:N takes 1-1000).`,
   cards: `NAME
     cards — show a run's cards
 
@@ -281,6 +292,52 @@ DESCRIPTION
     Stores the bearer token for this tab only (session storage), then checks it
     against the api. The token is masked in scrollback and history.`,
 };
+
+async function ledgerPost(ctx, path, body) {
+  try {
+    return { res: await ctx.api.post(path, body, { signal: ctx.signal() }) };
+  } catch (err) {
+    fail(ctx, 'runs', err);
+    return null;
+  }
+}
+
+async function runsKeep(ctx, rest) {
+  if (rest.length === 0) {
+    let res;
+    try {
+      res = await ctx.api.get('/v1/ledger/keep', undefined, { signal: ctx.signal() });
+    } catch (err) {
+      return fail(ctx, 'runs', err);
+    }
+    const list = (v) => (Array.isArray(v) && v.length ? v.map((x) => text(x)).join(', ') : '—');
+    return ctx.out.kv([
+      ['policy', text(res && res.policy)],
+      ['source', text(res && res.source)],
+      ['pinned', list(res && res.pinned)],
+      ['showcase', list(res && res.showcase)],
+    ]);
+  }
+  const value = rest[1];
+  if (rest[0] !== 'set' || rest.length !== 2 || !KEEP_RE.test(value)) {
+    return ctx.out.line('runs: usage: runs keep set <pinned|all|recent:N> (N 1-1000)', 'error');
+  }
+  const r = await ledgerPost(ctx, '/v1/ledger/policy', { value });
+  if (r) ctx.out.line(`keep policy ${value}`, 'success');
+  return undefined;
+}
+
+async function runsSub(ctx, args) {
+  const [sub, ...rest] = args;
+  if (sub === 'keep') return runsKeep(ctx, rest);
+  if (sub !== 'pin' && sub !== 'unpin') return ctx.out.line(RUNS_USAGE, 'error');
+  if (rest.length !== 1) return ctx.out.line(`runs: usage: runs ${sub} <run_id>`, 'error');
+  const id = rest[0];
+  if (!validRunId(id)) return ctx.out.line('runs: invalid run_id', 'error');
+  const r = await ledgerPost(ctx, `/v1/ledger/${sub}`, { run_id: id });
+  if (r) ctx.out.line(`${sub === 'pin' ? 'pinned' : 'unpinned'} ${id}`, 'success');
+  return undefined;
+}
 
 export function registerPipeline(registry) {
   registry.register({
@@ -458,10 +515,11 @@ export function registerPipeline(registry) {
 
   registry.register({
     name: 'runs',
-    summary: 'list eval runs',
-    usage: 'runs',
+    summary: 'list eval runs, pin or unpin them',
+    usage: 'runs [pin|unpin <run_id> | keep [set <pinned|all|recent:N>]]',
     man: manPages.runs,
-    async run(ctx) {
+    async run(ctx, args) {
+      if (args.length > 0) return runsSub(ctx, args);
       let res;
       try {
         res = await ctx.api.get('/v1/runs', undefined, { signal: ctx.signal() });
