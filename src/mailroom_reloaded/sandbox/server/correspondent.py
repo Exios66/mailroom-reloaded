@@ -488,7 +488,7 @@ _T_STATUS = _ENV.from_string(
 _T_SUBMISSION = _ENV.from_string(
     "Hello,\n\nThank you. We received {{ names }} and logged it for processing"
     "{% if doc_ids %} (reference {{ doc_ids }}){% endif %}.\n"
-    "{% for r in relations %}It appears to {{ r.kind }} {{ r.b }}; this is a proposed link pending review, not a confirmed change.\n{% endfor %}"
+    "{% for r in relations %}It appears that {{ r.a }} {{ r.kind }} {{ r.b }}; this is a proposed link pending review, not a confirmed change.\n{% endfor %}"
     "\nBest regards,\nMailroom Correspondent\n"
 )
 _T_HOLD = _ENV.from_string(
