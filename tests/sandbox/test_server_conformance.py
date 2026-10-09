@@ -13,6 +13,7 @@ from mailroom_reloaded.sandbox.server.conformance import (
 
 
 def test_split_is_deterministic_every_third_held_out():
+    """Verify positional splitting sorts IDs and selects every third scenario."""
     ids = [f"X{i}" for i in range(9)]
     sp = split_of(list(reversed(ids)))
     assert sp == split_of(ids)
@@ -20,6 +21,7 @@ def test_split_is_deterministic_every_third_held_out():
 
 
 def test_summarise_counts_and_failed_checks():
+    """Verify summary totals, split counts, and failed-check counts agree."""
     rows = [
         {"scenario": "a", "split": "tuned", "verdict": "pass", "failed_checks": []},
         {
@@ -36,6 +38,7 @@ def test_summarise_counts_and_failed_checks():
 
 
 def test_isolated_run_on_smoke_pack(idle_service):
+    """Verify isolated smoke scenarios all pass without shedding."""
     svc = idle_service.start(worker=False)
     try:
         res = run_conformance(svc)
@@ -46,6 +49,7 @@ def test_isolated_run_on_smoke_pack(idle_service):
 
 
 def test_heldout_ids_selects_tagged_scenarios_only():
+    """Verify held-out selection includes only scenarios with the explicit tag."""
     scenarios = {
         "A1_tuned": {"tags": ["smoke"]},
         "H1_frozen": {"tags": ["heldout", "wire"]},
@@ -57,6 +61,7 @@ def test_heldout_ids_selects_tagged_scenarios_only():
 
 
 def test_run_conformance_heldout_flag_selects_tagged(idle_service):
+    """Verify held-out mode runs and labels only explicitly tagged scenarios."""
     svc = idle_service
     svc.content.cs.scenarios["A1_status_inquiry"]["tags"] = ["heldout"]
     svc = svc.start(worker=False)
@@ -71,6 +76,7 @@ def test_run_conformance_heldout_flag_selects_tagged(idle_service):
 
 
 def test_run_conformance_heldout_flag_with_no_tagged_is_empty(idle_service):
+    """Verify held-out mode returns empty totals when no scenarios carry the tag."""
     svc = idle_service.start(worker=False)
     try:
         res = run_conformance(svc, heldout=True)
@@ -81,6 +87,7 @@ def test_run_conformance_heldout_flag_with_no_tagged_is_empty(idle_service):
 
 
 def test_lofo_single_family_has_no_training_rate():
+    """Verify LOFO reports absent training rates until another family is available."""
     import json
 
     rows = [
@@ -103,6 +110,7 @@ def test_lofo_single_family_has_no_training_rate():
 
 
 def test_lofo_empty_rows_returns_none_rates():
+    """Verify empty LOFO input yields no folds and displays unavailable rates."""
     rep = lofo([])
     assert rep["folds"] == []
     assert rep["macro_mean_held_out_rate"] is None

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_mailbox_panel_js_suite() -> None:
+    """Run the mailbox panel JavaScript tests with Node when it is available."""
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
@@ -25,6 +26,7 @@ def test_mailbox_panel_js_suite() -> None:
 
 
 def test_ui_is_offline_and_serves_the_panel(tmp_path):
+    """Verify the UI serves the mailbox panel and uses no explicit HTTP asset URLs."""
     from fastapi.testclient import TestClient
 
     from mailroom_reloaded.sandbox.server.app import create_sandbox_app

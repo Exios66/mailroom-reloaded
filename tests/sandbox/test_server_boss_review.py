@@ -28,6 +28,7 @@ AUTH_BAD = {"spf": "fail", "dkim": "none", "dmarc": "fail"}
 
 class _Tools:
     def registry(self):
+        """Return a verified Acme contact for sender and callback checks."""
         return {
             "acme": {
                 "display_name": "Acme",
@@ -38,13 +39,16 @@ class _Tools:
         }
 
     def lookup_catalog(self):
+        """Return an empty catalog for the Correspondent test double."""
         return []
 
     def read_attachment_text(self, att):
+        """Return no extracted text for any test attachment."""
         return ""
 
 
 def _wire(body, *, frm="x@evil.example", subject="hello", atts=()):
+    """Build a wire message with failed authentication and resolved attachments."""
     return WireMessage(
         "m1",
         "t1",
@@ -77,6 +81,7 @@ CASES = {
 
 @pytest.mark.parametrize("attack_class", sorted(CASES))
 def test_hostile_class_is_forwarded_on_the_mailbox_and_signalled(attack_class):
+    """Verify each attack class emits a signal and a pending Boss mailbox forward."""
     wire = CASES[attack_class]
     res = StandInCorrespondent().handle(wire, _Tools())
     # the typed pack signal is still emitted
@@ -104,6 +109,7 @@ def test_hostile_class_is_forwarded_on_the_mailbox_and_signalled(attack_class):
 
 
 def test_benign_mail_is_not_forwarded():
+    """Verify benign mail and unrelated mailbox entries do not open hostile reviews."""
     wire = _wire("What are your hours?", frm="pat@acme.example")
     res = StandInCorrespondent().handle(wire, _Tools())
     assert hostile_forward(wire, res) is None
@@ -112,9 +118,11 @@ def test_benign_mail_is_not_forwarded():
 
 @pytest.fixture
 def make_client(tmp_path):
+    """Yield a client factory that injects hostile mail and cleans up its guards."""
     made = []
 
     def _make(autonomy="human"):
+        """Create a guarded sandbox client and inject the wire-change scenario."""
         guard = NetworkGuard().install()
         svc = SandboxService(
             load_sandbox_content(),
@@ -136,6 +144,7 @@ def make_client(tmp_path):
 
 
 def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
+    """Verify pending hostile mail produces no reply or pipeline execution."""
     client, _svc = make_client()
     pend = client.get(f"{API}/boss/pending").json()
     assert pend["count"] == 1
@@ -152,6 +161,7 @@ def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
 
 
 def test_boss_release_drafts_a_reply_and_runs_the_pipeline(make_client):
+    """Verify a legitimate decision releases attachments and drafts an unsent reply."""
     client, _svc = make_client()
     mid = client.get(f"{API}/boss/pending").json()["pending"][0]["message_id"]
     r = client.post(
@@ -174,6 +184,7 @@ def test_boss_release_drafts_a_reply_and_runs_the_pipeline(make_client):
 
 
 def test_boss_quarantine_records_reason_and_keeps_everything_held(make_client):
+    """Verify quarantine holds attachments, records reasons, and rejects repeats."""
     client, _svc = make_client()
     mid = client.get(f"{API}/boss/pending").json()["pending"][0]["message_id"]
     r = client.post(
@@ -204,6 +215,7 @@ def test_boss_quarantine_records_reason_and_keeps_everything_held(make_client):
 
 
 def test_unattended_sandbox_autonomy_keeps_hostile_quarantined(make_client):
+    """Verify unattended sandbox autonomy immediately quarantines hostile mail."""
     client, _svc = make_client(autonomy="sandbox")
     assert client.get(f"{API}/boss/pending").json()["count"] == 0
     d = client.get(f"{API}/boss/decisions").json()["decisions"]
@@ -212,6 +224,7 @@ def test_unattended_sandbox_autonomy_keeps_hostile_quarantined(make_client):
 
 
 def test_unknown_message_and_bad_decision(make_client):
+    """Verify missing messages and invalid decisions return distinct client errors."""
     client, _ = make_client()
     assert (
         client.post(
@@ -230,12 +243,14 @@ def test_unknown_message_and_bad_decision(make_client):
 
 # ---------------------------------------------------------------- boss_mailbox channel
 def _mailbox(client, **params):
+    """Return mailbox entries matching the supplied API query parameters."""
     return client.get(f"{API}/boss/mailbox", params=params).json()["entries"]
 
 
 def test_hostile_forward_is_a_correspondent_to_boss_entry_read_in_the_same_step(
     make_client,
 ):
+    """Verify the Boss reads a hostile forward before sending any decision or reply."""
     client, _svc = make_client()
     fwd = _mailbox(client, kind="hostile_forward")
     assert len(fwd) == 1
@@ -256,10 +271,12 @@ def test_hostile_forward_is_a_correspondent_to_boss_entry_read_in_the_same_step(
 
 
 def test_boss_desk_is_handed_the_mailbox_entry_only(make_client, monkeypatch):
+    """Verify the Boss Desk receives the persisted mailbox entry for review."""
     seen = []
     orig = StandInBossDesk.read_forward
 
     def spy(self, entry):
+        """Record the entry before calling the original Boss Desk reader."""
         seen.append(entry)
         return orig(self, entry)
 
@@ -271,6 +288,7 @@ def test_boss_desk_is_handed_the_mailbox_entry_only(make_client, monkeypatch):
 
 
 def test_decision_travels_back_on_the_mailbox_and_the_correspondent_acts(make_client):
+    """Verify release, reply drafting, and approval travel through the mailbox."""
     client, _svc = make_client()
     fwd = _mailbox(client, kind="hostile_forward")[0]
     mid = fwd["message_id"]
@@ -296,6 +314,7 @@ def test_decision_travels_back_on_the_mailbox_and_the_correspondent_acts(make_cl
 
 
 def test_quarantine_reason_is_in_the_decision_entry(make_client):
+    """Verify quarantine details reach the mailbox without drafting a reply."""
     client, _svc = make_client()
     mid = _mailbox(client, kind="hostile_forward")[0]["message_id"]
     client.post(
@@ -318,6 +337,7 @@ def test_quarantine_reason_is_in_the_decision_entry(make_client):
 
 
 def test_sandbox_autonomy_boss_answers_through_the_mailbox_immediately(make_client):
+    """Verify autonomous quarantine acts on both the forward and decision entries."""
     client, _svc = make_client(autonomy="sandbox")
     entries = _mailbox(client)
     kinds = [(e["direction"], e["kind"]) for e in entries]
@@ -331,6 +351,7 @@ def test_sandbox_autonomy_boss_answers_through_the_mailbox_immediately(make_clie
 
 
 def test_mailbox_filters_events_stream_and_trace(make_client):
+    """Verify mailbox ordering and filters agree with emitted events and traces."""
     client, _svc = make_client()
     all_ = _mailbox(client)
     assert all_ and [e["seq"] for e in all_] == sorted(e["seq"] for e in all_)
@@ -354,6 +375,7 @@ def test_mailbox_filters_events_stream_and_trace(make_client):
 
 
 def test_observing_the_mailbox_changes_nothing(make_client):
+    """Verify operator reads leave entries, events, and pending reviews intact."""
     client, svc = make_client()
     before = (_mailbox(client), len(svc.events), svc.pending_reviews())
     for _ in range(3):
@@ -364,6 +386,7 @@ def test_observing_the_mailbox_changes_nothing(make_client):
 
 
 def test_mailbox_is_append_only_and_two_way(tmp_path):
+    """Verify two-way entries, status history, immutable storage, and validation."""
     import sqlite3
 
     from mailroom_reloaded.sandbox.server.mailbox import BossMailbox
@@ -419,12 +442,14 @@ def test_mailbox_is_append_only_and_two_way(tmp_path):
 
 
 def test_mailbox_lives_in_the_sandbox_data_dir_only(make_client, tmp_path):
+    """Verify the mailbox database is created inside the sandbox data directory."""
     _client, svc = make_client()
     assert svc.mailbox.path.is_file()
     assert str(svc.mailbox.path).startswith(str(tmp_path))
 
 
 def test_mailbox_list_filters_latest_status_and_limits_in_sql(tmp_path, monkeypatch):
+    """Verify SQL applies latest-status filters and limits before decoding entries."""
     from mailroom_reloaded.sandbox.server.mailbox import BossMailbox
 
     mb = BossMailbox(tmp_path / "mailbox.sqlite")
@@ -440,6 +465,7 @@ def test_mailbox_list_filters_latest_status_and_limits_in_sql(tmp_path, monkeypa
         mb.set_status(entries[2]["id"], "new", "boss")
 
         def unexpected_status_lookup(_):
+            """Fail if listing performs a separate status lookup for an entry."""
             pytest.fail("list must resolve status in its SQL query")
 
         monkeypatch.setattr(mb, "_status_of", unexpected_status_lookup)
@@ -447,6 +473,7 @@ def test_mailbox_list_filters_latest_status_and_limits_in_sql(tmp_path, monkeypa
         original_row = mb._row
 
         def decode(row, status):
+            """Record each decoded entry before applying the original row conversion."""
             decoded.append(row["id"])
             return original_row(row, status)
 
