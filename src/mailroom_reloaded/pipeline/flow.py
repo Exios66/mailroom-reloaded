@@ -741,6 +741,8 @@ class MailroomFlow(Flow[MailroomState]):
         base.doc_id = doc_id
         base.path = str(work)
         base.eval_mode = eval_ctx is not None
+        manifest.state = base.model_dump(mode="json")
+        save_manifest(self._bins, manifest)
 
     def _resume_start(self) -> str | None:
         """First node to run: the explicit ``resume_from`` else the manifest's next."""

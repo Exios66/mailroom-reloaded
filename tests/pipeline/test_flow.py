@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from fakes.openai_server import FakeOpenAI
@@ -509,3 +510,24 @@ def test_gate_retry_after_crash_resume_reexecutes_sort(env, mock_provider, monke
     assert calls["n"] == 2
     assert state.classify_attempts == 1  # one retry, not a skipped one plus a real one
     assert state.status == "archived"
+
+
+def test_initial_checkpoint_exists_before_ingest(env, monkeypatch):
+    from mailroom_reloaded.storage.bins import doc_id_for, load_manifest
+
+    bins, path = _write_inbox(env)
+    doc_id = doc_id_for(path)
+
+    def crash(*args):
+        checkpoint = load_manifest(bins, doc_id)
+        assert checkpoint is not None
+        assert Path(checkpoint.state['path']).is_file()
+        raise RuntimeError('ingest interruption')
+
+    monkeypatch.setattr(flow_mod, '_ingest', crash)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id='w1')
+    manifest = load_manifest(bins, doc_id)
+    assert manifest is not None
+    assert manifest.status == 'processing'
+    assert Path(manifest.state['path']).is_file()
