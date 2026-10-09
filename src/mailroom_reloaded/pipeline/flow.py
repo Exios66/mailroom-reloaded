@@ -43,6 +43,7 @@ from mailroom_reloaded.ingest.bert import (
 )
 from mailroom_reloaded.ingest.clerk import ingest as _ingest
 from mailroom_reloaded.obs.metrics import M
+from mailroom_reloaded.obs.run_context import ensure_run_scope
 from mailroom_reloaded.pipeline.archivist import archive_document
 from mailroom_reloaded.pipeline.guards import (
     NODE_DEADLINES,
@@ -809,7 +810,15 @@ def run_document(
     a node crashes (the manifest keeps the completed prefix, so a later call
     resumes). A deadline/token-budget failure or an ingest failure returns a
     state with ``status == "failed"``.
+
+    Reuse the current run scope, or open one inside the calling worker via
+    :func:`ensure_run_scope`, using ``eval_ctx.run_id`` when available. The
+    caller's scope is restored on exit, including on errors. A missing document
+    raises ``FileNotFoundError``; setup and persistence errors also propagate.
     """
     flow = MailroomFlow()
-    flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
-    return flow._drive()
+    # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
+    eval_run_id = getattr(eval_ctx, "run_id", None) if eval_ctx is not None else None
+    with ensure_run_scope("eval" if eval_ctx is not None else "watch", eval_run_id):
+        flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
+        return flow._drive()

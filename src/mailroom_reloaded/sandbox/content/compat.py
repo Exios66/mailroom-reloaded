@@ -10,6 +10,7 @@ class CompatError(Exception):
 
 
 def code_version() -> str:
+    """Return the installed package version, or '0.2.0' if metadata lookup fails."""
     try:
         from importlib.metadata import version
 
@@ -19,6 +20,10 @@ def code_version() -> str:
 
 
 def parse_version(v: str) -> tuple[int, ...]:
+    """Parse dot-separated integers without padding missing version components.
+
+    Raise CompatError if any component cannot be converted to an integer.
+    """
     try:
         return tuple(int(p) for p in str(v).split("."))
     except ValueError as exc:
@@ -26,6 +31,7 @@ def parse_version(v: str) -> tuple[int, ...]:
 
 
 def schema_major(schema_version: str) -> int:
+    """Return the first version component, raising CompatError for invalid components."""
     return parse_version(schema_version)[0]
 
 
@@ -37,7 +43,10 @@ def check_compat(
 ) -> None:
     """Raise CompatError unless ``meta`` (content.json) fits this code.
 
-    The code window (min/max_code_version, inclusive) is only checked when present.
+    The schema major must equal ``supported_major``. Truthy min/max_code_version
+    bounds are inclusive and compared as integer tuples without zero-padding.
+    An omitted or empty ``code`` uses code_version(). Missing schema_version and
+    invalid version components also raise CompatError.
     """
     sv = meta.get("schema_version")
     if sv is None:

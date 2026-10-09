@@ -34,13 +34,18 @@ LockOpt = typer.Option(
 
 
 def _fail(msg: str) -> typer.Exit:
+    """Print a prefixed error to stderr and return, without raising, an exit with code 1."""
     typer.echo(f"mailroom sandbox content: {msg}", err=True)
     return typer.Exit(code=1)
 
 
 @content_app.command()
 def status(lock: Path = LockOpt) -> None:
-    """Show the pin, the committed smoke fixtures and their compatibility."""
+    """Print JSON with the pin, smoke version/tag match, validity, and scenario count.
+
+    LockError, CompatError, and FileNotFoundError become exit code 1. Reported
+    smoke validation errors or a tag mismatch do not cause a nonzero exit.
+    """
     try:
         pin = ContentLock.read(lock)
         smoke = load_content(SMOKE_DIR)
@@ -67,7 +72,12 @@ def validate(
         SMOKE_DIR, help="Content dir or smoke export (default: committed smoke)."
     ),
 ) -> None:
-    """Validate a materialized content dir against schemas/ and content.json compat."""
+    """Validate a content directory or smoke export, defaulting to committed smoke.
+
+    Print a success summary or report validation errors to stderr and exit 1.
+    CompatError and FileNotFoundError also become exit code 1; other loading
+    errors propagate.
+    """
     try:
         cs = load_content(path)
     except (CompatError, FileNotFoundError) as exc:
@@ -96,7 +106,15 @@ def pull(
     dest: Path = typer.Option(Path(".sandbox-content"), "--dest"),
     lock: Path = LockOpt,
 ) -> None:
-    """Materialize the pinned content into --dest, verifying the lock."""
+    """Materialize content into --dest from exactly one directory, bundle, or URL.
+
+    Directory imports check compatibility and the pinned tag, then replace dest.
+    Bundles check the pinned SHA-256 before extraction and compatibility afterward;
+    unrelated destination files remain. URL downloads require --allow-network.
+    Failures may leave destination changes in place. Invalid source selection,
+    LockError, CompatError, OSError, ValueError, and RuntimeError become exit code 1;
+    archive and decompression errors propagate.
+    """
     if sum(x is not None for x in (from_bundle, from_dir, url)) != 1:
         raise _fail("give exactly one of --from-bundle, --from-dir, --url")
     try:
