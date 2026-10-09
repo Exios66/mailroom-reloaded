@@ -42,6 +42,12 @@ class StandInBossDesk:
         self.delegation = delegation
 
     def decide(self, res: CorrespondentResult) -> list[dict]:
+        """Return proposed Boss actions from the delegation matrix and classification.
+
+        Actions include review gates and attachment dispositions; this method
+        does not execute them. Missing relations produce ``no_candidate`` links,
+        and attachment release and draft approval remain ``pending_human``.
+        """
         row = self.delegation.get(res.issue_class, {})
         autonomy = row.get("autonomy", "n/a")
         source = f"delegation_matrix:{res.issue_class}" if row else "stand-in default"

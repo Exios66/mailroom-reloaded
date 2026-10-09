@@ -64,6 +64,11 @@ OUTPUT_SCHEMA = {
 
 
 def _check_loopback(base_url: str) -> None:
+    """Require ``localhost`` or a literal loopback IP as the URL hostname.
+
+    Raise ``ValueError`` for other hosts or malformed bracketed addresses;
+    no DNS lookup or connectivity check is performed.
+    """
     host = urlparse(base_url).hostname or ""
     if host == "localhost":
         return
@@ -78,7 +83,11 @@ def _check_loopback(base_url: str) -> None:
 
 
 def build_prompt(msg: WireMessage, delegation: dict[str, dict]) -> list[dict]:
-    """System + user messages. The message text is data, never instructions."""
+    """Build system and user messages from the delegation matrix and wire data.
+
+    The system prompt instructs the model to treat email text as data. Include
+    only the first 2,000 body characters and attachment names, not their bytes.
+    """
     lines = []
     for intent in ALLOWED_INTENTS:
         row = delegation.get(INTENT_ISSUE.get(intent, ""), {})
@@ -111,6 +120,12 @@ class LLMCorrespondent(StandInCorrespondent):
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        """Configure optional triage at a loopback OpenAI-compatible base URL.
+
+        ``timeout`` is the HTTP client timeout in seconds; ``transport`` can supply
+        an in-process mock. Invalid loopback hostnames raise ``ValueError`` before
+        any request is made.
+        """
         _check_loopback(base_url)
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -121,6 +136,12 @@ class LLMCorrespondent(StandInCorrespondent):
 
     # -------------------------------------------------------------- model call
     def _ask(self, msg: WireMessage, tools: CorrespondentTools) -> dict | None:
+        """Return schema-validated triage, or ``None`` on request/response failure.
+
+        Count each attempted request. Transport, HTTP, decoding, and schema errors
+        are recorded as fallbacks. Errors obtaining delegation data or building
+        the prompt occur before that fallback boundary and propagate.
+        """
         get = getattr(tools, "delegation", None)
         delegation = get() if callable(get) else {}
         body = {
@@ -152,6 +173,10 @@ class LLMCorrespondent(StandInCorrespondent):
         return out  # type: ignore[no-any-return]
 
     def _triage_hook(self, msg, text, feats, tri, tools) -> Triage | None:
+        """Use model triage when valid; return ``None`` to retain rule scoring on failure.
+
+        Model confidence below 0.5 forces review regardless of its review flag.
+        """
         out = self._ask(msg, tools)
         if out is None:
             return None
@@ -168,6 +193,12 @@ class LLMCorrespondent(StandInCorrespondent):
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Classify through the rule safety screen with optional model triage.
+
+        Return per-message call counts and fallback reasons, suppressing drafts
+        for hostile or suspicious senders and possible attacks. Model request and
+        response errors fall back to rules; errors from rule tools propagate.
+        """
         self._calls, self._fallbacks = 0, []
         res = super().handle(msg, tools)
         # invariants, enforced in code after the model: never trusted from it

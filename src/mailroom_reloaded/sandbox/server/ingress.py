@@ -72,6 +72,10 @@ def _local_name(addr: str) -> str:
 
 
 def _entry_for(path: Path, name: str, **extra: Any) -> dict:
+    """Read attachment bytes into wire metadata with byte size, hashes, and path.
+
+    ``extra`` can override metadata fields. Filesystem errors propagate.
+    """
     data = path.read_bytes()
     return {
         "name": name,
@@ -90,7 +94,13 @@ def _attachment(
     bound: dict[str, dict],
     synth_dir: Path | None = None,
 ) -> tuple[dict, str | None]:
-    """Resolve one ``attach`` entry to wire metadata, plus a note when unresolved."""
+    """Resolve an attachment to wire metadata and an optional explanatory note.
+
+    Reuse ``bound`` refs for ``same_as`` and bind new refs on success. Dataset
+    draws write placeholder PDFs when ``synth_dir`` is supplied; otherwise they
+    remain unresolved. Missing files/refs return unresolved metadata and a
+    note, while read/write errors propagate. Synthetic draws also carry a note.
+    """
     if "same_as" in spec:
         src = bound.get(spec["same_as"])
         if src is None:
@@ -171,7 +181,13 @@ def _render_email(
 def plan_scenario(
     content: SandboxContent, name: str, synth_dir: Path | None = None
 ) -> list[PlannedItem]:
-    """Expand a scenario timeline into renderable inbound items (document feeds + emails)."""
+    """Expand a timeline into document, email, and unexecuted fault items.
+
+    Offsets are simulated seconds. ``synth_dir`` enables writing placeholder
+    PDFs for dataset draws; absent bytes/templates produce notes. Unknown
+    scenario names raise ``KeyError``; rendering, offset parsing, and file I/O
+    errors propagate.
+    """
     scenario = content.cs.scenarios[name]
     items: list[PlannedItem] = []
     bound: dict[str, dict] = {}

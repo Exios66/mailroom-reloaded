@@ -12,6 +12,11 @@ from mailroom_reloaded.sandbox.content.lock import ContentLock, verify_bundle
 
 
 def _open(path: Path):
+    """Open a Zstandard-compressed tar for sequential reading; the caller must close it.
+
+    Missing ``zstandard`` raises ``RuntimeError``. File, decompression, and tar
+    errors propagate, including during subsequent iteration.
+    """
     try:
         import zstandard
     except ImportError as exc:  # pragma: no cover

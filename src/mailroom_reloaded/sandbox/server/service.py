@@ -78,6 +78,7 @@ class _Tools:
         return self.svc.content.registry_clients
 
     def delegation(self) -> dict[str, dict]:
+        """Expose the loaded policy matrix to Correspondent triage and drafting."""
         return self.svc.content.policy.delegation
 
     def lookup_catalog(self) -> list[dict]:
@@ -113,6 +114,13 @@ class SandboxService:
         correspondent: str = "standin",
         correspondent_options: dict | None = None,
     ) -> None:
+        """Configure isolated sandbox state and agents; call ``start`` to activate them.
+
+        ``clock`` supplies epoch seconds for admission and egress timing.
+        ``autonomy="sandbox"`` auto-approves drafts into the virtual outbox and
+        quarantines hostile reviews; ``human`` leaves them pending. Correspondent
+        options are passed to its factory, whose errors propagate.
+        """
         self.content = content
         self.data_dir = Path(data_dir)
         self.state_dir = self.data_dir / "sandbox"
@@ -163,6 +171,10 @@ class SandboxService:
         return self
 
     def stop(self) -> None:
+        """Request worker shutdown, save state, close the mailbox, and deactivate the pipeline.
+
+        Wait up to ten seconds for the worker. Persistence errors propagate.
+        """
         self._stop.set()
         if self._worker is not None:
             self._q.put(("", []))
@@ -203,6 +215,11 @@ class SandboxService:
 
     # ------------------------------------------------------------------ persistence
     def _save(self) -> None:
+        """Replace the JSON state snapshot, including reviews and outbox state.
+
+        Create the state directory if needed. Mailbox entries live in their separate
+        SQLite file; serialization and filesystem errors propagate.
+        """
         with self._lock:
             blob = {
                 "messages": self.messages,
@@ -222,6 +239,11 @@ class SandboxService:
             os.replace(tmp, self.state_dir / "state.json")
 
     def _load(self) -> None:
+        """Restore a saved snapshot and return interrupted processing to admitted state.
+
+        Missing, unreadable, or invalid JSON snapshots are ignored. Restored work
+        is not enqueued here.
+        """
         path = self.state_dir / "state.json"
         if not path.is_file():
             return
@@ -244,6 +266,11 @@ class SandboxService:
                     m["state"] = "admitted"
 
     def reset(self) -> None:
+        """Clear messages, events, reviews, mailbox, outbox items, and pipeline state.
+
+        Reset admission counters and remove held/quarantined attachment storage,
+        then save the empty snapshot. Filesystem and persistence errors propagate.
+        """
         with self._work_lock, self._lock:
             self.wait_idle(30)
             self.messages, self.events, self.docs, self.batches = {}, [], {}, []
@@ -291,6 +318,14 @@ class SandboxService:
         stagger_seconds: int = 0,
         process: bool = True,
     ) -> dict:
+        """Render and admit scenarios, returning batch/message IDs and current states.
+
+        ``scenario_ids`` is a list of names or ``"all"``. ``stagger_seconds`` shifts
+        each scenario's start in simulated time. Dataset draws write synthetic
+        PDFs. ``process`` queues admitted work without waiting for completion.
+        Raise ``ValueError`` for unknown flows and ``KeyError`` for unknown names;
+        rendering and persistence errors propagate.
+        """
         flows = list(flows) if flows is not None else list(FLOWS)
         bad = [f for f in flows if f not in FLOWS]
         if bad:
@@ -562,6 +597,11 @@ class SandboxService:
         )
 
     def _process_email(self, msg: dict, flows: list[str]) -> None:
+        """Run requested unfinished flows, storing triage, mailbox traffic, drafts, and handoffs.
+
+        A pipeline-only run bypasses Correspondent gating. Processing errors
+        propagate to the worker or idle-drain handler, which marks the message failed.
+        """
         mid = msg["id"]
         atts = {a["name"]: a for a in msg["wire"]["attachments"]}
         if "correspondent" in flows and "correspondent" not in msg["flows_done"]:
@@ -653,6 +693,11 @@ class SandboxService:
             msg["flows_done"].append("pipeline")
 
     def _queue_drafts(self, msg: dict, drafts: list) -> None:
+        """Add drafts to the virtual outbox and post approval requests to the mailbox.
+
+        Sandbox autonomy immediately approves them through the outbox policy gates
+        and records the response on the mailbox. Outbox and mailbox errors propagate.
+        """
         for d in drafts:
             item = self.outbox.add_draft(
                 message_id=msg["id"],
@@ -753,6 +798,7 @@ class SandboxService:
             )
 
     def pending_reviews(self) -> list[dict]:
+        """Return independent copies of pending review cases."""
         with self._lock:
             return [
                 copy.deepcopy(c)
@@ -761,6 +807,7 @@ class SandboxService:
             ]
 
     def list_reviews(self) -> list[dict]:
+        """Return independent copies of all review cases."""
         with self._lock:
             return [copy.deepcopy(c) for c in self.reviews.values()]
 
@@ -773,10 +820,18 @@ class SandboxService:
         category: str | None = None,
         by: str = "boss",
     ) -> dict:
-        """Boss decision on a held hostile message: ``legitimate`` or ``quarantine``.
+        """Decide a pending review as ``legitimate`` or ``quarantine`` and return a copy.
 
-        Written to the mailbox as a boss -> correspondent entry; the Correspondent reads
-        it and acts (lanes, pipeline, reply draft) in the same step."""
+        Write the decision to the mailbox and apply it in the same step. Release
+        runs resolved attachments when the message selected the pipeline and queues
+        a reply draft; quarantine keeps attachments held. ``category`` defaults to
+        the case category and must be ``phishing``, ``malware``, or ``other``.
+
+        Raise ``KeyError`` for a missing message/review, or ``ValueError`` for an
+        invalid decision/category or a non-pending review. Attachment pipeline
+        failures are recorded per attachment; mailbox, drafting, and persistence
+        errors propagate and may leave partial effects.
+        """
         if decision not in {"legitimate", "quarantine"}:
             raise ValueError("decision must be 'legitimate' or 'quarantine'")
         if category is not None and category not in CATEGORIES:
@@ -849,6 +904,12 @@ class SandboxService:
         self.mailbox.set_status(ent["id"], "acted", CORRESPONDENT, pl["decision"])
 
     def _release_after_review(self, msg: dict, by: str) -> None:
+        """Release held/quarantined handoffs and queue a reply after a legitimate decision.
+
+        Run resolved bytes only when the message selected the pipeline. Pipeline
+        exceptions become ``pipeline_error`` attachment status; reply-drafting and
+        outbox/mailbox errors propagate.
+        """
         mid = msg["id"]
         atts = {a["name"]: a for a in msg["wire"]["attachments"]}
         for entry in msg["handoffs"]:
@@ -958,6 +1019,12 @@ class SandboxService:
 
     # ------------------------------------------------------------------ outbox
     def approve_outbound(self, oid: str, by: str = "reviewer") -> dict:
+        """Apply outbox approval gates, record the mailbox answer, and save state.
+
+        Return the outbox item, which may remain blocked, rejected, or captured;
+        no mail is transmitted. Unknown IDs raise ``KeyError``. Mailbox and
+        persistence errors propagate after approval effects.
+        """
         item = self.outbox.approve(oid, by)
         self._mailbox_answer_draft(item, True, by)
         with self._lock:
@@ -970,6 +1037,11 @@ class SandboxService:
         return item
 
     def reject_outbound(self, oid: str, by: str = "reviewer") -> dict:
+        """Reject an outbox item, record the mailbox answer, and save state.
+
+        Already captured or rejected items retain their state. Unknown IDs raise
+        ``KeyError``; mailbox and persistence errors propagate after outbox effects.
+        """
         item = self.outbox.reject(oid, by)
         self._mailbox_answer_draft(item, False, by)
         self._save()
@@ -1037,6 +1109,11 @@ class SandboxService:
         )
 
     def trace(self, mid: str) -> dict:
+        """Return a message's ingress, triage, review, mailbox, pipeline, and egress trace.
+
+        Include evaluation only when expected outcomes are enabled. Unknown
+        message IDs raise ``KeyError``; mailbox and evaluation errors propagate.
+        """
         msg = self.message(mid)
         with self._lock:
             out = [

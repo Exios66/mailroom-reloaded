@@ -52,6 +52,7 @@ def _retry_after_seconds(exc: Exception) -> float | None:
 
 
 def _is_json_mode_400(exc: Exception) -> bool:
+    """Identify the retryable BadRequestError about a missing JSON prompt keyword."""
     return isinstance(exc, BadRequestError) and any(
         m in str(exc) for m in _JSON_MODE_400_MARKERS
     )

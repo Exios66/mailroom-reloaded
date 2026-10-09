@@ -188,6 +188,11 @@ def _build_request(
     messages: list[dict[str, Any]],
     sampling: dict[str, Any],
 ) -> dict[str, Any]:
+    """Build chat parameters from role defaults and sampling overrides.
+
+    Omit ``None`` values and place provider-specific options in ``extra_body``.
+    Unknown roles raise ``KeyError``; taxonomy loading errors propagate.
+    """
     cfg = load_taxonomy().agent(role)
     params: dict[str, Any] = {"temperature": cfg.temperature}
     if cfg.max_tokens is not None:

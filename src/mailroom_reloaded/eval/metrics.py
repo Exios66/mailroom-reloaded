@@ -160,6 +160,7 @@ def _prf(tp: int, fp: int, fn: int) -> dict[str, float]:
 
 
 def _row_f1(counts: Mapping[str, Any]) -> float:
+    """Compute F1 from TP/FP/FN counts, treating missing or empty counts as zero."""
     return _prf(
         int(counts.get("tp") or 0),
         int(counts.get("fp") or 0),
@@ -212,6 +213,10 @@ def _sorter_row(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
 
 
 def _sorter_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Summarize class/subclass accuracy, confusion, and usable confidence pairs.
+
+    Empty rows yield zero accuracy. Nonnumeric confidence values are skipped.
+    """
     exact = primary = subclass = 0
     expected_labels: list[str] = []
     predicted_labels: list[str] = []
@@ -269,6 +274,11 @@ def _sorter_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 def _ece(
     confidences: Sequence[float], correct: Sequence[int], bins: int = 10
 ) -> float | None:
+    """Return expected calibration error rounded to four decimals, or ``None`` if empty.
+
+    Expect paired confidences in [0, 1], binary correctness values, and a
+    positive bin count. Confidence 1.0 belongs to the final equal-width bin.
+    """
     if not confidences:
         return None
     counts = [0] * bins
@@ -358,6 +368,7 @@ def _resort_rate(rows: Sequence[Mapping[str, Any]]) -> float:
 
 
 def _clause_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Pool CUAD clause and value counts, using ``None`` for undefined precision/recall/F1."""
     tp = sum(int(r.get("cuad_tp") or 0) for r in rows)
     fp = sum(int(r.get("cuad_fp") or 0) for r in rows)
     fn = sum(int(r.get("cuad_fn") or 0) for r in rows)

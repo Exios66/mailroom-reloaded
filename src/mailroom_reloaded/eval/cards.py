@@ -109,6 +109,10 @@ def _error_kind(value: Any) -> str:
 
 
 def _normalise_telemetry(telemetry: Any, gpus: int) -> dict[str, Any]:
+    """Return replica dictionaries, capture status, and the expected GPU replica count.
+
+    Accept one mapping/telemetry record or a list/tuple; skip unsupported entries.
+    """
     if telemetry is None:
         return {"captured": False, "expected_replicas": gpus, "replicas": []}
     entries = telemetry if isinstance(telemetry, (list, tuple)) else [telemetry]
@@ -485,6 +489,11 @@ def render_card_md(card: Mapping[str, Any]) -> str:
 
 
 def _pooled(cards: Sequence[Mapping[str, Any]], gpus: int) -> dict[str, Any]:
+    """Pool card counts, costs in USD, and throughput from summed wall seconds.
+
+    Missing values contribute zero; rates without nonzero inputs return ``None``.
+    Per-GPU throughput divides by at least one GPU.
+    """
     docs = sum(int(c.get("n") or 0) for c in cards)
     ok = sum(int((c.get("quality") or {}).get("ok") or 0) for c in cards)
     errors = sum(int((c.get("quality") or {}).get("errors") or 0) for c in cards)

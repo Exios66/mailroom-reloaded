@@ -61,6 +61,14 @@ def compare_scenario(
     stuck: list[str],
     personas: dict[str, dict],
 ) -> dict:
+    """Compare recorded results with expectations and return checks and a verdict.
+
+    ``stuck`` contains pipeline document IDs; ``personas`` supplies sender roles
+    when absent from message truth. Intent and trust use the primary email;
+    other checks aggregate results and resolve scenario attachment references.
+    Return ``not_run`` when no email has a Correspondent result. Uncheckable
+    checks have ``ok=None`` and do not fail the verdict.
+    """
     expect = scenario.get("expect", {})
     emails = [m for m in msgs if m["kind"] == "email" and m.get("correspondent")]
     checks: list[dict] = []
@@ -215,6 +223,7 @@ def compare_scenario(
         rels = [r for lst in rels_by_msg.values() for r in lst]
 
         def names(ref: str) -> set[str]:
+            """Resolve an attachment or message ref to delivered names, falling back to the ref."""
             if ref in att_by_ref:
                 return {att_by_ref[ref]}
             if ref in msg_by_ref:

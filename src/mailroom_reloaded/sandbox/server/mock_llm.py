@@ -58,6 +58,10 @@ def _marker_confidence(body: dict) -> float | None:
 
 
 def build_mock_app(stats: dict[str, int] | None = None) -> FastAPI:
+    """Build an offline completion mock that updates the supplied request counters.
+
+    Responses are fixed fixtures selected by schema and message markers.
+    """
     stats = stats if stats is not None else {}
     app = FastAPI(title="sandbox-mock-llm")
 
@@ -67,6 +71,11 @@ def build_mock_app(stats: dict[str, int] | None = None) -> FastAPI:
 
     @app.post("/v1/chat/completions")
     def complete(body: dict) -> dict:
+        """Return a fixed completion and increment its request-kind counter.
+
+        Triage markers select intent, review, or invalid JSON for fallback tests.
+        Streaming and unsupported nonempty schemas raise HTTP 400.
+        """
         if body.get("stream"):
             raise HTTPException(400, "The mock supports non-streaming requests only")
         schema = (

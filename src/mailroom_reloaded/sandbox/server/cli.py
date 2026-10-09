@@ -52,7 +52,12 @@ def serve(
         help="Show scenario expected outcomes next to actual.",
     ),
 ) -> None:
-    """Serve the offline ingress sandbox (Correspondent stand-in + real pipeline on a mock LLM)."""
+    """Serve the offline sandbox with rule or optional loopback LLM triage.
+
+    The document pipeline uses a mock LLM. Content loading/validation failures
+    exit with code 1; invalid profile, autonomy, or Correspondent options exit
+    with code 2.
+    """
     import uvicorn
 
     from mailroom_reloaded.api.app import assert_bind_allowed
@@ -149,7 +154,14 @@ def conformance(
         None, "--lofo", help="Also write the leave-one-family-out report here."
     ),
 ) -> None:
-    """Run every scenario in isolation and print a per-check conformance table."""
+    """Run selected scenarios in isolation and print conformance and LOFO tables.
+
+    The data directory is disposable: runs reset sandbox and pipeline state.
+    Content loading failures exit with code 1. Scenario failures are reported
+    without setting a failing exit code. Fewer than two selected families
+    raise ``ZeroDivisionError`` during LOFO reporting; output I/O errors
+    propagate.
+    """
     from mailroom_reloaded.sandbox.server.conformance import (
         dumps,
         format_lofo,

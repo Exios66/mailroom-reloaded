@@ -231,6 +231,7 @@ def decode_pubsub_push(payload: dict[str, Any]) -> GmailNotification:
 
 
 def _parse_extensions(raw: str | None) -> tuple[str, ...] | None:
+    """Split comma/semicolon-delimited extensions, trim blanks, and return ``None`` if empty."""
     if not raw:
         return None
     exts = tuple(
@@ -521,6 +522,11 @@ class GmailIntake:
         self._save_state(state)
 
     def _save_state(self, state: dict[str, Any]) -> None:
+        """Atomically replace the intake JSON state, creating parent directories as needed.
+
+        Serialization and filesystem errors propagate; temporary-file cleanup is
+        attempted even when writing or replacement fails.
+        """
         path = self.state_path
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(

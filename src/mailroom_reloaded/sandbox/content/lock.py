@@ -54,6 +54,11 @@ class ContentLock:
             raise LockError("commit must be a 7-40 char sha")
 
     def write(self, path: Path | str = DEFAULT_LOCK) -> None:
+        """Validate and overwrite the lock file as UTF-8 text.
+
+        Raise ``LockError`` for invalid hashes and propagate filesystem errors;
+        parent directories are not created.
+        """
         self.validate()
         lines = [
             f"{k}: {v!r}" if k == "schema_version" else f"{k}: {v}"

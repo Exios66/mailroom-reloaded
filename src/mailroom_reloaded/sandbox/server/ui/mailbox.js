@@ -3,6 +3,7 @@
 // Vanilla JS, no external fetches, text via textContent only. Read-only apart from the
 // Release / Quarantine buttons, which call opts.onDecide.
 (function (root) {
+  /** Create an element, flatten child arrays, and insert primitive children as text. */
   function node(tag, cls, ...kids) {
     const n = root.document.createElement(tag);
     if (cls) n.className = cls;
@@ -12,6 +13,7 @@
     }
     return n;
   }
+  /** Summarize known entry kinds, falling back to the first 160 characters of payload JSON. */
   function summarize(e) {
     const p = e.payload || {};
     if (e.kind === "hostile_forward") {
@@ -22,10 +24,17 @@
     if (e.kind === "approval" || e.kind === "rejection") return `${e.kind} of ${p.outbox_id} by ${p.by}`;
     return JSON.stringify(p).slice(0, 160);
   }
+  /** Count new entries and hostile forwards with pending message IDs, once per entry. */
   function unread(entries, pendingIds) {
     const pend = pendingIds || new Set();
     return entries.filter((e) => e.status === "new" || (e.kind === "hostile_forward" && pend.has(e.message_id))).length;
   }
+  /**
+   * Return a detached mailbox view grouped by thread in first-seen order.
+   * opts.pending is a set of message IDs. Pending forwards offer buttons only
+   * when opts.onDecide exists; clicks pass (messageId, decision, reason) to it.
+   * Rendering does not fetch data or change entry status.
+   */
   function renderMailbox(entries, opts) {
     const o = opts || {};
     const pend = o.pending || new Set();

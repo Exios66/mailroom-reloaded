@@ -83,6 +83,7 @@ async function inject(ids) {
 }
 
 // ---------------------------------------------------------------- tabs
+/** Replace the active tab view, displaying loading errors in the tab body. */
 async function renderTab() {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
   const body = $("tab-body");
@@ -109,6 +110,10 @@ async function messagesView() {
   }
   return el("div", {}, head, d.messages.length ? t : el("p", { class: "muted" }, "No messages yet. Inject a scenario."));
 }
+/**
+ * Build a review card; withButtons enables decisions using the entered reason.
+ * Decision clicks post to the API and refresh views, alerting on errors.
+ */
 function reviewCard(c, withButtons) {
   const reason = el("input", { placeholder: "reason (recorded)", size: 30 });
   const decide = (decision) => guarded(async () => {
@@ -125,6 +130,10 @@ function reviewCard(c, withButtons) {
 }
 // ---------------------------------------------------------------- boss mailbox dock (always live)
 const mbx = { entries: [], last: 0, open: false, timer: null };
+/**
+ * Refresh cached entries, the unread badge, and the open dock without marking entries read.
+ * Fetch at most 5,000 entries; suppress polling errors and retain existing content on fetch failure.
+ */
 async function pollMailbox() {
   try {
     const p = await api("/boss/pending");
@@ -142,6 +151,7 @@ $("mbx-toggle").addEventListener("click", () => { mbx.open = !mbx.open; $("mbx-d
 mbx.timer = setInterval(pollMailbox, 2000);
 pollMailbox();
 
+/** Build pending and decided review cards; API failures reject the returned promise. */
 async function bossView() {
   const p = await api("/boss/pending");
   const d = await api("/boss/decisions");
@@ -217,6 +227,7 @@ async function renderTrace() {
     box.replaceChildren(...traceSections(t));
   } catch (e) { box.replaceChildren(el("p", { class: "err" }, e.message)); }
 }
+/** Build trace sections with review and release controls wired to explicit user clicks. */
 function traceSections(t) {
   const out = [];
   const w = t.ingress.wire, adm = t.ingress.admission;

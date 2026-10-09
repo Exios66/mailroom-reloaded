@@ -69,6 +69,7 @@ BEGIN SELECT RAISE(ABORT, 'boss_mailbox entries are append-only'); END;
 
 
 def _now() -> str:
+    """Return the current UTC timestamp in ISO format with millisecond precision."""
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
@@ -78,6 +79,11 @@ class BossMailbox:
         path: Path | str,
         emit: Callable[[str, str, dict | None], Any] | None = None,
     ) -> None:
+        """Configure a queue opened lazily at ``path``.
+
+        ``emit``, when supplied, receives entry and status events after commit;
+        its exceptions propagate without undoing the committed write.
+        """
         self.path = Path(path)
         self._emit = emit
         self._lock = threading.RLock()
@@ -85,6 +91,10 @@ class BossMailbox:
 
     # ------------------------------------------------------------------ plumbing
     def _conn(self) -> sqlite3.Connection:
+        """Open and initialize the queue on first use, creating parent directories.
+
+        Filesystem and SQLite errors propagate to the caller.
+        """
         if self._db is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._db = sqlite3.connect(self.path, check_same_thread=False)
@@ -93,6 +103,7 @@ class BossMailbox:
         return self._db
 
     def close(self) -> None:
+        """Close the cached connection; later operations can reopen the queue."""
         with self._lock:
             if self._db is not None:
                 self._db.close()
@@ -106,6 +117,7 @@ class BossMailbox:
                 Path(str(self.path) + suffix).unlink(missing_ok=True)
 
     def _row(self, r: sqlite3.Row, status: str) -> dict:
+        """Decode an entry payload and attach its current status to the returned view."""
         return {
             "id": r["id"],
             "seq": r["seq"],
@@ -133,6 +145,13 @@ class BossMailbox:
         payload: dict,
         in_reply_to: str | None = None,
     ) -> dict:
+        """Append an entry with initial status ``new`` and return its stored view.
+
+        ``sender`` and ``recipient`` must be opposite mailbox roles, and ``kind``
+        must be in ``KINDS``; otherwise raise ``ValueError``. Unsupported JSON
+        payload values are stringified. SQLite and serialization errors propagate,
+        as do event callback errors after the entry has been committed.
+        """
         if {sender, recipient} != {CORRESPONDENT, BOSS}:
             raise ValueError("the mailbox connects the correspondent and the boss only")
         if kind not in KINDS:
@@ -174,6 +193,13 @@ class BossMailbox:
         return entry
 
     def set_status(self, entry_id: str, status: str, by: str, note: str = "") -> dict:
+        """Append a status change and return the updated entry.
+
+        Repeating the current status is a no-op; any other status in ``STATUSES``
+        is accepted without transition ordering. Raise ``ValueError`` for an
+        unknown status and ``KeyError`` for a missing entry. SQLite errors and
+        event callback errors propagate; callbacks run after commit.
+        """
         if status not in STATUSES:
             raise ValueError(f"status must be one of {list(STATUSES)}")
         with self._lock:
@@ -200,6 +226,7 @@ class BossMailbox:
 
     # ------------------------------------------------------------------ read (no side effects)
     def _status_of(self, entry_id: str) -> str:
+        """Return the latest recorded status, or ``new`` when no status exists."""
         r = (
             self._conn()
             .execute(
@@ -211,6 +238,7 @@ class BossMailbox:
         return r["status"] if r else "new"
 
     def get(self, entry_id: str) -> dict | None:
+        """Return an entry with its current status, or ``None``, without marking it read."""
         with self._lock:
             r = (
                 self._conn()
@@ -220,6 +248,10 @@ class BossMailbox:
             return self._row(r, self._status_of(entry_id)) if r else None
 
     def history(self, entry_id: str) -> list[dict]:
+        """Return status changes in append order without changing entry status.
+
+        Entries with no changes and unknown IDs both return an empty list.
+        """
         with self._lock:
             return [
                 dict(x)
@@ -241,6 +273,14 @@ class BossMailbox:
         since: int = 0,
         limit: int = 500,
     ) -> list[dict]:
+        """Return matching entries in sequence order without marking them read.
+
+        ``since`` is an exclusive sequence cursor; ``role`` matches either sender
+        or recipient. Nonempty filters are combined, including current ``status``.
+        ``limit`` is applied last as a Python slice stop (zero returns no entries;
+        a negative value omits that many entries from the end). SQLite errors
+        propagate, including errors opening the queue on its first read.
+        """
         where, args = ["seq > ?"], [since]
         for col, val in (
             ("direction", direction),
@@ -269,5 +309,6 @@ class BossMailbox:
         return out[:limit]
 
     def count(self) -> int:
+        """Return the total number of entries across all statuses."""
         with self._lock:
             return self._conn().execute("SELECT COUNT(*) FROM entries").fetchone()[0]

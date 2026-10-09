@@ -82,6 +82,12 @@ def _wrap(fn):
 
 
 def create_sandbox_app(service: SandboxService) -> FastAPI:
+    """Build the sandbox API and static UI around ``service``.
+
+    The app lifespan starts and stops the service. JSON routes use the main
+    API's token dependency; health and static UI routes are public.
+    """
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         service.start()
@@ -309,6 +315,10 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
         since: int = Query(default=0, ge=0),
         limit: int = Query(default=500, ge=1, le=5000),
     ) -> dict:
+        """List matching entries after the exclusive sequence cursor without marking them read.
+
+        Return the last returned sequence, or ``since`` when no entries match.
+        """
         rows = service.mailbox.list(
             direction=direction,
             role=role,
@@ -327,6 +337,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/boss/mailbox/{entry_id}")
     def boss_mailbox_entry(entry_id: str) -> dict:
+        """Return an entry and status history without marking it read; raise HTTP 404 if absent."""
         e = service.mailbox.get(entry_id)
         if e is None:
             raise HTTPException(404, f"unknown mailbox entry {entry_id}")
@@ -334,16 +345,23 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/boss/pending")
     def boss_pending() -> dict:
+        """Return pending review cases and their count without changing review state."""
         rows = service.pending_reviews()
         return {"pending": rows, "count": len(rows)}
 
     @api.get("/boss/decisions")
     def boss_decisions() -> dict:
+        """Return all non-pending review cases and their count."""
         rows = [c for c in service.list_reviews() if c["state"] != "pending"]
         return {"decisions": rows, "count": len(rows)}
 
     @api.post("/boss/decisions")
     def boss_decide(body: BossDecisionBody) -> dict:
+        """Record a decision and apply its release or quarantine effects immediately.
+
+        Missing messages/reviews become HTTP 404; invalid or already-decided
+        reviews become HTTP 409. Permission errors become HTTP 403.
+        """
         return _wrap(
             lambda: service.boss_decide(
                 body.message_id,
@@ -394,6 +412,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @app.get("/ui/mailbox.js")
     def ui_mailbox_js() -> FileResponse:
+        """Serve the mailbox panel script, or raise HTTP 404 if it is not packaged."""
         return _static("mailbox.js", "text/javascript")
 
     @app.get("/ui/app.css")

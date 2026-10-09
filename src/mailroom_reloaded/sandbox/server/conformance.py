@@ -29,12 +29,19 @@ __all__ = [
 
 
 def split_of(ids: list[str]) -> dict[str, str]:
+    """Label every third sorted ID ``heldout`` (starting with the third), and the rest ``tuned``."""
     return {
         n: ("heldout" if i % 3 == 2 else "tuned") for i, n in enumerate(sorted(ids))
     }
 
 
 def _row(svc: SandboxService, name: str) -> dict[str, Any]:
+    """Reset the service, run one scenario, and return its check results.
+
+    With a worker, wait at most 120 seconds before evaluating the current
+    state; the idle-wait result is ignored. An unavailable evaluation becomes
+    ``not_run``, or ``shed`` if any message was shed. Service errors propagate.
+    """
     svc.reset()
     svc.inject([name], stagger_seconds=0)
     svc.wait_idle(120)
@@ -66,6 +73,13 @@ def _row(svc: SandboxService, name: str) -> dict[str, Any]:
 def run_conformance(
     svc: SandboxService, only: list[str] | None = None
 ) -> dict[str, Any]:
+    """Run selected scenarios separately and return counts plus per-scenario checks.
+
+    Use a started service with disposable state: reset it before each scenario
+    and after a successful run. ``only=None`` or an empty list selects all IDs;
+    split labels always come from the full pack. Unknown IDs raise ``KeyError``
+    after a reset. Other service errors propagate without a final reset.
+    """
     ids = svc.content.scenario_ids()
     split = split_of(ids)
     rows = []
@@ -83,13 +97,15 @@ def family_of(name: str) -> str:
 
 
 def lofo(rows: list[dict]) -> dict[str, Any]:
-    """Leave-one-family-out report.
+    """Summarize supplied results by held-out scenario family.
 
-    Each fold holds one family out; the rules are assumed to have been adjusted only
-    while looking at the other families (the training families), so the held-out family's
-    pass rate is the honest number for that fold. Reported: per-fold held-out and training
-    pass rates, their macro mean (every family weighs the same) and the micro rate, plus
-    failed-check counts per held-out family.
+    Each fold reports held-out and training pass rates, plus failed-check
+    counts per held-out family. The macro mean weights families equally; the
+    micro rate weights rows equally. All verdicts count in rate denominators.
+    No rules are trained here: interpreting rates as held-out performance
+    requires tuning without seeing the held-out family beforehand.
+
+    Raise ``ZeroDivisionError`` if rows contain fewer than two families.
     """
     fams = sorted({family_of(r["scenario"]) for r in rows})
     folds = []
@@ -126,6 +142,7 @@ def lofo(rows: list[dict]) -> dict[str, Any]:
 
 
 def format_lofo(rep: dict[str, Any]) -> str:
+    """Format a ``lofo`` report as a text table with macro and micro pass rates."""
     lines = [
         f"{'fold (held-out family)':<24}{'n':>3}{'pass':>6}{'rate':>7}   training rate"
     ]
@@ -140,7 +157,10 @@ def format_lofo(rep: dict[str, Any]) -> str:
 
 
 def summarise(rows: list[dict]) -> dict[str, Any]:
+    """Return verdict counts by split, failed-check occurrence counts, and the original rows."""
+
     def count(rs: list[dict]) -> dict[str, int]:
+        """Count each reported verdict and include all rows in the total."""
         c = Counter(r["verdict"] for r in rs)
         return {
             "pass": c["pass"],
@@ -163,6 +183,7 @@ def summarise(rows: list[dict]) -> dict[str, Any]:
 
 
 def format_table(result: dict[str, Any]) -> str:
+    """Format scenario verdicts, failed checks, and split totals as a text table."""
     lines = [f"{'scenario':<44}{'split':<8}{'verdict':<9}failed checks"]
     for r in result["scenarios"]:
         lines.append(

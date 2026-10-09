@@ -117,6 +117,7 @@ def _is_number(value: Any) -> bool:
 def _delta(
     after: Mapping[str, float], before: Mapping[str, float], key: str
 ) -> float | None:
+    """Subtract a counter baseline (default zero), or return ``None`` if absent afterward."""
     if key not in after:
         return None
     return after[key] - (before.get(key) or 0.0)

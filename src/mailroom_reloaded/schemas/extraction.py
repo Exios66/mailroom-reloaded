@@ -187,6 +187,7 @@ EXTRACTION_SCHEMAS: dict[str, type[BaseModel]] = {
 
 
 def get_extraction_schema(doc_type: str) -> type[BaseModel]:
+    """Return the extraction model for a document class; raise ``KeyError`` if unknown."""
     try:
         return EXTRACTION_SCHEMAS[doc_type]
     except KeyError:
@@ -199,6 +200,7 @@ def get_extraction_schema(doc_type: str) -> type[BaseModel]:
 
 
 def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
+    """Return a schema accepting null without mutating the input; reuse it if already nullable."""
     if "anyOf" in prop:
         if any(b.get("type") == "null" for b in prop["anyOf"]):
             return prop
@@ -236,6 +238,11 @@ def _strictify(node: Any) -> None:
 
 
 def response_format(doc_type: str) -> dict[str, Any]:
+    """Build a strict JSON-schema response format with required, nullable object fields.
+
+    The model schema is copied before conversion. Unknown document classes
+    raise ``KeyError``.
+    """
     model = get_extraction_schema(doc_type)
     schema = copy.deepcopy(model.model_json_schema())
     _strictify(schema)
@@ -264,6 +271,11 @@ _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
 def _parse_object_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Recover a dictionary from JSON, Python literals, or surrounding prose.
+
+    Return the dictionary and parser label, or ``(None, None)`` when supported
+    parsers reject the text or produce a non-dictionary.
+    """
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
@@ -343,6 +355,12 @@ def _pydantic_valid(doc_type: str, payload: dict[str, Any]) -> tuple[bool, list[
 
 
 def assess_payload(doc_type: str, raw: str | dict) -> SchemaAssessment:
+    """Assess parsing and model validity, retaining the parsed, uncoerced payload.
+
+    Parse failures and validation failures are returned in the assessment;
+    coerced fields name values changed by model validation. Unknown document
+    classes raise ``KeyError`` before parsing.
+    """
     get_extraction_schema(doc_type)  # KeyError on unknown class
     payload, reason = coerce_predicted_payload(raw)
     if payload is None or reason is not None:

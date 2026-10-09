@@ -109,6 +109,10 @@ class Taxonomy(BaseModel):
 
 
 def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
+    """Validate taxonomy sections into models while retaining the original raw mapping.
+
+    Missing required sections raise ``KeyError``; model validation errors propagate.
+    """
     classes = {d["key"]: DocClass(**d) for d in data["doc_classes"]}
     return Taxonomy(
         classes=classes,
@@ -124,6 +128,10 @@ def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
 
 @lru_cache(maxsize=1)
 def load_taxonomy() -> Taxonomy:
+    """Load and cache the packaged YAML taxonomy, returning the shared model instance.
+
+    File, YAML parsing, missing-section, and model validation errors propagate.
+    """
     text = (
         resources.files("mailroom_reloaded") / "config" / "taxonomy.yaml"
     ).read_text("utf-8")

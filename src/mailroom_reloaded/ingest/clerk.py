@@ -149,6 +149,7 @@ def validate_intake(result: dict, text: str) -> dict:
 def _fail(
     method: str, error: str, stats: dict | None = None, pages: int = 0
 ) -> IngestResult:
+    """Return a failed ingest result with empty text and the supplied error and page count."""
     logger.warning("ingest_failed", error=error)
     return IngestResult("", method, pages, stats or {}, {}, error)  # type: ignore[arg-type]
 

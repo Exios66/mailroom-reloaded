@@ -18,6 +18,11 @@ __all__ = ["materialise_draw", "matter_ref_for", "synthetic_pdf"]
 
 
 def matter_ref_for(spec: dict) -> str:
+    """Derive a synthetic matter reference from a dataset draw.
+
+    Groups such as ``cr_0577`` become ``CR-2026-0577``. Otherwise derive a
+    four-digit suffix from class, stratum, and ref; uniqueness is not guaranteed.
+    """
     group = str(spec.get("group") or "")
     m = re.fullmatch(r"([a-z]{1,4})_(\d{2,6})", group)
     if m:
@@ -29,11 +34,15 @@ def matter_ref_for(spec: dict) -> str:
 
 
 def _esc(s: str) -> str:
+    """Escape backslashes and parentheses for a PDF literal string."""
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
 def synthetic_pdf(lines: list[str]) -> bytes:
-    """A minimal one-page PDF (Helvetica text), byte-for-byte deterministic."""
+    """A minimal one-page PDF (Helvetica text), byte-for-byte deterministic.
+
+    Characters outside Latin-1 are replaced with question marks.
+    """
     ops = ["BT", "/F1 11 Tf", "14 TL", "72 740 Td"]
     ops += [f"({_esc(ln)}) Tj T*" for ln in lines]
     ops.append("ET")
@@ -66,7 +75,12 @@ def synthetic_pdf(lines: list[str]) -> bytes:
 
 
 def materialise_draw(spec: dict, directory: Path) -> tuple[Path, str]:
-    """Write the placeholder for one dataset draw; returns (path, delivered filename)."""
+    """Write the placeholder for one dataset draw; return (path, delivered filename).
+
+    Create ``directory`` as needed and overwrite the deterministic destination.
+    ``as`` overrides the delivered name; only its basename is used on disk.
+    Filesystem errors propagate.
+    """
     ref = spec.get("ref")
     cls, stratum = spec.get("class"), spec.get("stratum")
     name = spec.get("as") or f"{ref or f'{cls}_{stratum}'}.pdf"

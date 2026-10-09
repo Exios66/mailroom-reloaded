@@ -309,6 +309,10 @@ def _matrix_drafts(row: dict) -> bool:
 
 
 def _non_english(text: str) -> bool:
+    """Flag text with at least eight tokens and under 12% English stop words.
+
+    This is a language heuristic; shorter text always returns ``False``.
+    """
     toks = re.findall(r"[a-zA-Z\u00c0-\u024f']+", text.lower())
     if len(toks) < 8:
         return False
@@ -521,6 +525,12 @@ class StandInCorrespondent:
         return None, None
 
     def _trust(self, match: dict | None, auth: dict[str, str]) -> tuple[str, list[str]]:
+        """Return a sender trust level and reasons from registry matching and auth.
+
+        Registered addresses/domains require all three auth results to pass for
+        ``verified``. Missing results do not pass; explicit failures yield
+        ``suspicious``, or ``hostile`` for a lookalike domain.
+        """
         vals = [auth.get(k, "none") for k in ("spf", "dkim", "dmarc")]
         ok = all(v == "pass" for v in vals)
         bad = any(v in {"fail", "softfail", "permerror"} for v in vals)
@@ -548,6 +558,11 @@ class StandInCorrespondent:
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Return classification and drafts, adding a Boss forward for possible attacks.
+
+        The forward is returned in ``to_boss`` for the service to persist; this
+        method does not send mail or write the mailbox. Tool errors propagate.
+        """
         res = self._classify(msg, tools)
         attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
         if attacks:
@@ -586,6 +601,13 @@ class StandInCorrespondent:
     def _classify(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Classify wire data into trust, intent, signals, lanes, relations, and drafts.
+
+        Apply empty/auto-reply filters and safety checks before scored triage and
+        the optional triage hook. Read registry, catalog, and eligible attachment
+        text through ``tools``; tool errors propagate. Return proposed actions
+        without running the pipeline or sending drafts.
+        """
         text = f"{msg.subject}\n{msg.body}"
         reasons: list[str] = []
         registry = tools.registry()
@@ -634,6 +656,7 @@ class StandInCorrespondent:
             return CorrespondentResult(**base)
 
         def lanes(default: str, why: str) -> list[dict]:
+            """Assign lanes, overriding the default for missing bytes and risky attachments."""
             out = []
             for a in msg.attachments:
                 if not a.resolved:
@@ -1016,6 +1039,7 @@ class StandInCorrespondent:
             )
 
         def extra(kind: str, priority: str) -> None:
+            """Add a pending signal only if that kind is not already present."""
             if all(x["kind"] != kind for x in signals):
                 signals.append({"kind": kind, "priority": priority, "state": "pending"})
 
@@ -1103,6 +1127,12 @@ class StandInCorrespondent:
         }
 
     def _relations(self, msg, text, lane_list, tools, trust, reasons) -> list[dict]:
+        """Propose links to catalog documents using hashes, references, and wording.
+
+        Skip unresolved and quarantined attachments. Archived/parked hash matches
+        are duplicates with confidence 1.0; other proposals require score >= 0.5
+        and auto-link at >= 0.8. Catalog and attachment-read errors propagate.
+        """
         kind = next(
             (
                 k
@@ -1175,6 +1205,12 @@ class StandInCorrespondent:
     def _drafts(
         self, msg, intent, trust, lane_list, relations, tools, entities
     ) -> list[Draft]:
+        """Return permitted reply drafts, or an empty list when no reply is warranted.
+
+        Apply trust, intent, delegation, and acknowledgment rules. Status facts
+        come only from catalog entries matching extracted references. Tool errors
+        propagate; drafts are neither queued nor sent here.
+        """
         if trust in {"hostile", "suspicious"} or intent in {
             "auto_reply",
             "bounce",
@@ -1276,7 +1312,13 @@ AGENTS: dict[str, type] = {"standin": StandInCorrespondent}
 
 
 def create_correspondent(kind: str = "standin", **options: Any) -> CorrespondentAgent:
-    """Factory seam: register the real agent under another key to replace the stand-in."""
+    """Construct the selected agent, forwarding ``options`` to its constructor.
+
+    Register another key in ``AGENTS`` to replace the stand-in; ``llm`` selects
+    the optional loopback implementation. Unknown keys and ``KeyError`` from
+    registered constructors become ``ValueError``; other constructor errors
+    propagate, including invalid or missing LLM options.
+    """
     if kind == "llm":
         from mailroom_reloaded.sandbox.server.llm_correspondent import LLMCorrespondent
 
