@@ -267,6 +267,11 @@ class MailroomFlow(Flow[MailroomState]):
         """
         state = self.state
         report = compile_report(state)
+        report["status"] = "archived"
+        report["final_classification"] = {
+            "doc_type": self._effective_doc_type(),
+            "doc_subclass": self._effective_subclass(),
+        }
         report["llm_calls"] = self._llm_calls
         state.report = report
         result = archive_document(self._bins, self._manifest, state)
@@ -630,6 +635,7 @@ class MailroomFlow(Flow[MailroomState]):
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_type"),
+            self.state.classification_override.get("doc_type"),
             boss.doc_type
             if (boss is not None and boss.action == "reassign_class")
             else None,
@@ -647,6 +653,8 @@ class MailroomFlow(Flow[MailroomState]):
 
     def _effective_subclass(self) -> str | None:
         """Current doc_subclass: explicit override, boss reassignment, else sort."""
+        if self.state.classification_override:
+            return self.state.classification_override.get("doc_subclass")
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_subclass"),
@@ -744,6 +752,38 @@ class MailroomFlow(Flow[MailroomState]):
         base.path = str(work)
         base.eval_mode = eval_ctx is not None
         self._llm_calls = base.llm_calls
+        if resume_from == "extract" and manifest.status == "parked":
+            boss = base.boss
+            if (
+                boss is not None
+                and boss.action == "reassign_class"
+                and not self._overrides.get("doc_type")
+                and "doc_subclass" not in self._overrides
+            ):
+                # Keep the boss's class: clearing base.boss below would otherwise
+                # fall back to the sorter's class on the approved re-extraction.
+                base.classification_override = {
+                    "doc_type": boss.doc_type,
+                    "doc_subclass": boss.doc_subclass,
+                }
+            base.review_approved = True
+            base.extract_attempts = 0
+            base.boss_reassignments = 0
+            base.boss = None
+            base.verdict = None
+            base.arbiter = None
+            base.extract = None
+            base.report = None
+            manifest.completed_nodes = [
+                n for n in manifest.completed_nodes if n in {"ingest", "bert_primary", "sort"}
+            ]
+        if self._overrides.get("doc_type") or "doc_subclass" in self._overrides:
+            base.classification_override = {
+                "doc_type": self._overrides.get("doc_type") or self._effective_doc_type(),
+                "doc_subclass": self._overrides.get("doc_subclass"),
+            }
+        if resume_from is not None or manifest.status == "processing":
+            base.status = manifest.status = "processing"
         manifest.state = base.model_dump(mode="json")
         save_manifest(self._bins, manifest)
 
@@ -752,6 +792,8 @@ class MailroomFlow(Flow[MailroomState]):
         if self._resume_from:
             self._resume_done = set()
             return self._resume_from
+        if self.state.review_approved:
+            return "gate_extract" if "extract" in self._manifest.completed_nodes else "extract"
         return next_node(self._manifest, NODE_ORDER)
 
     def _drive(self) -> MailroomState:

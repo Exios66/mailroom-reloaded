@@ -61,6 +61,8 @@ class MailroomState(BaseModel):
     extract_attempts: int = 0
     boss_reassignments: int = 0
     llm_calls: int = 0
+    review_approved: bool = False
+    classification_override: dict[str, str | None] = Field(default_factory=dict)
     resorted: bool = False
 
     # trail and run outputs

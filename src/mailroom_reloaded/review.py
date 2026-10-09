@@ -91,10 +91,11 @@ def resolve_review(
         )
     except BaseException:
         # Keep the doc parked: put the file back and restore the parked manifest.
+        # Once the flow has re-claimed the file it owns the manifest, so leave it.
         try:
             if claimed.is_file():
                 os.replace(claimed, path)
-            save_manifest(bins, manifest)
+                save_manifest(bins, manifest)
         except OSError:
             logger.exception("review_restore_failed", doc_id=doc_id)
         raise

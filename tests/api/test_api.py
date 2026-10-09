@@ -717,3 +717,24 @@ def test_internal_value_error_during_correction_is_not_echoed_as_422(env, monkey
         response = c.post("/v1/review/abc/resolve", json={"action": "correct", "doc_type": "contract"})
     assert response.status_code == 500
     assert "internal secret" not in response.text
+
+
+@pytest.mark.parametrize("extract_doc_type,expected", [("contract", "contract"), (None, "correspondence")])
+def test_review_response_reports_the_extracted_class(client, monkeypatch, extract_doc_type, expected):
+    """Verify the resolve response reports the extraction's class, else the sorter's."""
+    import importlib
+    from types import SimpleNamespace
+
+    app_module = importlib.import_module("mailroom_reloaded.api.app")
+
+    extract = SimpleNamespace(doc_type=extract_doc_type) if extract_doc_type else None
+    state = SimpleNamespace(
+        status="archived",
+        route_trail=[],
+        sort=SimpleNamespace(doc_type="correspondence"),
+        extract=extract,
+    )
+    monkeypatch.setattr(app_module, "resolve_review", lambda *a, **k: state)
+    response = client.post("/v1/review/abc/resolve", json={"action": "correct", "doc_type": "contract"})
+    assert response.status_code == 200
+    assert response.json()["doc_type"] == expected

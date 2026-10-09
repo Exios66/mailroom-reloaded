@@ -335,7 +335,10 @@ def resolve_review_endpoint(doc_id: str, payload: ReviewResolve) -> dict:
         "doc_id": doc_id,
         "action": payload.action,
         "status": state.status,
-        "doc_type": state.sort.doc_type if state.sort is not None else payload.doc_type,
+        "doc_type": (
+            state.extract.doc_type if state.extract is not None
+            else state.sort.doc_type if state.sort is not None else payload.doc_type
+        ),
         "route_trail": state.route_trail,
     }
 
