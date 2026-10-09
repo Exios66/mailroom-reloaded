@@ -77,6 +77,15 @@ entries (source `jev` is coloured by action), `inspect` adds a `gate` line with 
 last decision, and boot adds `[ ok ] jev · <provider> calibrated` or `[ -- ] jev · off`.
 API keys are never printed.
 
+## Deep links
+
+`/tui#replay=run:<id>` (or a bare run id) runs `replay run:<id>` once boot finishes. The `/ui`
+runs table links each eval run this way. Only ids that `replay` itself accepts become a command;
+anything else prints `replay: invalid deep link`. The fragment stays in the browser, and the API
+token is still taken from this tab's session storage, never from the URL: when a token is
+configured, type `auth <token>` first and re-run the replay command, since `/ui` does not
+pass its token on.
+
 ## Themes
 
 `dark` (default), `light` (labelled proposed in the kit), and `hc` (high

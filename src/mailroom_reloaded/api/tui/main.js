@@ -8,6 +8,7 @@ import { registerPipeline } from './commands/pipeline.js';
 import { registerLedger } from './commands/ledger.js';
 import { registerReplay } from './commands/replay.js';
 import { registerShell } from './commands/shell.js';
+import { deepLinkCommand, isReplayLink } from './deeplink.js';
 
 async function loadText(name) {
   try {
@@ -67,6 +68,10 @@ export async function start() {
     term.setInputEnabled(true);
   }
   term.focus();
+  const hash = globalThis.location ? globalThis.location.hash : '';
+  const link = deepLinkCommand(hash);
+  if (link) term.run(link).catch(() => {});
+  else if (isReplayLink(hash)) term.ctx.out.line('replay: invalid deep link', 'error');
   return term;
 }
 

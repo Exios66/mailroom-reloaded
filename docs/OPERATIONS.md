@@ -128,6 +128,28 @@ It does not protect:
 The Supabase grants, the trigger and the PostgREST key header in the SQL file are unverified
 until tried on a staging project. Test there before relying on the anchor.
 
+## Replay and ledger views
+
+The `/tui` terminal reads the archive ledger and replays runs; both are read-only except
+pin, unpin and `keep set`, which append ledger entries.
+
+| Command | API | Use |
+| --- | --- | --- |
+| `ledger [--run ID] [--kind K] [--limit N]` | `GET /v1/ledger` | Entries, newest first. |
+| `ledger head` | `GET /v1/ledger/head` | Head seq, hash and entry count. |
+| `ledger verify [run_id]` | `GET /v1/ledger/verify` | Re-checks the hash chain (and a closed run's Merkle root). Not cached; each call walks the chain. |
+| `runs pin\|unpin <run_id>` | `POST /v1/ledger/pin\|unpin` | Protect a run's spans from pruning (or release it). |
+| `runs keep` / `runs keep set <pinned\|all\|recent:N>` | `GET /v1/ledger/keep` / `POST /v1/ledger/policy` | Show or change the retention policy. |
+| `replay [<run_id>]` | `GET /v1/replay/sessions[/{id}/timeline]` | List sessions or open the viewer. |
+
+A run whose spans retention removed lists as `data pruned`; opening it answers 410 and
+`ledger --run <id>` still shows its entries. Deep links: `/tui#replay=run:<id>` opens the viewer
+after boot, and the `/ui` runs table links each run there. The fragment is never sent to the
+server and only ids the `replay` command accepts are acted on. When `API_TOKEN` is set these routes
+are token-gated like the rest of `/v1`. `/tui` keeps its token in its own tab's session storage,
+so arriving from `/ui` needs `auth <token>` once; the link is then run again by hand
+(`replay run:<id>`).
+
 ## Observability
 
 The app emits OpenTelemetry traces and metrics; the compose stack ships a

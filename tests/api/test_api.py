@@ -267,6 +267,8 @@ def test_ui_served(client):
     assert "mailroom" in text.lower()
     assert "6006" in text  # Phoenix link
     assert "3000" in text  # Grafana link
+    assert '"/tui#replay=run:" + encodeURIComponent(r.run_id)' in text  # per-run replay link
+    assert "ev.stopPropagation()" in text  # the link must not also open the cards
 
 
 def test_runs_shape(client):
