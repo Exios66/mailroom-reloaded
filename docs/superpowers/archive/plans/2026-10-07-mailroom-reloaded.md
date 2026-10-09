@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-09** by [the core plan](../../plans/2026-10-09-mailroom-core-plan.md). Kept for history only; do not edit or add tasks here.
+
 # mailroom-reloaded Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. **Execution method chosen by the user: subagent-driven, with every implementer and reviewer subagent dispatched with `model: "sonnet"`.** Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-09** by [the core plan](../../plans/2026-10-09-mailroom-core-plan.md). Kept for history only; do not edit or add tasks here.
+
 # Mailroom Trace Replay Viewer Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
