@@ -259,7 +259,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 
 #### K-00: Reconcile with work already in flight. Do this first.
 **Why:** four things overlap K-series scope and must not be redone or contradicted.
-- [ ] Content PR #5 (H-series): CodeRabbit autofix for 2 findings started 2026-10-09 18:59 and had not delivered. The two findings: one relation scenario may pair unrelated claims; the docs call the batch "frozen" while the scenarios are `draft`. Re-fetch, confirm both are fixed before X-01 merges it.
+- [x] Content PR #5 (H-series): both CodeRabbit findings landed in `c8336b9` (H6 claim grouping; held-out/freeze wording). #5 and #6 are merged to content `main` (`67b9a3e`). Hazard now live: content `main` carries H1-H28 and fails reloaded `main`'s loader until reloaded #44 lands, and content CI cannot see it (K-06). Content PR #7 (K-series work, branch `claude/upbeat-euler-85ifix`) is open.
 - [ ] **The scenario-patch PR (owner reports one is waiting).** At the time of writing no open PR in either repo patches existing scenarios: #5 only adds H1-H28, and reloaded #23 states it makes no content-repo change. When it lands, do **not** redo K-03; verify it against the K-03 decision table (below) and tick K-03 only if every row is covered and the K-03 lint passes.
 - [ ] Reloaded #44 must merge before any pin to an H-series bundle (K-07 shows why).
 - [ ] Re-run `git fetch --all --prune` in both repos; update this block if PR state changed.
@@ -268,7 +268,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 **Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the lock's own comment says the pin is of a *local* build that is not published.
 **Where:** content `tools/build_bundle.py`, `tools/release.sh`, new `tools/requirements.txt`, `CONTENT_SPEC.md` section on releases.
 - [ ] Pin `zstandard==0.25.0` in `tools/requirements.txt`; `build_bundle.py` always prints the version and, under `--release` (passed by `release.sh` only; unit tests build without it), refuses any other version with a clear message.
-- [ ] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) as an extra line in `SHA256SUMS`, so reproducibility can be checked across compressor versions. Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras).
+- [x] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) to a separate `BUILD_INFO` release asset with the `zstandard` version, so reproducibility can be checked across compressor versions. `SHA256SUMS` stays two lines (an extra line would break `sha256sum -c`). Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras). Done in content `840e4e8` (pinned `zstandard==0.25.0` in `tools/requirements.txt`; `--release` refuses other versions).
 - [ ] Test: build twice, same bytes; build with a wrong zstandard version, expect a refusal (unittest with the version string patched).
 - [ ] Doc: state that the **published asset's bytes** are the verification authority for a download; rebuilds are an audit.
 - [ ] After merge, X-01 publishes `v0.5.0` from `f650cfd` **using the pinned version**; confirm the asset sha256 equals `7a32e86e...` before touching the lock.
@@ -363,9 +363,9 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 | D8 | Adopt `docs/evidence/<date>-<topic>/` for screenshots and check output? | Yes |
 | D9 | Rename content `email/` vs `emails/`? | No; document the distinction (done in 1.2) |
 | D10 | Move `DISCUSSION_BOARD.md` into `docs/superpowers/` (as `WORKLOG.md`) or retire it? | Move and update its header |
-| D11 | Bundle verification authority (K-01): the published asset's bytes, with `zstandard` pinned for rebuilds and an extra `tar_sha256` line for audits? Or change the lock to pin the uncompressed tar? | Asset bytes + pinned zstandard + `tar_sha256` line; do not change the lock's six fields (consumer schema is closed) |
-| D12 | Who decides a contested scenario expectation (K-03)? | The delegation matrix and Correspondent-Boss protocol, never the Correspondent's behaviour; the owner breaks ties the matrix cannot |
-| D13 | Where does the fault-injection suite live (K-02)? | Content `tests/` (unittest), seeded from `tools/fault_inject.py`; reloaded gets only the K-06 loader step |
+| D11 | Bundle verification authority (K-01): the published asset's bytes, with `zstandard` pinned for rebuilds and an extra `tar_sha256` line for audits? Or change the lock to pin the uncompressed tar? | **Confirmed by owner 2026-10-09.** Asset bytes + pinned zstandard + `tar_sha256` line; do not change the lock's six fields (consumer schema is closed) |
+| D12 | Who decides a contested scenario expectation (K-03)? | **Confirmed by owner 2026-10-09.** The delegation matrix and Correspondent-Boss protocol, never the Correspondent's behaviour; the owner breaks ties the matrix cannot |
+| D13 | Where does the fault-injection suite live (K-02)? | **Confirmed by owner 2026-10-09.** Content `tests/` (unittest), seeded from `tools/fault_inject.py`; reloaded gets only the K-06 loader step |
 
 ---
 
