@@ -104,9 +104,9 @@ begin
             new.seq, current_max
             using errcode = 'check_violation';
     end if;
-    if new.seq - coalesce(current_max, 0) > 1000000 then
+    if current_max is not null and new.seq - current_max > 1000000 then
         raise exception 'mailroom_anchor: seq % jumps more than 1000000 past the anchored head %',
-            new.seq, coalesce(current_max, 0)
+            new.seq, current_max
             using errcode = 'check_violation';
     end if;
     return new;

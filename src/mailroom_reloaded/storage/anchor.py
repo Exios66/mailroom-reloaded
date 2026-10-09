@@ -20,7 +20,7 @@ credential (who can append anchors over a rewritten tail; only an off-host ``exp
 helps). The trigger, grants and Supabase key header can only be tested against a live
 project; see the SQL file.
 
-Pushes never block or fail the pipeline: a daemon thread retries three times (1 s, 4 s, 16 s)
+Pushes never block or fail the pipeline: a daemon thread makes up to three attempts (1 s and 4 s apart)
 with 5 s timeouts, and the key is redacted from every logged error.
 """
 
@@ -366,7 +366,9 @@ class SqlBackend:
             and "sslmode" not in parsed.query
             and (parsed.host or "") not in LOOPBACK
         ):
-            connect_args["sslmode"] = "require"  # TLS unless the operator chose otherwise
+            # verify the certificate and host name unless the operator chose otherwise;
+            # a private CA needs ``sslrootcert`` in the DSN
+            connect_args["sslmode"] = "verify-full"
         try:
             self._engine = create_engine(parsed, connect_args=connect_args)
         except ModuleNotFoundError:
@@ -495,7 +497,20 @@ def push_head(ledger: Ledger, backend: Backend) -> PushResult:
             )
         if remote.seq == head.seq:
             return PushResult("already", head.seq, head.entry_hash)
-    backend.push(head.seq, head.entry_hash)
+    try:
+        backend.push(head.seq, head.entry_hash)
+    except AnchorConflict:
+        # another writer may have anchored the same or a newer head in the meantime;
+        # that is fine when it is a prefix of our chain, tamper otherwise
+        ledger.flush()
+        latest = backend.head()
+        if (
+            latest is not None
+            and latest.seq >= head.seq
+            and _local_hash_at(ledger, latest.seq) == latest.entry_hash
+        ):
+            return PushResult("already", latest.seq, latest.entry_hash)
+        raise
     return PushResult("pushed", head.seq, head.entry_hash)
 
 

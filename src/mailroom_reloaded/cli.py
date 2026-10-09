@@ -279,6 +279,9 @@ def audit_verify(
 
     ledger = get_ledger(anchor=False)
     verdict = ledger.verify(run)
+    if run is not None and not verdict.ok and verdict.detail == "unknown run":
+        typer.echo(f"unknown run {run!r}")
+        raise typer.Exit(2)
     if not verdict.ok:
         where = f" at {verdict.broken_at}" if verdict.broken_at is not None else ""
         typer.echo(f"chain: broken{where} ({verdict.detail or 'invalid'})")
@@ -468,6 +471,13 @@ gmail_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(gmail_app, name="gmail")
+
+from mailroom_reloaded.sandbox.content.cli import sandbox_app
+from mailroom_reloaded.sandbox.server import (
+    cli as _sandbox_server_cli,  # noqa: F401  (registers `sandbox serve`)
+)
+
+app.add_typer(sandbox_app, name="sandbox")
 
 
 def _gmail_failure(exc: Exception) -> typer.Exit:

@@ -134,7 +134,9 @@ def test_trigger_function_hardening(sql: str) -> None:
     assert "set search_path = pg_catalog, pg_temp" in body
     assert "pg_catalog.pg_advisory_xact_lock" in body
     assert "from public.mailroom_anchor" in body
-    assert "> 1000000" in body  # max step
+    assert (
+        "current_max is not null and new.seq - current_max > 1000000" in body
+    )  # max step, not on the first anchor
     assert "raise exception" in body
     # execute revoked from PUBLIC and the Supabase roles, guarded by role-exists
     assert (

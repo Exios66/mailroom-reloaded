@@ -94,8 +94,8 @@ mailroom audit export-head [--out PATH]
 - `audit verify` checks the local chain (one run with `--run`). Without `--external` it
   exits only 0 or 1. With `--external` it also compares the head with the anchor.
 - `audit anchor` pushes the current head now. Pushes also happen automatically in a
-  background thread after `run_closed`, pin, unpin, policy and prune entries; they retry
-  three times and never block or fail the pipeline.
+  background thread after `run_closed`, pin, unpin, policy and prune entries; they make up to
+  three attempts and never block or fail the pipeline.
 - `audit export-head` prints `seq`, `entry_hash`, `ts` and `exported_at` as JSON (or writes
   it to `--out/-o`), whatever `MAILROOM_ANCHOR` is set to. An empty ledger prints
   `ledger empty` and exits 0. Pin the output somewhere the pipeline host cannot write.

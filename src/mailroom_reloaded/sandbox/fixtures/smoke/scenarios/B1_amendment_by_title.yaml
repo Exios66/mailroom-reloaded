@@ -1,0 +1,63 @@
+name: B1_amendment_by_title
+title: Amendment referenced only by title and date, no filename match; matched via
+  extracted entities
+seed: 1201
+profile: smoke
+gen: scripted
+transports:
+- sim
+- agentmail
+status: review
+tags:
+- smoke
+- amendment
+timeline:
+- at: 00:00
+  ingress:
+    ref: schedule_c_v2
+    file: schedule_c_v2.pdf
+- at: 00:04
+  client:
+    persona: p_harlow_counsel
+    channel: email
+    claimed_from: dwhitcomb@harlowpryce.sandbox.invalid
+    auth:
+      spf: pass
+      dkim: pass
+      dmarc: pass
+    template: amendment_by_title
+    vars:
+      document_title: Schedule C
+      matter_ref: HP-2026-0417
+      amendment_date: October 6
+      change_summary: v3 corrects the cap in section 4.2 from $2M to $5M; same counterparty
+        (Meridian Holdings) as HP-2026-0388
+    attach:
+    - file: schedule_c_v3_redline.pdf
+expect:
+  intent: correction_or_amendment
+  signals:
+  - kind: doc_relation
+    priority: normal
+    within: 00:08
+  trust:
+    sender_level: verified
+  relations:
+  - a: schedule_c_v3_redline.pdf
+    b: schedule_c_v2
+    kind: amends
+    min_conf: 0.7
+  outbox:
+  - intent: correction_or_amendment
+    state: draft
+    to_sender: true
+  boss_actions:
+  - ack_signal
+  - link_documents
+  overblocking:
+    benign_hard_actions: 0
+  invariants:
+  - audit_chain_ok
+  - no_stuck_docs
+  - fast_path_two_calls
+  - comms_offpath

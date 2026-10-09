@@ -49,6 +49,7 @@ class ScoreSpec:
 
 
 def _s(*args: Any, **kw: Any) -> tuple[str, ScoreSpec]:
+    """Construct a score spec and pair it with its name for registry insertion."""
     spec = ScoreSpec(*args, **kw)
     return spec.name, spec
 
@@ -191,7 +192,11 @@ _FIELD_SPEC = ScoreSpec(
 
 
 def spec_for(name: str) -> ScoreSpec | None:
-    """The spec of ``name``, or ``None`` for an unregistered score."""
+    """The spec of ``name``, or ``None`` for an unregistered score.
+
+    Dynamic ``extraction_field_score.<field>`` names share a spec and require
+    a field suffix of 1 to 80 characters, inclusive.
+    """
     if name in SCORE_SPECS:
         return SCORE_SPECS[name]
     if name.startswith(_FIELD_PREFIX) and 0 < len(name) - len(_FIELD_PREFIX) <= 80:
@@ -200,7 +205,13 @@ def spec_for(name: str) -> ScoreSpec | None:
 
 
 def _coerce(spec: ScoreSpec, value: Any) -> Any:
-    """``value`` as the span-attribute form for ``spec`` (raises ``ValueError`` on a mismatch)."""
+    """Convert a score to its span-attribute form.
+
+    Boolean scores accept booleans or numeric 0/1; numeric scores accept finite
+    ints/floats, excluding booleans. Mismatches raise ``ValueError``. JSON is
+    serialized and truncated to 1,024 characters; other strings to 256. A
+    truncated JSON value may be invalid JSON. Other conversion errors propagate.
+    """
     if spec.data_type == "boolean":
         if isinstance(value, bool):
             return value
@@ -222,10 +233,13 @@ def _coerce(spec: ScoreSpec, value: Any) -> Any:
 def emit_score(
     span: Span, name: str, value: Any, *, strict: bool | None = None
 ) -> bool:
-    """Record score ``name`` on ``span``. Returns whether it was written.
+    """Set ``mailroom.score.<name>`` and add a ``mailroom.score`` event to ``span``.
 
-    An unknown name or a wrongly typed value raises ``ValueError`` when ``strict``
-    (default: under pytest) and is logged and skipped otherwise.
+    Return ``True`` after both span calls, even if the span is not recording.
+    An unknown name or a ``ValueError`` during coercion raises when ``strict``
+    (default: when pytest is loaded); otherwise return ``False`` without writing.
+    Other coercion errors and errors from the span calls propagate regardless
+    of ``strict``. See :func:`_coerce` for accepted values and truncation limits.
     """
     strict = ("pytest" in sys.modules) if strict is None else strict
     spec = spec_for(name)

@@ -1,0 +1,9 @@
+# Pins the sandbox content pack. Consumers never track a branch.
+# NOTE: tag v0.5.0 / its release are not published yet; the sha256 is that of the
+# locally built, reproducible bundle (tools/build_bundle.py at the pinned commit).
+repo: Exios66/mailroom-sandbox-content
+tag: v0.5.0
+commit: f650cfd95071ce4ec61b14a80482e7b3c495aacc
+bundle_sha256: 7a32e86efcc91c142bb8cdbf18241f4222365760c475166beddd98ff0d91d135
+schema_version: "2.0"
+dataset_revision: ed7576b6

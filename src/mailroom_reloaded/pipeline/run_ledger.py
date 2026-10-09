@@ -193,12 +193,13 @@ def _closed_snapshot() -> frozenset[str]:
         return frozenset(_closed)
 
 
-def ensure_live_run(ledger: Ledger, scope: RunScope) -> str:
+def ensure_live_run(ledger: Ledger, scope: RunScope) -> str | None:
     """Open the live run for ``scope`` and lazily close any other live run (rollover).
 
     Returns the run id a document finishing now should be recorded under: ``scope.run_id``
     normally, but the current live bucket when ``scope.run_id`` was already closed (a
     document that outlived its day's rollover must not append after ``run_closed``).
+    Returns ``None`` if that run cannot be opened, including a closed date bucket.
     """
     try:
         if scope.environment == "eval":
@@ -210,7 +211,7 @@ def ensure_live_run(ledger: Ledger, scope: RunScope) -> str:
             run_id = live_run_id()
             if run_id in _closed_snapshot():
                 run_id = f"live-{datetime.now(UTC):%Y%m%d}"  # never reopen: fall back to the date bucket
-        open_run(
+        if not open_run(
             ledger,
             run_id,
             "live",
@@ -220,7 +221,8 @@ def ensure_live_run(ledger: Ledger, scope: RunScope) -> str:
             prompt_set="frozen_v1",
             environment=scope.environment,
             source=scope.source,
-        )
+        ):
+            return None
         with _lock:
             first = run_id not in _rolled
             _rolled.add(run_id)
@@ -231,7 +233,7 @@ def ensure_live_run(ledger: Ledger, scope: RunScope) -> str:
         return run_id
     except Exception:
         logger.warning("ledger_ensure_live_run_failed", exc_info=True)
-        return scope.run_id
+        return None
 
 
 def close_other_live_runs(ledger: Ledger, keep_run_id: str) -> None:
@@ -332,6 +334,8 @@ def record_document(
         run_id = ensure_live_run(
             ledger, scope
         )  # a rollover may have closed the run mid-document
+        if run_id is None:
+            return
         outcome = "aborted" if aborted else _OUTCOME.get(state.status, "aborted")
         duration = time.monotonic() - base.started
         deltas = _role_deltas(state, base)
