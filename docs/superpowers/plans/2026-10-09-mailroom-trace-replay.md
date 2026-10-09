@@ -410,7 +410,7 @@ src/mailroom_reloaded/
   obs/scores.py               (new)    SCORE_SPECS registry + emit_score(span, name, value)
   obs/reconsideration.py      (new)    port of The-Mailroom collect_review_causes
   obs/metrics.py              (modify) auto-merge run_id/environment labels; retries/escalations/review.causes
-  obs/tracing.py              (modify) span store after masking; per-run Phoenix project provider for eval
+  obs/tracing.py              (modify) attach the span store (batch, masks internally); no per-run provider
   storage/ledger.py           (new)    archive ledger: tables, writer thread, Merkle root, verify (shares hashing with schemas/audit.py; audit_log.py untouched)
   storage/anchor.py           (new)    optional external anchor: none|export|postgres|supabase
   storage/retention.py        (new)    keep classes, prune, showcase seed, pin/unpin
@@ -422,16 +422,16 @@ src/mailroom_reloaded/
   llm/client.py, llm/retry.py (modify) role/prompt/cost/served-model/retry attributes and events
   eval/runner.py              (modify) run context, GT attrs, grading scores on spans
   watcher.py                  (modify) live run context
-  settings.py                 (modify) trace_store*, environment, run_id, public_url
-  cli.py                      (modify) `mailroom replay import|export|sessions`
+  settings.py                 (modify) trace_keep, anchor, anchor_url, anchor_key, public_url; _empty_to_none extended
+  cli.py                      (modify) `mailroom replay export|sessions` (import deferred); `mailroom audit verify|anchor|export-head`
   api/app.py                  (modify) /v1/replay/sessions, /v1/replay/{session}, /v1/replay/live
   api/tui/terminal.js         (modify) ctx.takeover(factory)
   api/tui/main.js             (modify) registerReplay; #replay= deep link
   api/tui/commands/replay.js  (new)
   api/tui/commands/ledger.js  (new)    ledger, ledger verify|head|anchor; runs pin|unpin|keep in pipeline.js
   api/ui/index.html           (modify) Eval runs: third column `replay ↗`
-src/mailroom_reloaded/showcase/*.json (new)  four showcase replay/v1 files (package data)
-  api/app.py also: /v1/ledger*, /v1/ledger/runs
+  showcase/*.json             (new)    four showcase replay/v1 files (package data)
+  api/app.py also: /v1/ledger*, /v1/runs/{id}/ledger
   api/tui/replay/{clock,model,view,panels,stations}.js     (new)
   api/tui/tokens.css, tui.css (modify) .replay-* layout; station role tokens (done)
 deploy/grafana/dashboards/{pipeline,quality}.json          (modify) replay ↗ / phoenix ↗ links, decision panels
