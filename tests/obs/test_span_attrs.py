@@ -477,6 +477,7 @@ def test_a_length_capped_call_is_flagged_on_its_span(exporter, mock_provider) ->
         call_structured("sorter", [{"role": "user", "content": "x"}])
     span = _by_name(exporter)["mailroom.llm.sorter"][-1]
     assert span.attributes["mailroom.length_capped"] is True
+    assert span.attributes["mailroom.tokens.total"] == 15  # the capped call still cost tokens
     assert span.status.status_code.name == "ERROR"
 
 

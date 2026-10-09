@@ -187,8 +187,9 @@ def _run_chunk(
             result = call_structured(
                 role, messages, response_format=rf, tools=tool_defs, **sampling
             )
-        except LengthFinishReasonError:
+        except LengthFinishReasonError as exc:
             calls += 1
+            usage = usage + exc.usage  # a capped call is still spend
             if dagger and length_attempt == 0:
                 continue
             return None, False, None, "LengthFinishReasonError", calls, usage

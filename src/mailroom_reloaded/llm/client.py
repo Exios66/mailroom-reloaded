@@ -315,26 +315,27 @@ def call_structured(
                 timeout=timeout,
                 **sampling,
             )
-        except LengthFinishReasonError:
+        except LengthFinishReasonError as exc:
+            _annotate_llm_span(span, role, exc.usage)
             span.set_attribute("mailroom.length_capped", True)
-            _annotate_llm_span(span, role, None)
             raise
         except BaseException:
             _annotate_llm_span(span, role, None)
             raise
-        _annotate_llm_span(span, role, result)
+        _annotate_llm_span(span, role, result.usage, result)
         return result
 
 
-def _annotate_llm_span(span: Any, role: str, result: LLMResult | None) -> None:
+def _annotate_llm_span(
+    span: Any, role: str, usage: Usage | None, result: LLMResult | None = None
+) -> None:
     """Model, token and cost attributes for a ``mailroom.llm.<role>`` span (best effort)."""
     try:
         r = resolve(role)
         span.set_attribute("mailroom.model", r.model)
         span.set_attribute("mailroom.provider", r.provider)
-        if result is None:
+        if usage is None:
             return
-        usage = result.usage
         span.set_attribute("mailroom.tokens.prompt", usage.prompt_tokens)
         span.set_attribute("mailroom.tokens.completion", usage.completion_tokens)
         span.set_attribute("mailroom.tokens.total", usage.total_tokens)
@@ -343,9 +344,10 @@ def _annotate_llm_span(span: Any, role: str, result: LLMResult | None) -> None:
         span.set_attribute("mailroom.cost.prompt", prompt_cost)
         span.set_attribute("mailroom.cost.completion", completion_cost)
         span.set_attribute("mailroom.cost.total", prompt_cost + completion_cost)
-        span.set_attribute("mailroom.tool_rounds", result.tool_rounds)
-        span.set_attribute("mailroom.parsed", result.parsed is not None)
-        span.set_attribute("mailroom.length_capped", False)
+        if result is not None:
+            span.set_attribute("mailroom.tool_rounds", result.tool_rounds)
+            span.set_attribute("mailroom.parsed", result.parsed is not None)
+            span.set_attribute("mailroom.length_capped", False)
     except Exception:
         logger.debug("llm_span_annotation_failed", role=role, exc_info=True)
 
@@ -410,7 +412,7 @@ def _call_structured(
         {"role": role, "provider": r.provider, "model": r.model},
     )
     if finish == "length":
-        raise LengthFinishReasonError(f"{role}: output hit the length cap")
+        raise LengthFinishReasonError(f"{role}: output hit the length cap", usage=usage)
     content = choice.message.content or ""
     return LLMResult(
         content=content,
