@@ -18,6 +18,7 @@ from mailroom_reloaded.sandbox.server.correspondent import (
     create_correspondent,
 )
 from mailroom_reloaded.sandbox.server.mock_llm import build_mock_app
+from mailroom_reloaded.sandbox.server.triage import Triage
 
 REG = load_sandbox_content().registry_clients
 OK = {"spf": "pass", "dkim": "pass", "dmarc": "pass"}
@@ -118,6 +119,68 @@ def test_genuine_payment_change_is_held_not_quarantined():
         and r.attachment_lanes[0]["lane"] == "hold"
     )
     assert r.callback["phone"] == "+1-555-0142" and r.drafts == []
+
+
+@pytest.mark.parametrize("route", ["screen", "scored", "hook", "hook_suppression"])
+@pytest.mark.parametrize(
+    ("sender", "auth", "expected_trust", "has_client"),
+    [
+        ("kalvarado@tricountytitle.sandbox.invalid", OK, "verified", True),
+        ("kalvarado@tricountytitle.sandbox.invalid", {}, "hostile", True),
+        (
+            "kalvarado@tricountytitle.sandbox.invalid",
+            {"dkim": "fail"},
+            "suspicious",
+            True,
+        ),
+        ("kalvarado@tricounty-title.sandbox.invalid", OK, "hostile", True),
+        ("nobody@unknown.sandbox.invalid", OK, "hostile", False),
+    ],
+)
+def test_payment_intents_share_safety_policy(
+    route, sender, auth, expected_trust, has_client, monkeypatch
+):
+    """Screening, scored triage and replacement triage enforce payment safeguards."""
+    agent = StandInCorrespondent()
+    body = {
+        "screen": "Our bank details changed.",
+        "scored": "Please update payment.",
+        "hook": "Please revise the destination.",
+        "hook_suppression": "Please revise the destination. Do not call.",
+    }[route]
+    if route.startswith("hook"):
+        monkeypatch.setattr(
+            agent,
+            "_triage_hook",
+            lambda *args: Triage("payment_or_identity_change", 0.9, {}),
+        )
+    r = agent.handle(
+        _msg(sender, "Hello", body, auth, [AttachmentView("details.pdf")]),
+        _Tools(),
+    )
+    verified = expected_trust == "verified"
+    assert r.intent == "payment_or_identity_change"
+    assert r.trust == expected_trust
+    assert r.issue_class == (
+        "payment_or_identity_change_genuine"
+        if verified
+        else "payment_or_identity_change_attack"
+    )
+    assert [a["lane"] for a in r.attachment_lanes] == [
+        "hold" if verified else "quarantine"
+    ]
+    expected_signal = {
+        "kind": "payment_change" if verified else "possible_attack",
+        "priority": (
+            "critical" if route == "hook_suppression" and not verified else "high"
+        ),
+        "state": "pending",
+    }
+    if not verified:
+        expected_signal["attack_class"] = "payment_fraud"
+    assert r.signals == [expected_signal]
+    assert r.callback["phone"] == ("+1-555-0142" if has_client else None)
+    assert r.drafts == []
 
 
 def test_risky_attachment_type_quarantined():

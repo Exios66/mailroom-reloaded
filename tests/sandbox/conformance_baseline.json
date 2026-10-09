@@ -10,6 +10,13 @@
  "heldout": {
   "fail": 0,
   "not_run": 0,
+  "pass": 0,
+  "shed": 0,
+  "total": 0
+ },
+ "positional_smoke_fixture": {
+  "fail": 0,
+  "not_run": 0,
   "pass": 2,
   "shed": 0,
   "total": 2
@@ -36,7 +43,7 @@
    "failed_checks": [],
    "scenario": "B1_amendment_by_title",
    "shed_messages": 0,
-   "split": "heldout",
+   "split": "positional_smoke_fixture",
    "verdict": "pass"
   },
   {
@@ -60,7 +67,7 @@
    "failed_checks": [],
    "scenario": "F1_personal_address_lockout",
    "shed_messages": 0,
-   "split": "heldout",
+   "split": "positional_smoke_fixture",
    "verdict": "pass"
   }
  ],

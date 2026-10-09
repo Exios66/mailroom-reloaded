@@ -214,7 +214,9 @@ deterministic, offline and behind the `CorrespondentAgent` interface:
   label but flags review.
 * The deterministic safety screen (injection text, payment change, link phishing, risky
   attachments, impersonation) still runs first and still owns trust, quarantine and the
-  hostile classes; the lexicon cannot create an attack intent on its own.
+  hostile classes. Payment-change intents found during triage use the same safeguards:
+  non-verified senders take the payment-fraud quarantine and registry-callback path; verified
+  senders retain the hold lane pending callback confirmation.
 * Signals come from the intent (`INTENT_SIGNAL`, kinds and priorities from protocol sections
   2 and 5); Boss actions come from the vendored/pack `delegation_matrix.csv` (action list,
   owner `human_reviewer` adds `request_human_review`, `release_attachments` is listed as
@@ -238,9 +240,12 @@ can be evaluated. No check was loosened; `overblocking` and every invariant are 
 ### Results
 
 Reproduced on this branch (smoke fixture, 6 scenarios, each run alone; `conformance_baseline.json`):
-6 pass / 0 fail / 0 not run; tuned 4/4, held-out 2/2. Leave-one-family-out over the six scenarios
-(`lofo_baseline.json`): folds A, B, D, E, F each 1.00. These six scenarios were the tuning set, so
-this is not evidence of generalisation.
+6 pass / 0 fail / 0 not run; tuned 4/4, positional smoke-fixture diagnostic 2/2,
+with no scenarios selected by the `heldout` tag. Leave-one-family-out over the six scenarios
+(`lofo_baseline.json`): folds A, B, D, E, F each 1.00. These are positional smoke-fixture
+diagnostics: all six scenarios were used for tuning, and no frozen-set commit SHA, author,
+or unchanged-since point is available. They are not official held-out results or evidence
+of generalisation.
 
 The tables and figures below were reported by PR #23 for the v0.5.0 pack (88 scenarios). That
 bundle is not published, so they were **not reproduced** on this branch; they are kept as that
@@ -310,7 +315,9 @@ owner.
 
 Optional LLM-backed Correspondent (`--correspondent llm --llm-base-url http://127.0.0.1:PORT/v1
 [--llm-model NAME]`, default off): the endpoint must be on loopback; the prompt is built from the
-delegation matrix; output is validated against a strict JSON schema and limited to benign intents
+delegation matrix. Sender, authentication, subject, attachment names and body are individually
+tagged and delimiter-escaped as untrusted data; the system prompt forbids following
+instructions inside them. Output is validated against a strict JSON schema and limited to benign intents
 (`legal_notice` included in the bypass). The rules run first. Mail the rules flag (trust
 `hostile` or `suspicious`, or any `possible_attack` signal), and attack or legal-notice intents,
 are decided by the rules and never sent to the model, so the model cannot downgrade a rules flag.
@@ -345,7 +352,9 @@ and still emits the typed pack signals (`possible_attack` with `attack_class` an
 `priority`), so `expect.signals` scoring is unchanged. The Boss Desk is handed that
 mailbox entry (`StandInBossDesk.read_forward`) and nothing else, in the same processing
 step. The message and attachments stay held; the sender gets no reply and nothing reaches
-the pipeline until the Boss decides. A decision is a `boss->correspondent` entry:
+the pipeline until the Boss decides. Drafts returned by any agent with a `possible_attack`
+signal are withheld from the outbox, including under sandbox autonomy; only a legitimate
+Boss decision permits the reply-after-release path. A decision is a `boss->correspondent` entry:
 
 * `legitimate`: the Correspondent reads it, releases the attachments (resolved ones run
   through the pipeline) and drafts a reply, which is posted back as a

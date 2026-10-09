@@ -23,6 +23,22 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Sandbox review hardening] Payment, prompt and Boss safeguards — CodeRabbit Agent
+- **Status:** done
+- **Files:** `sandbox/server/{correspondent,llm_correspondent,service}.py`, their sandbox
+  regression tests, `tests/sandbox/conformance_baseline.json`, `docs/SANDBOX_SERVER.md`,
+  `CHANGELOG.md`.
+- **Evidence:** `.venv/bin/pytest tests/sandbox tests/test_dependency_fence.py tests/test_prompts.py -q`
+  → 729 passed (one dependency deprecation warning); `.venv/bin/ruff check .` → all checks passed.
+  Regenerated isolated smoke baseline: 6 pass, 4 tuned + 2 positional smoke-fixture diagnostics,
+  0 official held-out scenarios; LOFO folds unchanged at 1.00.
+- **Commit:** uncommitted changes on `d28ccf1366ae4125b72aeb6bc9275568c6a5c1e1`.
+- **Notes:** all five supplied findings verified against current code. Software/UI specialist
+  implemented shared payment safeguards and the attack-draft gate; prompt specialist implemented
+  tagged, escaped input fields. Background ledger writes can log missing-table errors during
+  sandbox resets/teardown; assertions pass. Freeze provenance is unavailable, so smoke rates
+  are explicitly diagnostics.
+
 ### [Jev gate + docs] Opt-in Jev probabilistic scorer / route gate landed on PR #5 — orchestrator
 - **Status:** done (Task 24 Step 4 live run still env-blocked)
 - **Sources (issue #8):** hosted Jev `typesafe/jev-1.13` via OpenRouter Decisions API

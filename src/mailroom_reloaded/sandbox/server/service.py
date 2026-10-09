@@ -649,12 +649,15 @@ class SandboxService:
                 self.emit("boss.action", mid, a)
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
-            self._queue_drafts(msg, res.drafts)
             # the forward is derived from the result for every agent, so an agent that
             # reports a possible_attack signal is held for the Boss even without to_boss
             fwd = hostile_forward(wire, res)
             if fwd is not None:
                 self._forward_to_boss(msg, fwd)
+            else:
+                # Attack results wait for a legitimate decision; release generates
+                # a fresh reply rather than approving the agent's initial drafts.
+                self._queue_drafts(msg, res.drafts)
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:
             if "correspondent" not in msg["flows_done"]:

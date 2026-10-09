@@ -827,15 +827,14 @@ class StandInCorrespondent:
             text, "payment_or_identity_change"
         ) >= 2.6 and not _NO_CHANGE.search(text)
         suppress = bool(_CALL_SUPPRESS.search(text))
-        if payment:
+
+        def payment_result() -> CorrespondentResult:
+            """Apply the same payment safety policy for screening and triage."""
             reasons.append(
                 "safety: payment/identity change language"
                 + ("; call suppression" if suppress else "")
             )
-            bad_sender = trust in {"hostile", "suspicious"} or (
-                suppress and trust != "verified"
-            )
-            if bad_sender:
+            if trust != "verified":
                 # a registered sender whose authentication fails stays "suspicious"; a
                 # lookalike or unknown origin is hostile
                 final_trust = (
@@ -885,6 +884,9 @@ class StandInCorrespondent:
                 callback=cb,
                 summary="Verified sender announces a payment change; attachments held pending callback.",
             )
+
+        if payment:
+            return payment_result()
         if _URL.search(text) and (
             _CRED.search(text)
             or (_CTA.search(text) and trust in {"suspicious", "hostile"})
@@ -947,6 +949,8 @@ class StandInCorrespondent:
         tri = score_intents(text, feats, msg.subject)
         tri = self._triage_hook(msg, text, feats, tri, tools) or tri
         intent = tri.intent
+        if intent == "payment_or_identity_change":
+            return payment_result()
         issue = INTENT_ISSUE[intent]
         sig, pri = INTENT_SIGNAL[intent]
         if intent == "urgent_deadline" and _COURT_URGENT.search(text):

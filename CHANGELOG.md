@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sandbox review hardening: payment intents from triage share the safety-screen fraud/hold
+  handling; attack drafts wait for a legitimate Boss decision before entering the outbox;
+  inbound LLM prompt fields are individually tagged and escaped as untrusted data.
+- Relabel the two positional smoke-fixture baseline results and their documented LOFO
+  reporting as diagnostics, with zero official held-out scenarios and no freeze provenance.
+
 ### Added
 
 - Sandbox Correspondent triage v2 (recut from PR #23 onto the Boss mailbox branch): scored, deterministic intent triage with an abstain path and intent lexicons (`sandbox/server/triage.py`) replaces the first-match keyword chain in the stand-in Correspondent; trust, registry-match, and hostile-mail rules are refined; `link_documents` with no candidate is recorded as considered; submission drafts list one named relation per attachment and target, with source filenames.

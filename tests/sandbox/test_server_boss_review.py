@@ -16,6 +16,7 @@ from mailroom_reloaded.sandbox.server.bossdesk import StandInBossDesk
 from mailroom_reloaded.sandbox.server.content import load_sandbox_content
 from mailroom_reloaded.sandbox.server.correspondent import (
     AttachmentView,
+    Draft,
     StandInCorrespondent,
     WireMessage,
 )
@@ -163,6 +164,60 @@ def test_forward_is_derived_from_the_result_for_any_agent(make_client):
     assert fwd[0]["direction"] == "correspondent->boss"
     pend = client.get(f"{API}/boss/pending").json()
     assert pend["count"] == 1
+
+
+@pytest.mark.parametrize("autonomy", ["human", "sandbox"])
+@pytest.mark.parametrize("signal_state", ["pending", "dismissed"])
+def test_attack_drafts_wait_for_legitimate_boss_decision(
+    idle_service, autonomy, signal_state
+):
+    """Replacement agents cannot bypass Boss review by including outbound drafts."""
+
+    class AttackDraftAgent(StandInCorrespondent):
+        def handle(self, msg, tools):
+            """Report an attack alongside an otherwise approvable draft."""
+            res = super().handle(msg, tools)
+            assert res.drafts
+            res.signals = [
+                {
+                    "kind": "possible_attack",
+                    "attack_class": "payment_fraud",
+                    "priority": "high",
+                    "state": signal_state,
+                }
+            ]
+            res.to_boss = []
+            return res
+
+        def reply_after_release(self, msg, tools):
+            """Produce a distinct draft only after the Boss releases the message."""
+            return [
+                Draft(msg.from_addr, "Reviewed reply", "Confirmed.", "general_question")
+            ]
+
+    svc = idle_service
+    svc.autonomy = autonomy
+    svc.agent = AttackDraftAgent()
+    result = svc.inject(["A1_status_inquiry"], flows=["correspondent"])
+    assert svc.wait_idle()
+    mid = result["message_ids"][0]
+    message = svc.message(mid)
+    assert message["state"] == "processed", message["error"]
+    assert message["correspondent"]["drafts"]
+    assert message["outbox_ids"] == []
+    assert svc.outbox.items == {}
+    assert svc.mailbox.list(message_id=mid, kind="draft_for_approval") == []
+    assert svc.mailbox.list(message_id=mid, kind="approval") == []
+    assert svc.reviews[mid]["state"] == (
+        "pending" if autonomy == "human" else "quarantined"
+    )
+    if autonomy == "human":
+        svc.boss_decide(mid, "legitimate", "Registry callback confirmed")
+        drafts = list(svc.outbox.items.values())
+        assert len(drafts) == 1
+        assert drafts[0]["subject"] == "Reviewed reply"
+        assert drafts[0]["state"] == "draft"
+        assert len(svc.mailbox.list(message_id=mid, kind="draft_for_approval")) == 1
 
 
 def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
