@@ -110,3 +110,20 @@ def test_transcribe_pages_sends_page_images(scanned_pdf, mock_provider):
     assert "Harbor & Finch" in out
     content = mock_provider.requests[0]["messages"][-1]["content"]
     assert any(part.get("type") == "image_url" and part["image_url"]["url"].startswith("data:image/png;base64,") for part in content)
+
+
+def test_docx_preserves_paragraph_and_table_order(tmp_path):
+    from docx import Document
+
+    path = tmp_path / 'contract.docx'
+    doc = Document()
+    doc.add_paragraph('Agreement begins')
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = 'Party'
+    table.cell(0, 1).text = 'Acme'
+    doc.add_paragraph('Agreement ends')
+    doc.save(path)
+    result = ingest(path)
+    assert result.error is None
+    assert result.text.index('begins') < result.text.index('Acme') < result.text.index('ends')
+

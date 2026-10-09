@@ -168,6 +168,19 @@ def ingest(path: Path) -> IngestResult:
         if suffix in _TEXT_SUFFIXES:
             raw = path.read_text(encoding="utf-8", errors="replace")
             method, pages, stats = "text", 1, {}
+        elif suffix == ".docx":
+            from docx import Document
+            from docx.table import Table
+
+            document = Document(path)
+            blocks = []
+            for block in document.iter_inner_content():
+                if isinstance(block, Table):
+                    blocks.extend("\t".join(cell.text for cell in row.cells) for row in block.rows)
+                else:
+                    blocks.append(block.text)
+            raw = "\n".join(blocks)
+            method, pages, stats = "text", 1, {}
         elif suffix == ".pdf":
             try:
                 raw, pages = _pdf.extract_text(path)
