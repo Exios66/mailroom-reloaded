@@ -35,6 +35,7 @@ from __future__ import annotations
 import base64
 import binascii
 import fcntl
+import hashlib
 import json
 import os
 import sys
@@ -48,7 +49,7 @@ from typing import Any
 import structlog
 
 from mailroom_reloaded.settings import get_settings
-from mailroom_reloaded.storage.bins import Bins, doc_id_for
+from mailroom_reloaded.storage.bins import Bins
 
 logger = structlog.get_logger(__name__)
 
@@ -180,7 +181,7 @@ def _safe_filename(name: str | None) -> str:
     if not name:
         return ""
     base = Path(str(name).replace("\\", "/")).name
-    if not base or base.startswith("."):
+    if not base or base.startswith(".") or "\x00" in base:
         return ""
     return base
 
@@ -425,20 +426,8 @@ class GmailIntake:
         return _b64url_decode(response.get("data") or "")
 
     def _write_to_inbox(self, content: bytes, filename: str) -> str:
-        inbox = self.bins.inbox
-        stem, suffix = Path(filename).stem, Path(filename).suffix
-        dest = inbox / filename
-        counter = 0
-        while True:
-            try:
-                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-                break
-            except FileExistsError:
-                counter += 1
-                dest = inbox / f"{stem}-{counter}{suffix}"
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(content)
-        doc_id = doc_id_for(dest)
+        dest = self.bins.enqueue(content, filename)
+        doc_id = hashlib.sha256(content).hexdigest()[:16]
         logger.info(
             "gmail_attachment_ingested",
             doc_id=doc_id,

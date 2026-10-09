@@ -461,3 +461,56 @@ def test_state_saves_use_distinct_temporary_paths(tmp_path, monkeypatch):
     assert len(set(paths)) == 2
     assert intake.processed_message_ids() == {"outer"}
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_gmail_publish_is_claimable_only_after_complete_write(env, monkeypatch):
+    """A watcher that claims each visible inbox name on publish must read the full attachment."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    bins = Bins(env)
+    inbox = bins.inbox.resolve()
+    seen: list[bytes] = []
+
+    def on_publish(dest):
+        dest = Path(dest)
+        if dest.parent.resolve() == inbox and not dest.name.startswith("."):
+            seen.append(bins.claim(dest, "watcher").read_bytes())
+
+    real_open, real_link = os.open, os.link
+
+    def open_hook(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if flags & os.O_EXCL:
+            on_publish(path)
+        return fd
+
+    def link_hook(src, dst, *args, **kwargs):
+        real_link(src, dst, *args, **kwargs)
+        on_publish(dst)
+
+    monkeypatch.setattr(os, "open", open_hook)
+    monkeypatch.setattr(os, "link", link_hook)
+    intake = GmailIntake(_config(env), bins=bins)
+    assert intake._write_to_inbox(LETTER, "letter.txt") == hashlib.sha256(LETTER).hexdigest()[:16]
+    assert seen == [LETTER]
+
+
+def test_attachment_with_nul_in_name_is_skipped_without_aborting(tmp_path):
+    """Verify a NUL-bearing attachment name is skipped and the other attachments still ingest."""
+    service = FakeGmailService(["m1"], {"m1": None})
+    service.by_id["m1"] = _message(
+        "m1",
+        [
+            _part("bad\x00name.txt", "text/plain", data=LETTER),
+            _part("letter.txt", "text/plain", data=LETTER),
+        ],
+    )
+    bins = Bins(tmp_path)
+    intake = GmailIntake(_config(tmp_path), bins=bins, service=service)
+
+    doc_ids = intake.ingest_attachments(service.by_id["m1"])
+
+    assert [p.name for p in bins.inbox.iterdir()] == ["letter.txt"]
+    assert doc_ids == [doc_id_for(bins.inbox / "letter.txt")]
