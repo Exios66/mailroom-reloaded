@@ -97,9 +97,9 @@ for commands, exit codes and the threat model.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `MAILROOM_ANCHOR` | `none` | `none`, `export`, `postgres` or `supabase`. Blank means `none`; the value is lower-cased. `export` pushes nothing (use `mailroom audit export-head` and pin the output off-host). An unknown value is treated as not configured: pushes are skipped, `audit verify --external` and `audit anchor` exit 4, and startup does not fail. |
-| `MAILROOM_ANCHOR_URL` | unset | Supabase project URL or Postgres DSN. Required for `supabase` and `postgres`. Use HTTPS: a non-HTTPS Supabase URL is refused unless the host is loopback (`localhost`, `127.0.0.1`, `::1`). |
+| `MAILROOM_ANCHOR_URL` | unset | Supabase project URL or Postgres DSN. Required for `supabase` and `postgres`. Use HTTPS: a non-HTTPS Supabase URL is refused unless the host is loopback (`localhost`, `127.0.0.1`, `::1`). A non-loopback Postgres DSN gets `sslmode=require` unless the DSN sets its own `sslmode`. The URL is hidden from `repr` and logs because a DSN may carry a password. |
 | `MAILROOM_ANCHOR_KEY` | unset | Writer credential. Required for `supabase`. For `postgres` no key is needed; if set it is the role password. |
-| `MAILROOM_ANCHOR_KEY_FILE` | unset | File holding the key (Docker/Kubernetes secrets style). `MAILROOM_ANCHOR_KEY` wins when both are set. The file is capped at 8192 bytes, must be non-empty UTF-8 text, and a warning is printed by `audit verify --external` if it is world-readable. |
+| `MAILROOM_ANCHOR_KEY_FILE` | unset | File holding the key (Docker/Kubernetes secrets style). `MAILROOM_ANCHOR_KEY` wins when both are set. The file is capped at 8192 bytes, must be a regular file (symlinks are followed) holding non-empty UTF-8 text, and a warning is printed by `audit verify --external` if it is world-readable. |
 
 The Supabase key must be the key of the dedicated INSERT-only role created by
 `deploy/anchor/mailroom_anchor.sql`, never the `service_role` key (which bypasses

@@ -50,12 +50,8 @@ def listen_port() -> int:
 
 @app.command()
 def serve(
-    host: str = typer.Option(
-        None, "--host", help="Bind host (default MAILROOM_API_HOST)."
-    ),
-    port: int = typer.Option(
-        None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."
-    ),
+    host: str = typer.Option(None, "--host", help="Bind host (default MAILROOM_API_HOST)."),
+    port: int = typer.Option(None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."),
     watch: bool = typer.Option(
         True, "--watch/--no-watch", help="Run the embedded inbox watcher with the API."
     ),
@@ -120,9 +116,7 @@ def eval(
     prompt_set: str = typer.Option("frozen_v1", "--prompt-set"),
     merger_mode: str = typer.Option("frozen", "--merger-mode"),
     mode: str = typer.Option("pipeline", "--mode", help="pipeline | specialist_cell"),
-    judge_sample_rate: float = typer.Option(
-        1.0, "--judge-sample-rate", min=0.0, max=1.0
-    ),
+    judge_sample_rate: float = typer.Option(1.0, "--judge-sample-rate", min=0.0, max=1.0),
     split: str = typer.Option("test", "--split"),
     local_dir: Path = typer.Option(None, "--local-dir", exists=True, file_okay=False),
     gpu_usd_per_hour: float = typer.Option(0.80, "--gpu-usd-per-hour"),
@@ -153,14 +147,8 @@ def eval(
 
 @app.command("train-gate")
 def train_gate_command(
-    rows: Path = typer.Option(
-        ...,
-        "--rows",
-        exists=True,
-        dir_okay=False,
-        readable=True,
-        help="JSONL feature rows (eval_docs echoes).",
-    ),
+    rows: Path = typer.Option(..., "--rows", exists=True, dir_okay=False, readable=True,
+                             help="JSONL feature rows (eval_docs echoes)."),
     out: Path = typer.Option(Path("models/route_gate.json"), "--out"),
     calibration: bool = typer.Option(
         False, "--calibration", help="Fit temperature calibration instead of the gate."
@@ -225,9 +213,7 @@ def card(
 @app.command(name="conformance")
 def conformance(
     provider: str = typer.Option(
-        "",
-        "--provider",
-        help="Provider to conformance-test (default: configured provider).",
+        "", "--provider", help="Provider to conformance-test (default: configured provider)."
     ),
     per_class: int = typer.Option(2, "--per-class", min=1),
     revision: str = typer.Option("ed7576b6", "--revision"),
@@ -251,7 +237,9 @@ def conformance(
             {
                 "provider": card.provider,
                 "model": card.model,
-                "roles": {role: stats.to_dict() for role, stats in card.roles.items()},
+                "roles": {
+                    role: stats.to_dict() for role, stats in card.roles.items()
+                },
                 "out": str(out),
             }
         )
@@ -289,7 +277,7 @@ def audit_verify(
     from mailroom_reloaded.storage import anchor
     from mailroom_reloaded.storage.ledger import get_ledger
 
-    ledger = get_ledger()
+    ledger = get_ledger(anchor=False)
     verdict = ledger.verify(run)
     if not verdict.ok:
         where = f" at {verdict.broken_at}" if verdict.broken_at is not None else ""
@@ -320,6 +308,9 @@ def audit_verify(
         raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
     try:
         result = anchor.verify_external(ledger, cfg, backend)
+    except Exception as exc:  # noqa: BLE001 - an unexpected failure is never "tamper"
+        typer.echo(f"anchor: unreachable ({type(exc).__name__})")
+        raise typer.Exit(anchor.EXIT_UNREACHABLE) from None
     finally:
         close = getattr(backend, "close", None)
         if close:
@@ -346,14 +337,14 @@ def audit_anchor() -> None:
     except anchor.AnchorError as exc:
         typer.echo(f"anchor: not configured ({exc})")
         raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
-    ledger = get_ledger()
+    ledger = get_ledger(anchor=False)
     try:
         result = anchor.push_head(ledger, backend)
     except anchor.AnchorConflict as exc:
         typer.echo(f"anchor: {cfg.redact(str(exc))}")
         raise typer.Exit(anchor.EXIT_TAMPER) from None
-    except anchor.AnchorError as exc:
-        typer.echo(f"anchor: unreachable ({cfg.redact(str(exc))})")
+    except Exception as exc:  # noqa: BLE001 - an unexpected failure is never "tamper"
+        typer.echo(f"anchor: unreachable ({cfg.redact(str(exc)) if isinstance(exc, anchor.AnchorError) else type(exc).__name__})")
         raise typer.Exit(anchor.EXIT_UNREACHABLE) from None
     finally:
         close = getattr(backend, "close", None)
@@ -362,17 +353,6 @@ def audit_anchor() -> None:
     if result.status == "empty":
         typer.echo("ledger empty; nothing to anchor")
         return
-    if result.status == "pushed":
-        ledger.append(
-            "anchor",
-            "ledger",
-            payload={
-                "head": {"seq": result.seq, "entry_hash": result.entry_hash},
-                "count": result.seq,
-                "backend": cfg.backend,
-            },
-        )
-        ledger.flush()
     typer.echo(f"anchor: {result.status} {result.seq} {_short(result.entry_hash)}")
 
 
@@ -386,7 +366,7 @@ def audit_export_head(
     from mailroom_reloaded.storage import anchor
     from mailroom_reloaded.storage.ledger import get_ledger
 
-    record = anchor.export_head(get_ledger())
+    record = anchor.export_head(get_ledger(anchor=False))
     if record is None:
         typer.echo("ledger empty")
         return
@@ -420,9 +400,7 @@ def _jev_off() -> None:
 def decide(
     state: str = typer.Option(..., "--state", help="State text/prompt passed to Jev."),
     question_type: str = typer.Option(..., "--type", help="choice | noul | score."),
-    instructions: str = typer.Option(
-        ..., "--instructions", help="Question instructions."
-    ),
+    instructions: str = typer.Option(..., "--instructions", help="Question instructions."),
     criteria: list[str] = typer.Option(
         None, "--criteria", help="Repeatable KEY=DESCRIPTION (choice/noul)."
     ),

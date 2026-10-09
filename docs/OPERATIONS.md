@@ -120,6 +120,8 @@ It does not protect:
 - the unanchored tail (entries after the last push);
 - runs that are still open;
 - the correctness of what was recorded (it proves integrity, not truth);
+- the validity of the chain at push time: a push anchors the current head without
+  re-verifying earlier entries, so run `mailroom audit verify` before trusting an anchor;
 - against a holder of the writer credential, who can append anchors over a rewritten tail.
   An off-host `export-head` copy taken earlier mitigates this.
 

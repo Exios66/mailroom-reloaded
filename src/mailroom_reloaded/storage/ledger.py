@@ -474,11 +474,7 @@ class Ledger:
 
     def count(self, kind: str, run_id: str, doc_id: str | None = None) -> int:
         """Committed entries of ``kind`` for a run (and optionally one document)."""
-        q = (
-            select(func.count())
-            .select_from(_t)
-            .where(_t.c.kind == kind, _t.c.run_id == run_id)
-        )
+        q = select(func.count()).select_from(_t).where(_t.c.kind == kind, _t.c.run_id == run_id)
         if doc_id is not None:
             q = q.where(_t.c.doc_id == doc_id)
         with self.engine.connect() as conn:
@@ -494,11 +490,7 @@ class Ledger:
         )
         with self.engine.connect() as conn:
             rows = conn.execute(q).all()
-        return [
-            r.run_id
-            for r in rows
-            if kind is None or json.loads(r.payload).get("kind") == kind
-        ]
+        return [r.run_id for r in rows if kind is None or json.loads(r.payload).get("kind") == kind]
 
     def entries(
         self,
@@ -692,12 +684,15 @@ _default: Ledger | None = None
 _default_lock = threading.Lock()
 
 
-def get_ledger() -> Ledger:
+def get_ledger(*, anchor: bool = True) -> Ledger:
     """The process-wide ledger on the default engine (created lazily).
 
     If the default engine was replaced (a different ``base_dir``), the old ledger is
     flushed and closed and a new one is bound, so a late write never lands in the
     wrong database.
+
+    ``anchor=False`` (read-only tooling such as ``mailroom audit``) skips the external
+    anchor hook and its startup push, so inspecting the ledger never writes to the store.
     """
     global _default
     engine = get_engine()
@@ -708,11 +703,12 @@ def get_ledger() -> Ledger:
         if _default is None:
             _default = Ledger(engine)
             atexit.register(_default.close)
-            from mailroom_reloaded.storage import (
-                anchor,  # lazy: the anchor imports the ledger types
-            )
+            if anchor:
+                from mailroom_reloaded.storage import (
+                    anchor as anchor_mod,  # lazy: the anchor imports the ledger types
+                )
 
-            anchor.install(_default)
+                anchor_mod.install(_default)
         return _default
 
 

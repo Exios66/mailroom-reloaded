@@ -72,6 +72,7 @@ def test_monotonic_trigger_exists(sql: str) -> None:
         in sql
     )
     assert "new.seq <= current_max" in sql
+    assert "drop trigger if exists mailroom_anchor_monotonic" in sql
     assert "raise exception" in sql
     assert "drop trigger if exists" in sql  # idempotent
 
@@ -86,17 +87,27 @@ def test_rls_enabled_with_explicit_policies(sql: str) -> None:
     assert sql.count("drop policy if exists") == len(policies)
 
 
-def test_writer_grants_are_insert_and_select_only(sql: str) -> None:
+def test_writer_grants_are_column_level_insert_and_table_select(sql: str) -> None:
     grants = [g for g in _statements(sql, "grant") if f"to {WRITER}" in g]
     table_grants = [g for g in grants if " on table " in g]
-    assert len(table_grants) == 1
-    privs = table_grants[0].split(" on table ")[0].removeprefix("grant ")
-    assert {p.strip() for p in privs.split(",")} == {"select", "insert"}
+    assert len(table_grants) == 2
+    assert f"grant select on table public.mailroom_anchor to {WRITER}" in table_grants
+    assert (
+        "grant insert (seq, entry_hash) on table public.mailroom_anchor to " + WRITER
+        in table_grants
+    )
+    # no table-level INSERT (anchored_at must not be writable)
+    assert not any(re.match(r"grant [^(]*\binsert\b[^(]* on table", g) for g in grants)
+    assert "anchored_at" not in "".join(table_grants)
     for g in grants:
         assert not re.search(
             r"\b(update|delete|truncate|references|trigger|all)\b", g
         ), g
     assert "grant usage on schema public to " + WRITER in sql
+    # re-run resets: table-level revoke (also clears column grants) precedes the grants
+    assert sql.index(
+        f"revoke all on table public.mailroom_anchor from {WRITER}"
+    ) < sql.index("grant insert (seq, entry_hash)")
     # nothing is granted to anyone else
     for g in _statements(sql, "grant"):
         assert (
@@ -104,6 +115,66 @@ def test_writer_grants_are_insert_and_select_only(sql: str) -> None:
             or "to authenticator" in g
             or g.endswith(WRITER + " to authenticator")
         )
+
+
+def test_constraints(sql: str) -> None:
+    assert "check (seq > 0 and seq < 9007199254740992)" in sql
+    assert "check (entry_hash ~ '^[0-9a-f]{64}$')" in sql
+    assert sql.count("drop constraint if exists") == 2  # idempotent re-add
+
+
+def test_trigger_function_hardening(sql: str) -> None:
+    fn = re.search(
+        r"create or replace function public\.mailroom_anchor_enforce_monotonic\(\).*?\$\$;",
+        sql,
+    )
+    assert fn
+    body = fn.group(0)
+    assert "security definer" in body
+    assert "set search_path = pg_catalog, pg_temp" in body
+    assert "pg_catalog.pg_advisory_xact_lock" in body
+    assert "from public.mailroom_anchor" in body
+    assert "> 1000000" in body  # max step
+    assert "raise exception" in body
+    # execute revoked from PUBLIC and the Supabase roles, guarded by role-exists
+    assert (
+        "revoke all on function public.mailroom_anchor_enforce_monotonic() from public"
+        in sql
+    )
+    assert "revoke execute on function %s from %i" in sql
+    assert "if exists (select 1 from pg_roles where rolname = r)" in sql
+    assert "'public.mailroom_anchor_enforce_monotonic()'" in sql
+    assert "'public.mailroom_anchor_forbid_change()'" in sql
+    roles = re.search(
+        r"foreach r in array array\[('anon'.*?)\] loop if exists \(select 1 from pg_roles "
+        r"where rolname = r\) then foreach f",
+        sql,
+    )
+    assert roles
+    assert {"anon", "authenticated", "service_role"} <= set(
+        re.findall(r"'(\w+)'", roles.group(1))
+    )
+
+
+def test_update_delete_truncate_guard_triggers(sql: str) -> None:
+    guard = re.search(
+        r"create or replace function public\.mailroom_anchor_forbid_change\(\).*?\$\$;",
+        sql,
+    )
+    assert guard
+    assert "raise exception" in guard.group(0)
+    assert "set search_path = pg_catalog, pg_temp" in guard.group(0)
+    assert re.search(
+        r"create trigger \w+ before update or delete on public\.mailroom_anchor "
+        r"for each row execute function public\.mailroom_anchor_forbid_change\(\)",
+        sql,
+    )
+    assert re.search(
+        r"create trigger \w+ before truncate on public\.mailroom_anchor "
+        r"for each statement execute function public\.mailroom_anchor_forbid_change\(\)",
+        sql,
+    )
+    assert sql.count("drop trigger if exists") == 3
 
 
 def test_no_grants_in_dollar_blocks_to_other_roles(sql: str) -> None:

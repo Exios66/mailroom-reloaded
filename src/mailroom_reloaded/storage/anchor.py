@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import quote
 
 import httpx
 import structlog
@@ -77,6 +78,7 @@ TRIGGER_KINDS = frozenset({"run_closed", "pinned", "unpinned", "policy", "pruned
 STALE_AFTER = timedelta(hours=24)
 KEY_FILE_MAX_BYTES = 8192
 TIMEOUT_S = 5.0
+LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 RETRY_DELAYS_S = (1.0, 4.0, 16.0)
 
 # exit codes of ``mailroom audit verify`` (2 is Click's usage error, so it is skipped)
@@ -111,10 +113,18 @@ def _url_password(url: str | None) -> str | None:
         return None
 
 
+def _scrub_password(text: str, password: str | None) -> str:
+    """``text`` with ``:<password>@`` (raw or percent-encoded) masked; other text is untouched."""
+    if not password:
+        return text
+    for variant in {password, quote(password, safe="")}:
+        text = text.replace(f":{variant}@", ":***@")
+    return text
+
+
 def _hide_password(url: str | None) -> str | None:
     """``url`` with an embedded password masked."""
-    password = _url_password(url)
-    return url.replace(password, "***") if url and password else url
+    return _scrub_password(url, _url_password(url)) if url else url
 
 
 @dataclass(frozen=True)
@@ -135,10 +145,7 @@ class AnchorConfig:
         out = text
         if self.key:
             out = out.replace(self.key, "***")
-        password = _url_password(self.url)
-        if password:
-            out = out.replace(password, "***")
-        return out
+        return _scrub_password(out, _url_password(self.url))
 
 
 @dataclass(frozen=True)
@@ -164,16 +171,28 @@ class Backend(Protocol):
 
 # --------------------------------------------------------------------------- configuration
 def _read_key_file(path: Path) -> tuple[str, bool]:
-    """The stripped key in ``path`` and whether the file is world-readable (fails closed)."""
+    """The stripped key in ``path`` and whether the file is world-readable (fails closed).
+
+    Opens non-blocking and checks the *opened* descriptor is a regular file, so a FIFO or
+    device cannot hang or flood the read. Symlinks are followed (Kubernetes secret mounts).
+    """
     try:
-        info = path.stat()
-        if info.st_size > KEY_FILE_MAX_BYTES:
-            raise AnchorNotConfigured("anchor key file is too large")
-        text = path.read_text(encoding="utf-8").strip()
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise AnchorNotConfigured("anchor key file is not a regular file")
+            raw = os.read(fd, KEY_FILE_MAX_BYTES + 1)
+        finally:
+            os.close(fd)
     except OSError as exc:
         raise AnchorNotConfigured(
             f"anchor key file is unreadable ({type(exc).__name__})"
         ) from None
+    if len(raw) > KEY_FILE_MAX_BYTES:
+        raise AnchorNotConfigured("anchor key file is too large")
+    try:
+        text = raw.decode("utf-8").strip()
     except UnicodeDecodeError:
         raise AnchorNotConfigured("anchor key file is not text") from None
     if not text:
@@ -210,12 +229,11 @@ def get_config() -> AnchorConfig:
 
 def _require_https(url: str) -> None:
     """Refuse a non-HTTPS URL unless it is loopback (development)."""
-    parsed = httpx.URL(url)
-    if parsed.scheme != "https" and parsed.host not in {
-        "localhost",
-        "127.0.0.1",
-        "::1",
-    }:
+    try:
+        parsed = httpx.URL(url)
+    except httpx.InvalidURL:
+        raise AnchorNotConfigured("MAILROOM_ANCHOR_URL is not a valid URL") from None
+    if parsed.scheme != "https" and parsed.host not in LOOPBACK:
         raise AnchorNotConfigured("MAILROOM_ANCHOR_URL must use https")
 
 
@@ -256,7 +274,10 @@ class SupabaseBackend:
             params={"select": "seq,entry_hash", "order": "seq.desc", "limit": "1"},
         )
         rows = self._json(resp)
-        return Head(int(rows[0]["seq"]), str(rows[0]["entry_hash"])) if rows else None
+        try:
+            return Head(int(rows[0]["seq"]), str(rows[0]["entry_hash"])) if rows else None
+        except (KeyError, TypeError, ValueError, IndexError):
+            raise AnchorUnreachable("anchor store returned an unexpected row") from None
 
     def get(self, seq: int) -> str | None:
         """The hash at ``seq``."""
@@ -264,7 +285,10 @@ class SupabaseBackend:
             "GET", params={"select": "entry_hash", "seq": f"eq.{int(seq)}"}
         )
         rows = self._json(resp)
-        return str(rows[0]["entry_hash"]) if rows else None
+        try:
+            return str(rows[0]["entry_hash"]) if rows else None
+        except (KeyError, TypeError, IndexError):
+            raise AnchorUnreachable("anchor store returned an unexpected row") from None
 
     def push(self, seq: int, entry_hash: str) -> None:
         """Insert ``(seq, entry_hash)``; duplicates are resolved by read-back, not by status code."""
@@ -282,6 +306,11 @@ class SupabaseBackend:
             return
         if existing is not None:
             raise AnchorConflict(f"seq {seq} is already anchored with a different hash")
+        current = self.head()  # a trigger rejection means the store already holds a higher seq
+        if current is not None and current.seq >= seq:
+            raise AnchorConflict(
+                f"anchor store already holds seq {current.seq}, ahead of {seq}"
+            )
         raise AnchorUnreachable(
             f"anchor store rejected the insert (HTTP {resp.status_code})"
         )
@@ -317,8 +346,12 @@ class SqlBackend:
             create_engine,
         )
         from sqlalchemy.engine import make_url
+        from sqlalchemy.exc import ArgumentError
 
-        parsed = make_url(url)
+        try:
+            parsed = make_url(url)
+        except (ArgumentError, ValueError):
+            raise AnchorNotConfigured("MAILROOM_ANCHOR_URL is not a valid database URL") from None
         if parsed.drivername in {"postgresql", "postgres"}:
             parsed = parsed.set(drivername="postgresql+psycopg")
         if key and parsed.drivername.startswith("postgresql"):
@@ -328,6 +361,12 @@ class SqlBackend:
             if parsed.drivername.startswith("postgresql")
             else {}
         )
+        if (
+            parsed.drivername.startswith("postgresql")
+            and "sslmode" not in parsed.query
+            and (parsed.host or "") not in LOOPBACK
+        ):
+            connect_args["sslmode"] = "require"  # TLS unless the operator chose otherwise
         try:
             self._engine = create_engine(parsed, connect_args=connect_args)
         except ModuleNotFoundError:
@@ -528,7 +567,7 @@ def _tail(
     first: LedgerEntry = ledger.entries(since_seq=anchored or 0, limit=1)[0]
     try:
         age = now - datetime.fromisoformat(first.ts)
-    except ValueError:
+    except (ValueError, TypeError):
         age = timedelta(0)
     unanchored = local_seq - (anchored or 0)
     if age > STALE_AFTER:
@@ -595,6 +634,12 @@ def _loop() -> None:
             _push_with_retries(ledger)
 
 
+def _settings_redact(text: str) -> str:
+    """``text`` redacted with whatever secrets the settings hold (when no config resolved)."""
+    s = get_settings()
+    return AnchorConfig(s.anchor, s.anchor_url, s.anchor_key).redact(text)
+
+
 def _push_with_retries(
     ledger: Ledger, delays: tuple[float, ...] = RETRY_DELAYS_S
 ) -> bool:
@@ -613,11 +658,11 @@ def _push_with_retries(
             return True
         except AnchorConflict as exc:
             logger.error(
-                "anchor_conflict", error=str(exc)
+                "anchor_conflict", error=_settings_redact(str(exc))
             )  # tamper signal: never retried
             return False
         except Exception as exc:  # noqa: BLE001
-            text = cfg.redact(str(exc)) if cfg else str(exc)
+            text = cfg.redact(str(exc)) if cfg else _settings_redact(str(exc))
             logger.warning("anchor_push_failed", attempt=attempt, error=text)
             if attempt < len(delays):
                 time.sleep(delay)

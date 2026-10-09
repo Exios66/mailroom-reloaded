@@ -1022,13 +1022,10 @@ def test_cli_anchor_then_verify_external_ok(cli, monkeypatch) -> None:
     res = _invoke("anchor")
     assert res.exit_code == 0 and "anchor: pushed 3" in res.output
     assert cli.rows == {3: _hash(lg, 3)}
-    # the push itself is recorded in the chain (seq 4), which is now an unanchored tail
-    assert lg.head().kind == "anchor" and lg.head().seq == 4
+    # the push writes nothing to the chain: an idle ledger is fully anchored, never stale
+    assert lg.head().seq == 3
     res = _invoke("verify", "--external")
-    assert res.exit_code == 0 and "anchored 3, local 4, 1 unanchored" in res.output
-    # each push appends its own "anchor" entry, so the head is always one entry ahead
-    assert _invoke("anchor").exit_code == 0
-    assert "anchored 4, local 5, 1 unanchored" in _invoke("verify", "--external").output
+    assert res.exit_code == 0 and "anchored 3, local 3, 0 unanchored" in res.output
 
 
 def test_cli_anchor_already(cli, monkeypatch) -> None:
