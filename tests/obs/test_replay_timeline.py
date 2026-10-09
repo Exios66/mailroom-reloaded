@@ -23,19 +23,8 @@ from mailroom_reloaded.storage.span_store import SpanStore
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    """Stub the sibling modules (sessions, audit source) and start with a cold cache."""
+    """Stub the audit source (no database) and start with a cold cache."""
     clear_cache()
-    sessions = types.ModuleType("mailroom_reloaded.obs.replay.sessions")
-
-    def parse_session_id(raw: str) -> tuple[str, str]:
-        kind, sep, key = raw.partition(":")
-        if not sep:
-            kind, key = "run", raw
-        if kind not in {"run", "session", "doc", "window"} or not key:
-            raise ValueError(raw)
-        return kind, key
-
-    sessions.parse_session_id = parse_session_id
     audit = types.ModuleType("mailroom_reloaded.obs.replay.audit_source")
     audit.calls = []
     audit.result = None
@@ -45,7 +34,6 @@ def _isolate(monkeypatch):
         return audit.result
 
     audit.timeline_from_audit = timeline_from_audit
-    monkeypatch.setitem(sys.modules, "mailroom_reloaded.obs.replay.sessions", sessions)
     monkeypatch.setitem(sys.modules, "mailroom_reloaded.obs.replay.audit_source", audit)
     yield audit
     clear_cache()
@@ -296,7 +284,7 @@ def test_kinds_resolve_rows(tmp_path: Path) -> None:
     one = build_timeline("doc:doc-b", store=store)
     assert one is not None and [e.doc_id for e in one.entities] == ["doc-b"]
     lo, hi = F.ns(0), F.ns(3.5)
-    win = build_timeline(f"window:{lo}..{hi}", store=store)
+    win = build_timeline(f"window:{lo}-{hi}", store=store)
     assert win is not None and {e.doc_id for e in win.entities} == {
         "doc-a",
         "doc-b",
@@ -320,7 +308,7 @@ def test_audit_fallback_and_missing_store(tmp_path: Path, _isolate) -> None:
 
 def test_malformed_id_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
-        build_timeline("bogus:", store=_store(tmp_path))
+        build_timeline("window:not-a-range", store=_store(tmp_path))
 
 
 def test_cache_hit_and_watermark_miss(tmp_path: Path, monkeypatch) -> None:
@@ -335,7 +323,7 @@ def test_cache_hit_and_watermark_miss(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(tlmod, "timeline_from_spans", counting)
     first = build_timeline("run:run-1", store=store)
     again = build_timeline("run:run-1", store=store)
-    assert again is first and len(calls) == 1
+    assert again == first and again is not first and len(calls) == 1
     build_timeline("run:run-1", from_s=0, to_s=5, store=store)  # different window: miss
     assert len(calls) == 2
     store.write(
@@ -366,3 +354,23 @@ def test_cache_is_bounded(tmp_path: Path) -> None:
     for i in range(tlmod.CACHE_SIZE + 5):
         build_timeline("run:run-1", from_s=float(i), store=store)
     assert len(tlmod._CACHE) == tlmod.CACHE_SIZE
+
+
+def test_cached_timeline_is_isolated_from_caller_mutation(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    clear_cache()
+    first = build_timeline("run-1", store=store)
+    assert first is not None
+    n = len(first.segments)
+    first.segments.clear()
+    first.session.id = "tampered"
+    again = build_timeline("run-1", store=store)
+    assert again is not None and len(again.segments) == n and again.session.id != "tampered"
+
+
+def test_window_id_round_trips_between_sessions_and_timeline(tmp_path: Path) -> None:
+    from mailroom_reloaded.obs.replay.sessions import format_session_id
+
+    store = _store(tmp_path)
+    sid = format_session_id("window", f"{F.ns(0)}-{F.ns(3.5)}")
+    assert build_timeline(sid, store=store) is not None

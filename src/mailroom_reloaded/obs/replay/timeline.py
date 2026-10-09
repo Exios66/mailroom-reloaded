@@ -648,19 +648,6 @@ def _cache_put(key: tuple[Any, ...], tl: Timeline) -> None:
 
 
 # ------------------------------------------------------------------ public entry
-def _parse_instant_ns(text: str) -> int:
-    """A window bound: epoch nanoseconds, epoch seconds, or an ISO-8601 instant."""
-    text = text.strip()
-    try:
-        number = float(text)
-    except ValueError:
-        dt = datetime.fromisoformat(text)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return int(dt.timestamp() * 1e9)
-    return int(number) if number >= 1e17 else int(number * 1e9)
-
-
 def _read_rows(store: Any, kind: str, key: str) -> list[dict[str, Any]]:
     path = getattr(store, "path", None)
     if isinstance(path, Path) and not path.exists():
@@ -672,10 +659,9 @@ def _read_rows(store: Any, kind: str, key: str) -> list[dict[str, Any]]:
     if kind == "doc":
         return store.spans_for_doc(key)
     if kind == "window":
-        start, _, end = key.partition("..")
-        if not start or not end:
-            raise ValueError(f"malformed window session id: {key!r}")
-        return store.spans_between(_parse_instant_ns(start), _parse_instant_ns(end))
+        from mailroom_reloaded.obs.replay.sessions import window_bounds_ns
+
+        return store.spans_between(*window_bounds_ns(key))
     raise ValueError(f"unknown session kind: {kind!r}")
 
 
@@ -713,7 +699,7 @@ def build_timeline(
     if watermark is not None:
         hit = _cache_get(cache_key)
         if hit is not None:
-            return hit
+            return hit.model_copy(deep=True)  # callers may mutate; the cache stays pristine
 
     tl = timeline_from_spans(_read_rows(store, kind, key), kind, key)
     from_spans = tl is not None
@@ -725,5 +711,5 @@ def build_timeline(
             return None
     result = _finalize(tl, from_s, to_s)
     if from_spans and watermark is not None:
-        _cache_put(cache_key, result)
+        _cache_put(cache_key, result.model_copy(deep=True))
     return result
