@@ -17,7 +17,15 @@ from typing import Any
 
 from mailroom_reloaded.sandbox.server.service import SandboxService
 
-__all__ = ["format_table", "run_conformance", "split_of", "summarise"]
+__all__ = [
+    "family_of",
+    "format_lofo",
+    "format_table",
+    "lofo",
+    "run_conformance",
+    "split_of",
+    "summarise",
+]
 
 
 def split_of(ids: list[str]) -> dict[str, str]:
@@ -67,6 +75,68 @@ def run_conformance(
         rows.append(r)
     svc.reset()
     return summarise(rows)
+
+
+def family_of(name: str) -> str:
+    """Scenario family = the series letter of the id (A..G, S, T)."""
+    return name[:1].upper()
+
+
+def lofo(rows: list[dict]) -> dict[str, Any]:
+    """Leave-one-family-out report.
+
+    Each fold holds one family out; the rules are assumed to have been adjusted only
+    while looking at the other families (the training families), so the held-out family's
+    pass rate is the honest number for that fold. Reported: per-fold held-out and training
+    pass rates, their macro mean (every family weighs the same) and the micro rate, plus
+    failed-check counts per held-out family.
+    """
+    fams = sorted({family_of(r["scenario"]) for r in rows})
+    folds = []
+    for fam in fams:
+        held = [r for r in rows if family_of(r["scenario"]) == fam]
+        train = [r for r in rows if family_of(r["scenario"]) != fam]
+        hp = sum(r["verdict"] == "pass" for r in held)
+        tp = sum(r["verdict"] == "pass" for r in train)
+        checks: Counter[str] = Counter()
+        for r in held:
+            checks.update(set(r["failed_checks"]))
+        folds.append(
+            {
+                "held_out_family": fam,
+                "held_out_n": len(held),
+                "held_out_pass": hp,
+                "held_out_rate": round(hp / len(held), 3),
+                "training_n": len(train),
+                "training_pass": tp,
+                "training_rate": round(tp / len(train), 3),
+                "held_out_failed_checks": dict(sorted(checks.items())),
+            }
+        )
+    return {
+        "protocol": "leave-one-family-out over series letters",
+        "macro_mean_held_out_rate": round(
+            sum(f["held_out_rate"] for f in folds) / len(folds), 3
+        ),
+        "micro_pass_rate": round(
+            sum(r["verdict"] == "pass" for r in rows) / len(rows), 3
+        ),
+        "folds": folds,
+    }
+
+
+def format_lofo(rep: dict[str, Any]) -> str:
+    lines = [
+        f"{'fold (held-out family)':<24}{'n':>3}{'pass':>6}{'rate':>7}   training rate"
+    ]
+    for f in rep["folds"]:
+        lines.append(
+            f"{f['held_out_family']:<24}{f['held_out_n']:>3}{f['held_out_pass']:>6}{f['held_out_rate']:>7.2f}   {f['training_rate']:.2f}"
+        )
+    lines.append(
+        f"macro mean held-out rate {rep['macro_mean_held_out_rate']:.3f}; micro pass rate {rep['micro_pass_rate']:.3f}"
+    )
+    return "\n".join(lines)
 
 
 def summarise(rows: list[dict]) -> dict[str, Any]:

@@ -110,6 +110,8 @@ class SandboxService:
         clock: Callable[[], float] = time.time,
         guard: NetworkGuard | None = None,
         pipeline: PipelineRunner | None = None,
+        correspondent: str = "standin",
+        correspondent_options: dict | None = None,
     ) -> None:
         self.content = content
         self.data_dir = Path(data_dir)
@@ -123,7 +125,9 @@ class SandboxService:
         self._q: queue.Queue[tuple[str, list[str]]] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
-        self.agent = create_correspondent("standin")
+        self.agent = create_correspondent(
+            correspondent, **(correspondent_options or {})
+        )
         self.desk = StandInBossDesk(content.policy.delegation)
         self.meter = IngressMeter(content.policy.ingress)
         self.pipeline = pipeline or PipelineRunner(self.data_dir)

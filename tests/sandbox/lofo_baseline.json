@@ -1,0 +1,136 @@
+{
+ "folds": [
+  {
+   "held_out_failed_checks": {
+    "boss_actions": 1,
+    "intent": 2,
+    "outbox": 6,
+    "relation": 2,
+    "signal": 3,
+    "trust.sender_level": 1
+   },
+   "held_out_family": "A",
+   "held_out_n": 17,
+   "held_out_pass": 9,
+   "held_out_rate": 0.529,
+   "training_n": 71,
+   "training_pass": 44,
+   "training_rate": 0.62
+  },
+  {
+   "held_out_failed_checks": {
+    "boss_actions": 4,
+    "intent": 2,
+    "outbox": 2,
+    "relation": 4,
+    "signal": 4
+   },
+   "held_out_family": "B",
+   "held_out_n": 8,
+   "held_out_pass": 3,
+   "held_out_rate": 0.375,
+   "training_n": 80,
+   "training_pass": 50,
+   "training_rate": 0.625
+  },
+  {
+   "held_out_failed_checks": {
+    "boss_actions": 2,
+    "intent": 1,
+    "quarantine": 1,
+    "signal": 1
+   },
+   "held_out_family": "C",
+   "held_out_n": 11,
+   "held_out_pass": 8,
+   "held_out_rate": 0.727,
+   "training_n": 77,
+   "training_pass": 45,
+   "training_rate": 0.584
+  },
+  {
+   "held_out_failed_checks": {
+    "intent": 1,
+    "outbox": 1,
+    "signal": 1
+   },
+   "held_out_family": "D",
+   "held_out_n": 6,
+   "held_out_pass": 4,
+   "held_out_rate": 0.667,
+   "training_n": 82,
+   "training_pass": 49,
+   "training_rate": 0.598
+  },
+  {
+   "held_out_failed_checks": {
+    "outbox": 1,
+    "signal": 1
+   },
+   "held_out_family": "E",
+   "held_out_n": 13,
+   "held_out_pass": 12,
+   "held_out_rate": 0.923,
+   "training_n": 75,
+   "training_pass": 41,
+   "training_rate": 0.547
+  },
+  {
+   "held_out_failed_checks": {
+    "outbox": 1
+   },
+   "held_out_family": "F",
+   "held_out_n": 5,
+   "held_out_pass": 4,
+   "held_out_rate": 0.8,
+   "training_n": 83,
+   "training_pass": 49,
+   "training_rate": 0.59
+  },
+  {
+   "held_out_failed_checks": {
+    "boss_actions": 2,
+    "intent": 1,
+    "outbox": 4,
+    "relation": 1,
+    "signal": 2
+   },
+   "held_out_family": "G",
+   "held_out_n": 12,
+   "held_out_pass": 8,
+   "held_out_rate": 0.667,
+   "training_n": 76,
+   "training_pass": 45,
+   "training_rate": 0.592
+  },
+  {
+   "held_out_failed_checks": {
+    "signal": 8
+   },
+   "held_out_family": "S",
+   "held_out_n": 10,
+   "held_out_pass": 1,
+   "held_out_rate": 0.1,
+   "training_n": 78,
+   "training_pass": 52,
+   "training_rate": 0.667
+  },
+  {
+   "held_out_failed_checks": {
+    "intent": 2,
+    "outbox": 1,
+    "signal": 2
+   },
+   "held_out_family": "T",
+   "held_out_n": 6,
+   "held_out_pass": 4,
+   "held_out_rate": 0.667,
+   "training_n": 82,
+   "training_pass": 49,
+   "training_rate": 0.598
+  }
+ ],
+ "macro_mean_held_out_rate": 0.606,
+ "micro_pass_rate": 0.602,
+ "protocol": "leave-one-family-out over series letters"
+}

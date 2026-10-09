@@ -40,6 +40,7 @@ EXTRACT = {
     "keywords": ["fixture"],
     "confidence": 0.99,
 }
+_TRIAGE_INTENT = re.compile(r"\[mock-intent:([a-z_]+)\]")
 _MARKER = re.compile(r"\[confidence:(\d?\.\d+)\]")
 
 
@@ -73,7 +74,24 @@ def build_mock_app(stats: dict[str, int] | None = None) -> FastAPI:
         )
         properties = schema.get("properties", {})
         marker = _marker_confidence(body)
-        if "doc_subclass" in properties:
+        if "needs_review" in properties and "intent" in properties:
+            # Correspondent triage route: a fixed answer steered by markers in the message
+            # text (no inference), so the optional LLM Correspondent can be tested offline.
+            stats["triage"] = stats.get("triage", 0) + 1
+            text = json.dumps(body.get("messages", []))
+            if "[mock-invalid]" in text:
+                content = "this is not json"
+            else:
+                m = _TRIAGE_INTENT.search(text)
+                content = json.dumps(
+                    {
+                        "intent": m.group(1) if m else "general_question",
+                        "confidence": 0.9,
+                        "needs_review": "[mock-review]" in text,
+                        "reasoning": "fixed mock answer",
+                    }
+                )
+        elif "doc_subclass" in properties:
             stats["structured"] = stats.get("structured", 0) + 1
             sort = dict(SORT, **({"confidence": marker} if marker is not None else {}))
             content = json.dumps({k: v for k, v in sort.items() if k in properties})

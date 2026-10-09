@@ -79,8 +79,15 @@ class StandInBossDesk:
             if attack and name == "dismiss_signal":
                 continue  # an attack is escalated, never folded into the digest
             if name == "release_attachments":
-                continue  # human-only, after approval
+                # human-only, after approval: listed as awaiting, never done here
+                add(name, params, state="pending_human", why="after human approval")
+                continue
             add(name, params)
+        if row.get("owner") == "human_reviewer":
+            add(
+                "request_human_review",
+                why="the delegation matrix assigns this class to a human",
+            )
         lanes = {ln["lane"] for ln in res.attachment_lanes}
         if "quarantine" in lanes:
             add(
@@ -90,6 +97,13 @@ class StandInBossDesk:
             add("hold_attachments", why="soft hold comms/pending")
         if res.callback is not None:
             add("recommend_callback", why="task for a human; registry number only")
+        if any(
+            r["kind"] == "duplicates" and r["confidence"] >= 0.95 for r in res.relations
+        ):
+            add(
+                "dismiss_signal",
+                why="identical content hash: duplicate folded, benign-by-policy",
+            )
         if res.relations and any(
             r["auto_link"] and r["kind"] != "contradicts" for r in res.relations
         ):

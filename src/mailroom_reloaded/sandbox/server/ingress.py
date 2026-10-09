@@ -101,6 +101,10 @@ def _attachment(
         entry = dict(src)
         if "as" in spec:
             entry["name"] = spec["as"]
+        entry["same_as"] = spec["same_as"]
+        if spec.get("ref"):
+            entry["ref"] = spec["ref"]  # the new label for the exact same document
+            bound[spec["ref"]] = entry
         return entry, None
     fname = spec.get("file")
     if not fname and synth_dir is not None and spec.get("class"):

@@ -1,25 +1,24 @@
 {
  "all": {
-  "fail": 42,
+  "fail": 34,
   "not_run": 1,
-  "pass": 45,
+  "pass": 53,
   "shed": 0,
   "total": 88
  },
  "failed_checks": {
-  "boss_actions": 22,
-  "intent": 13,
-  "outbox": 14,
+  "boss_actions": 9,
+  "intent": 9,
+  "outbox": 16,
   "quarantine": 1,
-  "relation": 11,
-  "signal": 29,
-  "soft_hold": 1,
-  "trust.sender_level": 2
+  "relation": 7,
+  "signal": 22,
+  "trust.sender_level": 1
  },
  "heldout": {
-  "fail": 23,
+  "fail": 16,
   "not_run": 1,
-  "pass": 5,
+  "pass": 12,
   "shed": 0,
   "total": 29
  },
@@ -27,7 +26,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "boss_actions",
+    "signal",
     "relation"
    ],
    "scenario": "A10_late_binding",
@@ -107,8 +106,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "intent",
-    "boss_actions",
+    "outbox",
     "relation"
    ],
    "scenario": "A2_missing_document_followup",
@@ -127,11 +125,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "intent",
-    "signal",
-    "outbox",
-    "boss_actions",
-    "relation"
+    "outbox"
    ],
    "scenario": "A4_duplicate_resubmission",
    "shed_messages": 0,
@@ -141,10 +135,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "signal",
-    "outbox",
-    "boss_actions",
-    "relation"
+    "outbox"
    ],
    "scenario": "A5_split_package",
    "shed_messages": 0,
@@ -154,7 +145,9 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "signal"
+    "intent",
+    "signal",
+    "outbox"
    ],
    "scenario": "A6_urgent_deadline_complaint",
    "shed_messages": 0,
@@ -163,15 +156,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "intent",
-    "signal",
-    "boss_actions"
-   ],
+   "failed_checks": [],
    "scenario": "A7_unrelated_correspondence",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -241,7 +230,6 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "intent",
     "outbox",
     "boss_actions",
     "relation"
@@ -253,20 +241,16 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "signal",
-    "boss_actions",
-    "relation",
-    "relation"
-   ],
+   "failed_checks": [],
    "scenario": "B6_late_exhibit_completes_set",
    "shed_messages": 0,
    "split": "tuned",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
    "failed_checks": [
+    "intent",
     "signal",
     "relation"
    ],
@@ -293,13 +277,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "outbox"
-   ],
+   "failed_checks": [],
    "scenario": "C11_empty_body_attachment",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -320,8 +302,6 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "soft_hold",
-    "outbox",
     "boss_actions"
    ],
    "scenario": "C3_password_zip",
@@ -343,20 +323,16 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "boss_actions"
-   ],
+   "failed_checks": [],
    "scenario": "C5_misleading_filename",
    "shed_messages": 0,
    "split": "tuned",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
    "failed_checks": [
-    "intent",
-    "signal",
-    "boss_actions"
+    "intent"
    ],
    "scenario": "C6_conflicting_instructions",
    "shed_messages": 0,
@@ -381,17 +357,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "intent",
-    "signal",
-    "signal",
-    "outbox",
-    "boss_actions"
-   ],
+   "failed_checks": [],
    "scenario": "C9_litigation_threat",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -488,15 +458,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "intent",
-    "signal",
-    "boss_actions"
-   ],
+   "failed_checks": [],
    "scenario": "E2_registered_address_dkim_fail",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -516,13 +482,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "signal"
-   ],
+   "failed_checks": [],
    "scenario": "E5_invoice_fraud_po",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -535,8 +499,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "intent",
-    "trust.sender_level",
+    "signal",
     "outbox"
    ],
    "scenario": "E7_thread_hijack",
@@ -546,13 +509,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "signal"
-   ],
+   "failed_checks": [],
    "scenario": "E8_fake_subpoena",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -572,13 +533,11 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [
-    "boss_actions"
-   ],
+   "failed_checks": [],
    "scenario": "F2_genuine_bank_change_callback",
    "shed_messages": 0,
    "split": "heldout",
-   "verdict": "fail"
+   "verdict": "pass"
   },
   {
    "error_messages": 0,
@@ -599,7 +558,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "boss_actions"
+    "outbox"
    ],
    "scenario": "F5_counsel_forwards_claim",
    "shed_messages": 0,
@@ -655,6 +614,7 @@
    "error_messages": 0,
    "failed_checks": [
     "signal",
+    "outbox",
     "boss_actions",
     "relation"
    ],
@@ -682,7 +642,7 @@
   {
    "error_messages": 0,
    "failed_checks": [
-    "boss_actions"
+    "outbox"
    ],
    "scenario": "G6_reextraction_after_amendment",
    "shed_messages": 0,
@@ -857,17 +817,20 @@
   },
   {
    "error_messages": 0,
-   "failed_checks": [],
+   "failed_checks": [
+    "intent",
+    "signal"
+   ],
    "scenario": "T6_duplicate_delivery_idempotent",
    "shed_messages": 0,
    "split": "tuned",
-   "verdict": "pass"
+   "verdict": "fail"
   }
  ],
  "tuned": {
-  "fail": 19,
+  "fail": 18,
   "not_run": 0,
-  "pass": 40,
+  "pass": 41,
   "shed": 0,
   "total": 59
  }
