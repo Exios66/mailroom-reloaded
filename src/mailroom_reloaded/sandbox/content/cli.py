@@ -63,8 +63,8 @@ def validate(
     """Validate a content directory or smoke export, defaulting to committed smoke.
 
     Print a success summary or report validation errors to stderr and exit 1.
-    CompatError and FileNotFoundError also become exit code 1; other loading
-    errors propagate.
+    Content read/parse failures are included in the report. CompatError and
+    FileNotFoundError also become exit code 1; schema loading errors propagate.
     """
     try:
         cs = load_content(path)
