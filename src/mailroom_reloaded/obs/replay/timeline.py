@@ -703,19 +703,22 @@ def _cache_put(key: tuple[Any, ...], tl: Timeline) -> None:
 
 # ------------------------------------------------------------------ public entry
 def _read_rows(store: Any, kind: str, key: str) -> list[dict[str, Any]]:
+    from mailroom_reloaded.storage import span_store
+
+    cap = span_store.READ_CAP + 1  # one extra row tells a cut read from an exact fit
     path = getattr(store, "path", None)
     if isinstance(path, Path) and not path.exists():
         return []  # never create an empty database just to read it
     if kind == "run":
-        return store.spans_for_run(key)
+        return store.spans_for_run(key, cap)
     if kind == "session":
-        return store.spans_for_session(key)
+        return store.spans_for_session(key, cap)
     if kind == "doc":
-        return store.spans_for_doc(key)
+        return store.spans_for_doc(key, cap)
     if kind == "window":
         from mailroom_reloaded.obs.replay.sessions import window_bounds_ns
 
-        return store.spans_between(*window_bounds_ns(key))
+        return store.spans_between(*window_bounds_ns(key), cap)
     raise ValueError(f"unknown session kind: {kind!r}")
 
 
@@ -768,8 +771,15 @@ def _build(
         if hit is not None:
             return hit.model_copy(deep=True)  # callers may mutate; the cache stays pristine
 
-    tl = timeline_from_spans(_read_rows(store, kind, key), kind, key)
+    from mailroom_reloaded.storage import span_store
+
+    rows = _read_rows(store, kind, key)
+    truncated = len(rows) > span_store.READ_CAP
+    tl = timeline_from_spans(rows[: span_store.READ_CAP], kind, key)
     from_spans = tl is not None
+    if tl is not None and truncated:
+        # the store silently cuts a read at the cap: say so, before any window is applied
+        tl.session.window.complete = False
     if tl is None:
         from mailroom_reloaded.obs.replay.audit_source import timeline_from_audit
 

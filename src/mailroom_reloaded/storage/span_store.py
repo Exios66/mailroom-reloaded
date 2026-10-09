@@ -51,6 +51,7 @@ from mailroom_reloaded.settings import get_settings
 from mailroom_reloaded.storage.db import _pragmas
 
 __all__ = [
+    "READ_CAP",
     "SPAN_ROWS_PER_RUN",
     "SpanStore",
     "SqliteSpanExporter",
@@ -62,6 +63,8 @@ logger = structlog.get_logger(__name__)
 
 #: Maximum span rows kept per run; later spans of that run are dropped.
 SPAN_ROWS_PER_RUN = 20_000
+#: Default row limit of the ``spans_for_*`` / ``spans_between`` reads; a read this long was cut.
+READ_CAP = 100_000
 MASKED = "<masked>"
 _MAX_STR = 256
 _MAX_SUMMARY = 2000
@@ -290,22 +293,22 @@ class SpanStore:
                 for r in conn.execute(q)
             ]
 
-    def spans_for_run(self, run_id: str, limit: int = 100_000) -> list[dict[str, Any]]:
+    def spans_for_run(self, run_id: str, limit: int = READ_CAP) -> list[dict[str, Any]]:
         """Spans of one run in start order."""
         return self._rows(_t.c.run_id == run_id, limit)
 
     def spans_for_session(
-        self, session_id: str, limit: int = 100_000
+        self, session_id: str, limit: int = READ_CAP
     ) -> list[dict[str, Any]]:
         """Spans of one session in start order."""
         return self._rows(_t.c.session_id == session_id, limit)
 
-    def spans_for_doc(self, doc_id: str, limit: int = 100_000) -> list[dict[str, Any]]:
+    def spans_for_doc(self, doc_id: str, limit: int = READ_CAP) -> list[dict[str, Any]]:
         """Spans of one document (across runs) in start order."""
         return self._rows(_t.c.doc_id == doc_id, limit)
 
     def spans_between(
-        self, start_ns: int, end_ns: int, limit: int = 100_000
+        self, start_ns: int, end_ns: int, limit: int = READ_CAP
     ) -> list[dict[str, Any]]:
         """Spans that started in ``[start_ns, end_ns)``."""
         return self._rows((_t.c.start_ns >= start_ns) & (_t.c.start_ns < end_ns), limit)

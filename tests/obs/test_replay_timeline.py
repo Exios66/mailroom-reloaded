@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from datetime import UTC, datetime
@@ -576,5 +577,38 @@ def test_build_timeline_leaves_a_supplied_store_open(tmp_path: Path) -> None:
         assert build_timeline("run:run-1", store=store) is not None
         # still usable: the caller owns it
         assert build_timeline("run:run-1", store=store) is not None
+    finally:
+        store.close()
+
+
+def test_read_at_cap_is_incomplete(tmp_path, monkeypatch) -> None:
+    from mailroom_reloaded.storage import span_store
+
+    rows = F.all_rows()
+    store = SpanStore(tmp_path / "t.db")
+    store.write(
+        [
+            {**r, "attrs": json.dumps(r["attrs"]), "events": json.dumps(r["events"])}
+            for r in rows
+        ]
+    )
+    n = len(store.spans_for_run(F.RUN))
+    assert n > 1
+    try:
+        monkeypatch.setattr(span_store, "READ_CAP", n - 1)
+        cut = build_timeline(f"run:{F.RUN}", store=store)
+        assert cut is not None and cut.session.window.complete is False
+        # the cached copy keeps the flag
+        again = build_timeline(f"run:{F.RUN}", store=store)
+        assert again is not None and again.session.window.complete is False
+        # a later window never flips a truncated read back to complete
+        clear_cache()
+        win = build_timeline(f"run:{F.RUN}", from_s=0.0, store=store)
+        assert win is not None and win.session.window.complete is False
+        # exactly CAP rows is a complete read, not a cut one
+        clear_cache()
+        monkeypatch.setattr(span_store, "READ_CAP", n)
+        whole = build_timeline(f"run:{F.RUN}", store=store)
+        assert whole is not None and whole.session.window.complete is True
     finally:
         store.close()

@@ -140,9 +140,17 @@ start (`api/app.py:87-117`). `/health`, `/` and `/ui` stay public.
 | `POST` | `/v1/review/{doc_id}/resolve` | Disposition a parked document: `approve` / `correct` / `reject` (`api/app.py:220-240`). |
 | `GET` | `/v1/runs` | Eval runs and document counts from SQLite `eval_docs` (`api/app.py:243-246`). |
 | `GET` | `/v1/runs/{run_id}/cards` | Card JSONs on disk; empty until cards are written (`api/app.py:249-260`). |
+| `GET` | `/v1/replay/sessions` | Replayable sessions, newest first; `?limit=` 1..500 (default 50). Runs whose spans retention removed carry `data_pruned: true`. |
+| `GET` | `/v1/replay/sessions/{id}/timeline` | `replay/v1` timeline; optional `?from_s=&to_s=` window (seconds, finite, >= 0). 400 bad id, 404 unknown, 410 `data pruned`. |
+| `GET` | `/v1/replay/sessions/{id}/export` | The full timeline as an attachment `<id>.replay.json` (same status codes). |
 | `POST` | `/v1/intake/gmail` | Gmail Pub/Sub push; ingests in the background, returns 204 (`api/app.py:297-321`). |
 | `POST` | `/v1/intake/gmail/poll` | On-demand Gmail fetch (`api/app.py:324-333`). |
 | `GET` | `/ui` | Vanilla-JS runs page, no build step (`api/app.py:398-404`). |
+
+The replay routes carry metadata only (no document text, prompts or completions; entities may carry a bounded filename).
+A timeline read is cut at 100,000 span rows; when it is, `session.window.complete`
+is `false`. A session id is `run:<id>`, `session:<id>`, `doc:<id>` or
+`window:<from_ns>-<to_ns>`; a bare id means a run.
 
 Uploads are capped at 50 MB (`MAILROOM_MAX_UPLOAD_BYTES`) and accept
 `.txt .md .pdf .docx .rtf .html .htm` (`api/app.py:60-66`).
