@@ -39,6 +39,7 @@ def test_every_schema_is_valid(p):
 
 @pytest.mark.parametrize("schema,example", [
     ("scenario.v2.json", "scenario_A1.yaml"),
+    ("scenario.v2.json", "scenario_H1_template.yaml"),
     ("gen_spec.v1.json", "gen_spec.yaml"),
     ("persona_behavior.v1.json", "persona_behavior.yaml"),
     ("registry.v1.json", "registry.yaml"),
@@ -338,7 +339,7 @@ def test_required_fields_cannot_be_omitted(contract, kind, path, fields):
 
 
 @pytest.mark.parametrize("kind,path,value,keyword", [
-    ("scenario", ("name",), "H1_status", "pattern"),
+    ("scenario", ("name",), "I1_status", "pattern"),
     ("scenario", ("name",), "a1_status", "pattern"),
     ("scenario", ("name",), "A_status", "pattern"),
     ("scenario", ("name",), "A1_Status", "pattern"),
@@ -436,11 +437,20 @@ def test_wire_contracts_reject_content_only_metadata(contract, kind, path, field
     assert_rejected(check, data, path, "additionalProperties")
 
 
-@pytest.mark.parametrize("series", list("ABCDEFGST"))
+@pytest.mark.parametrize("series", list("ABCDEFGHST"))
 def test_supported_scenario_series(contract, series):
     check, data = contract("scenario")
     data["name"] = f"{series}12_boundary_case_01"
     check.validate(data)
+
+
+def test_heldout_series_accepts_h_name(contract):
+    """H is the held-out series: a valid H name validates and I still does not."""
+    check, data = contract("scenario")
+    data["name"] = "H1_heldout_boundary_case_01"
+    check.validate(data)
+    data["name"] = "I1_heldout_boundary_case_01"
+    assert_rejected(check, data, ("name",), "pattern")
 
 
 @pytest.mark.parametrize("kind,path,values", [

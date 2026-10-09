@@ -9,7 +9,7 @@ this document and a schema disagree, the schema wins.
 
 | File | Contract |
 |---|---|
-| `scenario.v2.json` | `scenarios/<Series>/*.yaml` (`mailroom.scenario/v2`; series enum `A-G`, `S`, `T`, AM1) |
+| `scenario.v2.json` | `scenarios/<Series>/*.yaml` (`mailroom.scenario/v2`; series enum `A-G`, `S`, `T`, `H` held-out, AM1) |
 | `registry.v1.json` | compiled client registry (`mailroom.comm.registry/v1`, the comm/v1 registry) |
 | `overlay.v1.json` | one JSONL line of `email/overlay/*.jsonl` |
 | `gen_spec.v1.json` | `gen/specs/*.yaml` |
@@ -34,7 +34,7 @@ there and are added here because the plan assigns them to M0.
 | Clients | slug | `tricountytitle` |
 | Contacts | `<clientprefix>_<name>` | `tc_kalvarado` |
 | Personas | `p_<client>_<role>` | `p_tricounty_real` |
-| Scenarios | `<Series><n>_<slug>` (`^[A-GST][0-9]+_[a-z0-9_]+$`) | `E1_lookalike_wire_change` |
+| Scenarios | `<Series><n>_<slug>` (`^[A-HST][0-9]+_[a-z0-9_]+$`; `H` is the held-out series) | `E1_lookalike_wire_change` |
 | Generation specs | `gen_<archetype>_<nnnn>` | `gen_E1_wire_change_0042` |
 | Emails | `em_<series>_<nnnn>` | `em_E_0042` |
 | Attachments | `att_<nnnn>` | `att_0001` |

@@ -1,0 +1,31 @@
+# Held-out scenario template (docs/HELD_OUT_SCENARIOS.md).
+# Write the expectation FIRST, then the email, from the sources only. H names are the
+# frozen held-out batch; tag them `heldout` so `mailroom sandbox conformance --heldout`
+# can measure them. Replace every value below before freezing; it is a shape, not content.
+name: H1_heldout_status_confirm
+title: Counsel asks for a status confirmation on in-flight matter HP-2026-0417
+seed: 9101
+profile: smoke
+gen: scripted
+transports: [sim, agentmail]
+status: draft
+tags: [heldout, status]
+timeline:
+- at: "00:02"
+  client:
+    persona: p_harlow_counsel
+    channel: email
+    claimed_from: dwhitcomb@harlowpryce.sandbox.invalid
+    auth: {spf: pass, dkim: pass, dmarc: pass}
+    template: status_inquiry
+    vars: {matter_ref: HP-2026-0417, matter_description: Schedule C indemnification review}
+expect:
+  intent: status_request
+  signals:
+  - {kind: status_request, priority: normal, within: "00:05"}
+  trust: {sender_level: verified}
+  outbox:
+  - {intent: status_request, state: draft, to_sender: true}
+  boss_actions: [ack_signal, approve_outbound]
+  overblocking: {benign_hard_actions: 0}
+  invariants: [audit_chain_ok, no_stuck_docs, fast_path_two_calls, comms_offpath]
