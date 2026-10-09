@@ -71,11 +71,62 @@ the canonical entry) and is keyed `(doc_id, seq)` (`schemas/audit.py:44-49`,
 `storage/db.py:25-36`). The chain detects edits, middle deletions and reordering;
 **tail truncation cannot be detected without an external anchor** — export or
 externally anchor the SQLite DB if that threat is in scope
-(`storage/audit_log.py:44-45`).
+(`storage/audit_log.py:44-45`). The archive ledger has its own anchor, see
+[Ledger anchor](#ledger-anchor).
 
 The SQLite DB is `<base_dir>/mailroom.db`, WAL mode, `busy_timeout=5000`, and is
 created lazily (`storage/db.py:56-73`). Back it up together with `manifests/`,
 `archive/` and `review/` for a complete restore.
+
+## Ledger anchor
+
+The archive ledger is one hash chain over every run. A chain on one disk detects edits but
+not truncation or a restored backup, so the head can be anchored off-host. Configuration:
+[CONFIGURATION.md](CONFIGURATION.md#archive-ledger-anchor). The remote table, role and grants
+are in `deploy/anchor/mailroom_anchor.sql`.
+
+```bash
+mailroom audit verify [--run ID] [--external]
+mailroom audit anchor
+mailroom audit export-head [--out PATH]
+```
+
+- `audit verify` checks the local chain (one run with `--run`). Without `--external` it
+  exits only 0 or 1. With `--external` it also compares the head with the anchor.
+- `audit anchor` pushes the current head now. Pushes also happen automatically in a
+  background thread after `run_closed`, pin, unpin, policy and prune entries; they make up to
+  three attempts and never block or fail the pipeline.
+- `audit export-head` prints `seq`, `entry_hash`, `ts` and `exported_at` as JSON (or writes
+  it to `--out/-o`), whatever `MAILROOM_ANCHOR` is set to. An empty ledger prints
+  `ledger empty` and exits 0. Pin the output somewhere the pipeline host cannot write.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | OK. A fresh unanchored tail is still 0. |
+| 1 | Tamper: chain broken, or (`--external`, `anchor`) the anchor conflicts with the ledger (truncated or rewritten). |
+| 3 | Anchor store unreachable. |
+| 4 | Anchor not configured (`none`, unknown value, missing URL/key, or `export`, which has no remote). |
+| 5 | STALE: the oldest unanchored entry is older than 24 h. |
+
+Exit 2 is reserved for command-line usage errors.
+
+### What the anchor protects
+
+It protects against truncation, rollback (including a restored backup) and rewrite of entries
+at or before the last anchor pushed, by an attacker who does not hold the writer credential.
+
+It does not protect:
+
+- the unanchored tail (entries after the last push);
+- runs that are still open;
+- the correctness of what was recorded (it proves integrity, not truth);
+- the validity of the chain at push time: a push anchors the current head without
+  re-verifying earlier entries, so run `mailroom audit verify` before trusting an anchor;
+- against a holder of the writer credential, who can append anchors over a rewritten tail.
+  An off-host `export-head` copy taken earlier mitigates this.
+
+The Supabase grants, the trigger and the PostgREST key header in the SQL file are unverified
+until tried on a staging project. Test there before relying on the anchor.
 
 ## Observability
 

@@ -47,6 +47,7 @@ embeddings = ["scipy", "sentence-transformers"]
 deploy = ["modal==1.5.5"]
 dev = ["pytest", "pytest-asyncio", "respx", "scikit-learn", "ruff"]
 sandbox = ["jsonschema>=4", "zstandard", "jinja2"]
+anchor = ["psycopg[binary]"]
 parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.21.0"]
 
 [project.scripts]

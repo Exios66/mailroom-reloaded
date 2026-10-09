@@ -246,6 +246,141 @@ def conformance(
     )
 
 
+audit_app = typer.Typer(
+    name="audit",
+    help="Archive ledger: verify the hash chain, anchor its head off-host, export the head.",
+    no_args_is_help=True,
+)
+app.add_typer(audit_app, name="audit")
+
+
+def _short(h: str | None) -> str:
+    """First 12 hex characters of a hash, or ``-``."""
+    return (h or "-")[:12]
+
+
+@audit_app.command("verify")
+def audit_verify(
+    run: str = typer.Option(
+        None, "--run", help="Verify one run instead of the whole ledger."
+    ),
+    external: bool = typer.Option(
+        False, "--external", help="Also compare the head with the external anchor."
+    ),
+) -> None:
+    """Verify the ledger chain (and with ``--external`` the anchor).
+
+    Exit codes: 0 ok, 1 tamper (chain broken, TRUNCATED or REWRITTEN), 3 anchor store
+    unreachable, 4 anchor not configured, 5 STALE (entries unanchored for over 24 h).
+    Code 2 is left to the CLI's own usage errors.
+    """
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    ledger = get_ledger(anchor=False)
+    verdict = ledger.verify(run)
+    if run is not None and not verdict.ok and verdict.detail == "unknown run":
+        typer.echo(f"unknown run {run!r}")
+        raise typer.Exit(2)
+    if not verdict.ok:
+        where = f" at {verdict.broken_at}" if verdict.broken_at is not None else ""
+        typer.echo(f"chain: broken{where} ({verdict.detail or 'invalid'})")
+        raise typer.Exit(anchor.EXIT_TAMPER)
+    merkle = (
+        ""
+        if verdict.merkle_ok is None
+        else (", merkle ok" if verdict.merkle_ok else ", merkle BAD")
+    )
+    typer.echo(
+        f"chain: ok ({verdict.count} entries, head {verdict.head_seq} {_short(verdict.head_hash)}{merkle})"
+    )
+    if not external:
+        return
+    try:
+        cfg = anchor.get_config()
+    except anchor.AnchorNotConfigured as exc:
+        typer.echo(f"anchor: not configured ({exc})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    if cfg.backend == "export":
+        typer.echo("anchor: export only; pin `mailroom audit export-head` off-host")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED)
+    try:
+        backend = anchor.make_backend(cfg)
+    except anchor.AnchorError as exc:
+        typer.echo(f"anchor: not configured ({cfg.redact(str(exc))})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    try:
+        result = anchor.verify_external(ledger, cfg, backend)
+    except Exception as exc:  # noqa: BLE001 - an unexpected failure is never "tamper"
+        typer.echo(f"anchor: unreachable ({type(exc).__name__})")
+        raise typer.Exit(anchor.EXIT_UNREACHABLE) from None
+    finally:
+        close = getattr(backend, "close", None)
+        if close:
+            close()
+    if result.key_file_warning:
+        typer.echo("warning: the anchor key file is world-readable")
+    detail = f": {cfg.redact(result.detail)}" if result.detail else ""
+    typer.echo(
+        f"anchor: {result.status.upper()} (anchored {result.anchored_seq}, local {result.local_seq}, "
+        f"{result.unanchored} unanchored){detail}"
+    )
+    raise typer.Exit(result.exit_code)
+
+
+@audit_app.command("anchor")
+def audit_anchor() -> None:
+    """Push the ledger head to the external anchor now (exit codes as for ``verify``)."""
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    try:
+        cfg = anchor.get_config()
+        backend = anchor.make_backend(cfg)
+    except anchor.AnchorError as exc:
+        typer.echo(f"anchor: not configured ({exc})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    ledger = get_ledger(anchor=False)
+    try:
+        result = anchor.push_head(ledger, backend)
+    except anchor.AnchorConflict as exc:
+        typer.echo(f"anchor: {cfg.redact(str(exc))}")
+        raise typer.Exit(anchor.EXIT_TAMPER) from None
+    except Exception as exc:  # noqa: BLE001 - an unexpected failure is never "tamper"
+        typer.echo(f"anchor: unreachable ({cfg.redact(str(exc)) if isinstance(exc, anchor.AnchorError) else type(exc).__name__})")
+        raise typer.Exit(anchor.EXIT_UNREACHABLE) from None
+    finally:
+        close = getattr(backend, "close", None)
+        if close:
+            close()
+    if result.status == "empty":
+        typer.echo("ledger empty; nothing to anchor")
+        return
+    typer.echo(f"anchor: {result.status} {result.seq} {_short(result.entry_hash)}")
+
+
+@audit_app.command("export-head")
+def audit_export_head(
+    out: Path = typer.Option(
+        None, "--out", "-o", help="Write the record here instead of stdout."
+    ),
+) -> None:
+    """Print the ledger head as JSON for off-host pinning (works with any anchor setting)."""
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    record = anchor.export_head(get_ledger(anchor=False))
+    if record is None:
+        typer.echo("ledger empty")
+        return
+    text = json.dumps(record, sort_keys=True)
+    if out is not None:
+        out.write_text(text + "\n", encoding="utf-8")
+        typer.echo(str(out))
+    else:
+        typer.echo(text)
+
+
 jev_app = typer.Typer(
     name="jev",
     help="Jev (TypeSafe System One) decision model: ask decisions and calibrate.",

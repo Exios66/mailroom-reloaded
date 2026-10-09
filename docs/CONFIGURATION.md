@@ -88,6 +88,27 @@ and `deploy/modal_vllm.py`, not by the Python runtime.
 | `LLAMAFILE_MODEL` / `LLAMAFILE_ALIAS` / `LLAMAFILE_CTX` / `LLAMAFILE_GPU` | `/models/model.gguf` / `qwen3:7b` / `16384` / `disable` | Llamafile sidecar (`docker-compose.yml:149-152`). |
 | `MODAL_GPU`, `MODAL_GPU_COUNT`, `MODAL_MAX_CONTAINERS`, `MODAL_SCALEDOWN_WINDOW` | `L4`, `1`, `1`, `300` | Modal vLLM shape (`deploy/README.md:9-14`). |
 
+### Archive ledger anchor
+
+Optional off-host anchor of the archive-ledger head (`storage/anchor.py`). Only
+`(seq, entry_hash)` of the head is pushed. See [OPERATIONS.md](OPERATIONS.md#ledger-anchor)
+for commands, exit codes and the threat model.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MAILROOM_ANCHOR` | `none` | `none`, `export`, `postgres` or `supabase`. Blank means `none`; the value is lower-cased. `export` pushes nothing (use `mailroom audit export-head` and pin the output off-host). An unknown value is treated as not configured: pushes are skipped, `audit verify --external` and `audit anchor` exit 4, and startup does not fail. |
+| `MAILROOM_ANCHOR_URL` | unset | Supabase project URL or Postgres DSN. Required for `supabase` and `postgres`. Use HTTPS: a non-HTTPS Supabase URL is refused unless the host is loopback (`localhost`, `127.0.0.1`, `::1`). A non-loopback Postgres DSN gets `sslmode=verify-full` unless the DSN sets its own `sslmode`; a private CA needs `sslrootcert` in the DSN. The URL is hidden from `repr` and logs because a DSN may carry a password. |
+| `MAILROOM_ANCHOR_KEY` | unset | Writer credential. Required for `supabase`. For `postgres` no key is needed; if set it is the role password. |
+| `MAILROOM_ANCHOR_KEY_FILE` | unset | File holding the key (Docker/Kubernetes secrets style). `MAILROOM_ANCHOR_KEY` wins when both are set. The file is capped at 8192 bytes, must be a regular file (symlinks are followed) holding non-empty UTF-8 text, and a warning is printed by `audit verify --external` if it is world-readable. |
+
+The Supabase key must be the key of the dedicated INSERT-only role created by
+`deploy/anchor/mailroom_anchor.sql`, never the `service_role` key (which bypasses
+row-level security and can rewrite the anchor table). The key is redacted from logged errors.
+
+The `postgres` backend needs the optional extra and outbound TCP to the database:
+`pip install mailroom-reloaded[anchor]` (or `uv sync --extra anchor`). The default install
+does not include `psycopg`. The `supabase` backend uses `httpx` and needs no extra.
+
 ### Gmail intake
 
 `MAILROOM_GMAIL_CREDENTIALS`, `MAILROOM_GMAIL_TOKEN`, `MAILROOM_GMAIL_QUERY`,

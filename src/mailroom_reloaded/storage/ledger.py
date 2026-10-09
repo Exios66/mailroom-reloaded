@@ -29,7 +29,7 @@ import json
 import math
 import threading
 from collections import deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -150,6 +150,7 @@ class Ledger:
         self._stop = False
         self._thread: threading.Thread | None = None
         # accessed by enqueuing threads under _cond; the writer under _cond too
+        self._commit_hooks: list[Callable[[set[str]], None]] = []
         self._dropped: dict[str, int] = {}
         self._overflow_gap: set[str] = set()
 
@@ -160,6 +161,10 @@ class Ledger:
         if self._engine is None:
             self._engine = get_engine()
         return self._engine
+
+    def add_commit_hook(self, hook: Callable[[set[str]], None]) -> None:
+        """Call ``hook(kinds)`` after each committed batch (on the writer thread; failures are logged)."""
+        self._commit_hooks.append(hook)
 
     # ------------------------------------------------------------------ writes
     def append(
@@ -293,6 +298,14 @@ class Ledger:
                 self._pending_rows -= sum(len(i.rows) for i in batch)
                 self._done += len(batch)
                 self._cond.notify_all()
+            self._run_hooks({i.kind for i in batch if i.kind})
+
+    def _run_hooks(self, kinds: set[str]) -> None:
+        for hook in list(self._commit_hooks):
+            try:
+                hook(kinds)
+            except Exception:
+                logger.warning("ledger_commit_hook_failed", exc_info=True)
 
     def _shed_metrics(self, batch: list[_Item]) -> list[_Item]:
         """After repeated write failures drop the batch's metric rows (never chain entries).
@@ -691,12 +704,15 @@ _default: Ledger | None = None
 _default_lock = threading.Lock()
 
 
-def get_ledger() -> Ledger:
+def get_ledger(*, anchor: bool = True) -> Ledger:
     """The process-wide ledger on the default engine (created lazily).
 
     If the default engine was replaced (a different ``base_dir``), the old ledger is
     flushed and closed and a new one is bound, so a late write never lands in the
     wrong database.
+
+    ``anchor=False`` (read-only tooling such as ``mailroom audit``) skips the external
+    anchor hook and its startup push, so inspecting the ledger never writes to the store.
     """
     global _default
     engine = get_engine()
@@ -707,6 +723,12 @@ def get_ledger() -> Ledger:
         if _default is None:
             _default = Ledger(engine)
             atexit.register(_default.close)
+            if anchor:
+                from mailroom_reloaded.storage import (
+                    anchor as anchor_mod,  # lazy: the anchor imports the ledger types
+                )
+
+                anchor_mod.install(_default)
         return _default
 
 

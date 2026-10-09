@@ -22,11 +22,20 @@ def _empty_to_none(value: Any) -> Any:
     return value
 
 
+def _anchor_mode(value: Any) -> Any:
+    """Blank means ``none``; the value is lower-cased and validated lazily by ``storage/anchor.py``,
+    so a typo can never crash startup or the pipeline."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "none"
+    return str(value).strip().lower()
+
+
 # Optional Jev knobs: a blank ``.env`` line must mean "unset", not a parse error.
 _JevStr = Annotated[str | None, BeforeValidator(_empty_to_none)]
 _JevFloat = Annotated[float | None, BeforeValidator(_empty_to_none)]
 _JevInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
 _OptPath = Annotated[Path | None, BeforeValidator(_empty_to_none)]
+_AnchorMode = Annotated[str, BeforeValidator(_anchor_mode)]
 
 
 class DocClass(BaseModel):
@@ -189,6 +198,13 @@ class Settings(BaseSettings):
     trace_mask: bool = False
     #: SQLite file for the local span store; ``None`` means ``<base_dir>/traces.db``.
     trace_store_path: _OptPath = None
+    # External anchor of the archive-ledger head (storage/anchor.py). ``none`` is the default;
+    # ``supabase`` (HTTPS, no extra dependency) is the recommended backend, ``postgres`` needs the
+    # ``anchor`` extra, ``export`` only prints the head for off-host pinning.
+    anchor: _AnchorMode = "none"
+    anchor_url: _JevStr = Field(default=None, repr=False)  # a DSN may embed a password
+    anchor_key: _JevStr = Field(default=None, repr=False)
+    anchor_key_file: _OptPath = None
     gpu_usd_per_hour: float = 0.80
 
 
