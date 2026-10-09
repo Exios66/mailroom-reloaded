@@ -7,7 +7,7 @@ message key), so even a row carrying content cannot leak it into the payload.
 
 :func:`build_timeline` resolves a session id, reads the span store, falls back to the
 audit log when there are no spans, applies the window and payload cap, and caches the
-result keyed by the store watermark.
+result keyed by the store change token.
 """
 
 from __future__ import annotations
@@ -52,23 +52,31 @@ MAX_SEGMENTS = 20_000
 CACHE_SIZE = 16
 
 _MAX_STR = 256
-_MAX_PAYLOAD_KEYS = 16
+_MAX_NAME = 128
+_MAX_CAUSES = 16
 _NODE_PREFIX = "mailroom.node."
 _LLM_PREFIX = "mailroom.llm."
 _ROOT_NAME = "mailroom.document"
 _VERDICTS = {"complete": "CORRECT", "partial": "PARTIAL", "incomplete": "MISS"}
 _RETRY_EVENT_KINDS = {"retry"}
-#: Event keys that look like they carry content are never passed through.
-_CONTENT_HINTS = (
-    "text",
-    "content",
-    "message",
-    "prompt",
-    "completion",
-    "input",
-    "output",
-    "body",
-)
+#: Payload keys passed through per event kind (what the pipeline emits). A kind or key not
+#: listed here is dropped, so an event can never carry text under an unexpected name.
+_EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
+    "gate_decision": frozenset({"stage", "action", "reason", "source", "confidence"}),
+    "route": frozenset({"from", "to", "reason"}),
+    "escalation": frozenset({"to", "reason"}),
+    "retry": frozenset({"kind", "attempt", "max_attempts", "confidence"}),
+    "parked": frozenset({"reason"}),
+    "archived": frozenset({"doc_type"}),
+    "judge_gate": frozenset({"engaged", "extraction_confidence"}),
+    "arbiter": frozenset({"decision", "retry_count"}),
+    "boss": frozenset({"action"}),
+    "llm_retry": frozenset(
+        {"attempt", "max_attempts", "error_type", "retry_in_s", "status_code"}
+    ),
+    "exception": frozenset({"exception.type"}),
+}
+_MAX_EVENT_STR = 128
 
 
 def stations() -> list[StationInfo]:
@@ -112,21 +120,20 @@ def _percentile(values: list[float], q: float) -> float:
     return ordered[lo] + (ordered[hi] - ordered[lo]) * (pos - lo)
 
 
-def _scalar_payload(attrs: dict[str, Any]) -> dict[str, Any]:
-    """Event attributes reduced to bounded scalars (lists and objects are dropped)."""
+def _scalar_payload(kind: str, attrs: dict[str, Any]) -> dict[str, Any]:
+    """The allow-listed payload keys of a ``kind`` event, as bounded scalars."""
+    allowed = _EVENT_PAYLOAD_KEYS.get(kind, frozenset())
     out: dict[str, Any] = {}
     for key, value in attrs.items():
-        if len(out) >= _MAX_PAYLOAD_KEYS:
-            break
-        if any(h in str(key).lower() for h in _CONTENT_HINTS):
+        if key not in allowed:
             continue
         if isinstance(value, (bool, int)):
-            out[str(key)[:64]] = value
+            out[key] = value
         elif isinstance(value, float):
             if math.isfinite(value):
-                out[str(key)[:64]] = value
+                out[key] = value
         elif isinstance(value, str):
-            out[str(key)[:64]] = value[:_MAX_STR]
+            out[key] = value[:_MAX_EVENT_STR]
     return out
 
 
@@ -142,14 +149,21 @@ def _data_type(name: str, value: Any) -> str:
 
 
 def _score_value(name: str, value: Any, data_type: str) -> Any:
+    """A bounded scalar (``None`` otherwise); ``review_causes`` is a short token list."""
     if data_type == "json" and isinstance(value, str):
         try:
-            return json.loads(value)
+            value = json.loads(value)
         except ValueError:
-            return value[:_MAX_STR]
+            pass
+    if name == "review_causes":
+        return _causes(value)
     if isinstance(value, str):
         return value[:_MAX_STR]
-    return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, (bool, int)):
+        return value
+    return None
 
 
 def _is_llm(row: dict[str, Any]) -> bool:
@@ -165,6 +179,15 @@ def timeline_from_spans(
         return None
     rows = sorted(rows, key=lambda r: (r["start_ns"], r["span_id"]))
     t0_ns = min(r["start_ns"] for r in rows)
+    # a span without an end (None/0) is still running: it reaches the latest known end
+    running = {r["span_id"] for r in rows if not r["end_ns"]}
+    known_end = max(
+        (max(r["end_ns"], r["start_ns"]) for r in rows if r["end_ns"]), default=t0_ns
+    )
+    rows = [
+        {**r, "end_ns": max(known_end, r["start_ns"])} if r["span_id"] in running else r
+        for r in rows
+    ]
     end_ns = max(max(r["end_ns"], r["start_ns"]) for r in rows)
 
     def rel(ns: int) -> float:
@@ -205,6 +228,7 @@ def timeline_from_spans(
     roots: dict[str, dict[str, Any]] = {}
     judge: dict[str, dict[str, Any]] = {}
     review_causes_attr: dict[str, list[str]] = {}
+    instrumentor_children: list[dict[str, Any]] = []
     env = "live"
 
     for row in rows:
@@ -235,15 +259,19 @@ def timeline_from_spans(
                     t1=t1,
                     attempt=max(1, _int(a.get(A.ATTEMPT), 1)),
                     retry_kind=_str(a.get(A.RETRY_KIND), 64),
-                    status="failed" if failed else "ok",
+                    status="failed"
+                    if failed
+                    else "running"
+                    if row["span_id"] in running
+                    else "ok",
                     reason=_str(a.get(A.FAIL_REASON)),
-                    tokens=_int(a["mailroom.tokens.used"])
+                    tokens=max(0, _int(a["mailroom.tokens.used"]))
                     if "mailroom.tokens.used" in a
                     else None,
-                    cost_usd=_num(a["mailroom.cost_usd"])
+                    cost_usd=max(0.0, _num(a["mailroom.cost_usd"]))
                     if "mailroom.cost_usd" in a
                     else None,
-                    llm_calls=_int(a["mailroom.llm_calls"])
+                    llm_calls=max(0, _int(a["mailroom.llm_calls"]))
                     if "mailroom.llm_calls" in a
                     else None,
                     span_id=row["span_id"],
@@ -263,7 +291,9 @@ def timeline_from_spans(
                 and parent is not None
                 and str(parent["name"]).startswith(_LLM_PREFIX)
             ):
-                pass  # the instrumentor span under our own mailroom.llm.* span: count once
+                # the instrumentor span under our own mailroom.llm.* span: count once,
+                # but keep its token counts for a parent that recorded none
+                instrumentor_children.append(row)
             else:
                 generations.append(_generation(row, doc, t0, t1))
 
@@ -286,7 +316,7 @@ def timeline_from_spans(
                     doc_id=doc,
                     kind=kind_[:64],
                     station=station_of(row),
-                    payload=_scalar_payload(eattrs),
+                    payload=_scalar_payload(kind_, eattrs),
                 )
             )
 
@@ -294,20 +324,30 @@ def timeline_from_spans(
         seen_scores: set[str] = set()
         for k, v in a.items():
             if k.startswith(SCORE_PREFIX) and len(k) > len(SCORE_PREFIX):
-                seen_scores.add(k[len(SCORE_PREFIX) :])
-                scores.append(_score(row, doc, k[len(SCORE_PREFIX) :], v, t1))
+                sname = k[len(SCORE_PREFIX) : len(SCORE_PREFIX) + _MAX_NAME]
+                seen_scores.add(sname)
+                scores.append(_score(row, doc, sname, v, t1))
         for ev in row["events"]:
             if ev.get("name") == "mailroom.score":
                 eattrs = ev.get("attrs") or {}
                 sname = eattrs.get("name")
-                if (
-                    isinstance(sname, str)
-                    and sname
-                    and sname not in seen_scores
-                    and "value" in eattrs
-                ):
+                sname = sname[:_MAX_NAME] if isinstance(sname, str) else None
+                if sname and sname not in seen_scores and "value" in eattrs:
                     seen_scores.add(sname)
-                    scores.append(_score(row, doc, sname[:128], eattrs["value"], t1))
+                    scores.append(_score(row, doc, sname, eattrs["value"], t1))
+
+    by_gen = {g.span_id: g for g in generations}
+    for child in instrumentor_children:
+        gen = by_gen.get(child["parent_id"])
+        parent = by_id[child["parent_id"]]
+        ca = child["attrs"]
+        if (
+            gen is not None
+            and not any(k.startswith("mailroom.tokens.") for k in parent["attrs"])
+            and ("llm.token_count.prompt" in ca or "llm.token_count.completion" in ca)
+        ):
+            gen.prompt_tokens = max(0, _int(ca.get("llm.token_count.prompt")))
+            gen.completion_tokens = max(0, _int(ca.get("llm.token_count.completion")))
 
     segments.sort(key=lambda s: (s.t0, s.t1, s.node))
     generations.sort(key=lambda g: (g.t0, g.span_id))
@@ -353,7 +393,7 @@ def _causes(raw: Any) -> list[str]:
         except ValueError:
             raw = [p.strip() for p in raw.split(",")]
     if isinstance(raw, list):
-        return [str(c)[:64] for c in raw if isinstance(c, str) and c][:32]
+        return [c[:64] for c in raw if isinstance(c, str) and c][:_MAX_CAUSES]
     return []
 
 
@@ -396,11 +436,13 @@ def _generation(row: dict[str, Any], doc: str, t0: float, t1: float) -> Generati
         prompt_version=_str(a.get("mailroom.prompt.version"), 64),
         t0=t0,
         t1=t1,
-        prompt_tokens=_int(pick("mailroom.tokens.prompt", "llm.token_count.prompt")),
-        completion_tokens=_int(
-            pick("mailroom.tokens.completion", "llm.token_count.completion")
+        prompt_tokens=max(
+            0, _int(pick("mailroom.tokens.prompt", "llm.token_count.prompt"))
         ),
-        cost_usd=_num(pick("mailroom.cost.total", "llm.cost.total")),
+        completion_tokens=max(
+            0, _int(pick("mailroom.tokens.completion", "llm.token_count.completion"))
+        ),
+        cost_usd=max(0.0, _num(pick("mailroom.cost.total", "llm.cost.total"))),
         transport_attempts=_int(transport) if transport is not None else None,
         ttft_s=_num(ttft) if ttft is not None else None,
         length_capped=flag("mailroom.length_capped"),
@@ -497,11 +539,12 @@ def _entities(
 
 
 def _first_num(*values: Any) -> float:
-    """First real number among ``values`` (the last is the fallback and may be 0)."""
+    """First finite number among ``values`` (the last is the fallback), never negative."""
     for v in values[:-1]:
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return float(v)
-    return float(values[-1])
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+            return max(0.0, float(v))
+    last = values[-1]
+    return max(0.0, float(last)) if math.isfinite(last) else 0.0
 
 
 def _rollups(tl: Timeline, scores_by_doc: dict[str, dict[str, Any]]) -> Rollups:
@@ -570,6 +613,14 @@ def _window(tl: Timeline, lo: float, hi: float) -> Timeline:
     generations = [g for g in tl.generations if _overlaps(g.t0, g.t1, lo, hi)]
     events = [e for e in tl.events if lo <= e.t <= hi]
     scores = [s for s in tl.scores if lo <= s.t <= hi]
+    if lo > 0:
+        # the latest score per (doc, name) from before the window, so state at ``lo`` holds
+        carried: dict[tuple[str, str], Any] = {}
+        for s in tl.scores:  # time-ordered
+            if s.t < lo:
+                carried[(s.doc_id, s.name)] = s
+        scores = [*carried.values(), *scores]
+        scores.sort(key=lambda s: s.t)
     entities = [
         e
         for e in tl.entities
@@ -609,6 +660,7 @@ def _finalize(tl: Timeline, from_s: float | None, to_s: float | None) -> Timelin
     full_hi = tl.session.duration_s
     lo = 0.0 if from_s is None else max(0.0, from_s)
     hi = full_hi if to_s is None else min(to_s, full_hi)
+    lo = min(lo, hi)
     out = tl
     if from_s is not None or to_s is not None:
         out = _window(tl, lo, hi)
@@ -678,7 +730,7 @@ def build_timeline(
     Spans are the exact source; with no spans the audit log gives an approximate
     timeline. ``from_s``/``to_s`` select a window (``complete`` is then false); a
     payload over the cap is windowed automatically. Span-sourced results are cached by
-    the store watermark, so a new span invalidates them.
+    the store's change token, so any insert or prune invalidates them.
     """
     from mailroom_reloaded.obs.replay.sessions import parse_session_id
 
@@ -691,10 +743,11 @@ def build_timeline(
 
         store = SpanStore(default_span_store_path())
 
-    watermark: int | None = None
+    watermark: Any = None
     path = getattr(store, "path", None)
     if not (isinstance(path, Path) and not path.exists()):
-        watermark = store.watermark()
+        token = getattr(store, "change_token", store.watermark)
+        watermark = token()
     cache_key = (session_id, from_s, to_s, str(path), watermark)
     if watermark is not None:
         hit = _cache_get(cache_key)

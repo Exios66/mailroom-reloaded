@@ -41,6 +41,7 @@ from sqlalchemy import (
     delete,
     event,
     func,
+    literal_column,
     select,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -331,6 +332,18 @@ class SpanStore:
         """Newest ``end_ns`` stored (0 when empty); the timeline cache key."""
         with self.engine.connect() as conn:
             return conn.execute(select(func.max(_t.c.end_ns))).scalar() or 0
+
+    def change_token(self) -> tuple[int, int, int]:
+        """``(rows, newest rowid, newest end_ns)``: changes on any insert or prune.
+
+        Unlike :meth:`watermark`, a late span that ends before the newest one still moves it.
+        """
+        q = select(
+            func.count(), func.max(literal_column("rowid")), func.max(_t.c.end_ns)
+        )
+        with self.engine.connect() as conn:
+            n, rowid, end = conn.execute(q).one()
+        return (n, rowid or 0, end or 0)
 
     def count(self, run_id: str | None = None) -> int:
         """Stored span rows (for one run, or all)."""

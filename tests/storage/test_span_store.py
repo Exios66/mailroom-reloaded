@@ -316,6 +316,21 @@ def test_watermark_and_empty_store(store) -> None:
     assert store.watermark() > 0
 
 
+def test_change_token_moves_on_late_insert_and_prune(store) -> None:
+    empty = store.change_token()
+    _fake_run(_provider(store))
+    after_insert = store.change_token()
+    assert after_insert != empty
+    mark = store.watermark()
+    with run_scope("late"):
+        _fake_run(_provider(store), "d-late")
+    assert store.change_token() != after_insert
+    assert store.watermark() >= mark
+    before_prune = store.change_token()
+    assert store.prune(keep_runs=[], older_than_ns=2**62) > 0
+    assert store.change_token() != before_prune
+
+
 def test_cap_holds_across_two_store_instances_and_counts_only_real_inserts(
     tmp_path,
 ) -> None:

@@ -231,6 +231,22 @@ def boss() -> list[dict[str, Any]]:
     ]  # fmt: skip
 
 
+def llm_child() -> list[dict[str, Any]]:
+    """An LLM span without ``mailroom.tokens.*`` whose instrumentor child carries the counts."""
+    d, tr = "doc-f", "f" * 32
+    root = _root(d, tr, 0, 4, status="archived", stage="archive", scores={})
+    node = _node(d, tr, root, "sort", "sorter", 0, 4)
+    parent = row(
+        "mailroom.llm.sorter", 1, 3, trace=tr, parent=node["span_id"], kind="SPAN",
+        attrs={"mailroom.role": "sorter", "mailroom.model": "m-1"},
+    )  # fmt: skip
+    child = row(
+        "ChatCompletion", 1.1, 2.9, trace=tr, parent=parent["span_id"], kind="LLM",
+        attrs={"llm.token_count.prompt": 40, "llm.token_count.completion": 7},
+    )  # fmt: skip
+    return [root, node, parent, child]
+
+
 def all_rows() -> list[dict[str, Any]]:
     return happy() + retry() + failed() + parked() + boss()
 

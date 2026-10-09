@@ -131,9 +131,32 @@ def test_parked_and_boss_events(tl: Timeline) -> None:
     ]
 
 
-def test_unknown_event_payload_is_scalar_and_bounded(tl: Timeline) -> None:
+def test_unknown_event_kind_payload_is_dropped(tl: Timeline) -> None:
     custom = next(e for e in tl.events if e.kind == "custom_thing")
-    assert custom.payload == {"note": "x" * 256, "n": 3}
+    assert custom.payload == {}
+
+
+def test_event_payload_allow_list_and_bounds() -> None:
+    rows = F.parked()
+    rows[-2]["events"] = [
+        F.ev(
+            "parked",
+            8.1,
+            reason="r" * 500,
+            snippet="SECRET SNIPPET",
+            extracted_value="SECRET VALUE",
+            body="SECRET BODY",
+            nested={"a": "SECRET NESTED"},
+        ),
+        F.ev("retry", 8.2, kind="retry_sort", attempt=1, confidence=float("nan")),
+    ]
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    parked = next(e for e in out.events if e.kind == "parked")
+    assert parked.payload == {"reason": "r" * 128}
+    retry = next(e for e in out.events if e.kind == "retry")
+    assert retry.payload == {"kind": "retry_sort", "attempt": 1}
+    assert "SECRET" not in out.model_dump_json()
 
 
 def test_scores_at_span_end_time(tl: Timeline) -> None:
@@ -226,11 +249,101 @@ def test_no_content_in_serialised_timeline(tl: Timeline) -> None:
         "output.value",
     ):
         assert needle not in blob
+    # content under unexpected names, in events and score values, never reaches the payload
+    rows = F.all_rows()
+    rows[0]["attrs"]["mailroom.score.leaky_list"] = ["SECRET LIST"]
+    rows[0]["attrs"]["mailroom.score.leaky_dict"] = {"extracted_value": "SECRET DICT"}
+    rows[0]["attrs"]["mailroom.score.review_causes"] = ["ok", {"body": "SECRET"}]
+    rows[0]["events"].append(
+        F.ev(
+            "gate_decision",
+            1,
+            snippet="SECRET SNIPPET",
+            extracted_value="SECRET VALUE",
+            body="SECRET BODY",
+        )
+    )
+    rows[0]["events"].append(F.score_ev("leaky_event_score", {"body": "SECRET"}, 1))
+    leaky = timeline_from_spans(rows, "run", F.RUN)
+    assert leaky is not None
+    assert "SECRET" not in leaky.model_dump_json()
+    assert all(not isinstance(s.value, (dict, list)) for s in leaky.scores if s.name != "review_causes")
     # the fixture really carries the content the builder must ignore
     rows = F.all_rows()
     assert any("llm.input_messages.0.message.content" in r["attrs"] for r in rows)
     assert any("input.value" in r["attrs"] for r in rows)
     assert any(ev["attrs"].get("text") for r in rows for ev in r["events"])
+
+
+def test_score_names_are_bounded() -> None:
+    rows = F.happy()
+    rows[0]["attrs"]["mailroom.score." + "n" * 500] = 1.0
+    rows[0]["events"].append(F.score_ev("e" * 500, 1.0, 1))
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    assert max(len(s.name) for s in out.scores) == 128
+
+
+def test_non_finite_and_negative_numbers_do_not_break_the_build() -> None:
+    rows = F.happy()
+    root = rows[0]
+    root["attrs"]["mailroom.score.total_tokens"] = float("nan")
+    root["attrs"]["mailroom.score.estimated_cost_usd"] = float("inf")
+    root["attrs"]["mailroom.score.llm_call_count"] = float("-inf")
+    root["attrs"]["mailroom.usage.total_tokens"] = float("nan")
+    root["attrs"]["mailroom.usage.cost_usd"] = float("inf")
+    root["attrs"]["mailroom.usage.calls"] = float("nan")
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    t = out.entities[0].totals
+    # non-finite values fall through to the summed generations
+    assert (t.tokens, t.cost_usd, t.llm_calls) == (500, 0.003, 2)
+    root["attrs"]["mailroom.score.total_tokens"] = -5
+    root["attrs"]["mailroom.score.estimated_cost_usd"] = -1.5
+    root["attrs"]["mailroom.score.llm_call_count"] = -2
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    t = out.entities[0].totals
+    assert (t.tokens, t.cost_usd, t.llm_calls) == (0, 0.0, 0)
+    assert out.rollups.tokens >= 0 and out.rollups.cost_usd >= 0
+
+
+def test_instrumentor_child_tokens_merge_into_tokenless_parent() -> None:
+    out = timeline_from_spans(F.llm_child(), "run", F.RUN)
+    assert out is not None
+    assert len(out.generations) == 1  # still counted once
+    gen = out.generations[0]
+    assert (gen.prompt_tokens, gen.completion_tokens) == (40, 7)
+    assert out.entities[0].totals.tokens == 47
+
+
+def test_instrumentor_child_does_not_override_parent_tokens() -> None:
+    rows = F.llm_child()
+    rows[2]["attrs"]["mailroom.tokens.prompt"] = 1
+    rows[2]["attrs"]["mailroom.tokens.completion"] = 2
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    gen = out.generations[0]
+    assert (gen.prompt_tokens, gen.completion_tokens) == (1, 2)
+
+
+def test_unfinished_span_is_running_not_a_crash() -> None:
+    for end in (None, 0):
+        rows = F.happy()
+        extract = next(r for r in rows if r["name"] == "mailroom.node.extract")
+        extract["end_ns"] = end
+        out = timeline_from_spans(rows, "run", F.RUN)
+        assert out is not None
+        seg = next(s for s in out.segments if s.node == "extract")
+        assert seg.status == "running"
+        assert seg.t1 == 10.0 == out.session.duration_s  # latest known end
+
+
+def test_only_unfinished_span_ends_at_its_start() -> None:
+    rows = [r for r in F.happy() if r["name"] == "mailroom.document"]
+    rows[0]["end_ns"] = 0
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None and out.session.duration_s == 0.0
 
 
 # ------------------------------------------------------------------ windowing
@@ -255,6 +368,30 @@ def test_window_marks_incomplete(tmp_path: Path) -> None:
     assert part.rollups == full.rollups  # rollups describe the whole session
     whole = build_timeline("run:run-1", from_s=0, to_s=16, store=store)
     assert whole is not None and whole.session.window.complete is True
+
+
+def test_window_keeps_latest_prior_score_per_doc_and_name(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    full = build_timeline("run:run-1", store=store)
+    assert full is not None
+    part = build_timeline("run:run-1", from_s=11.5, to_s=16, store=store)
+    assert part is not None
+    before = [s for s in full.scores if s.t < 11.5]
+    assert before
+    latest = {}
+    for s in before:
+        latest[(s.doc_id, s.name)] = s
+    got = {(s.doc_id, s.name): s for s in part.scores if s.t < 11.5}
+    assert got == latest  # original times kept, one per (doc, name)
+    assert [s.t for s in part.scores] == sorted(s.t for s in part.scores)
+
+
+def test_window_from_beyond_duration_is_clamped(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    out = build_timeline("run:run-1", from_s=100, store=store)
+    assert out is not None
+    w = out.session.window
+    assert w.from_s <= w.to_s == 16.0 and w.complete is False
 
 
 def test_payload_cap_auto_windows(tmp_path: Path, monkeypatch) -> None:
@@ -347,6 +484,30 @@ def test_cache_hit_and_watermark_miss(tmp_path: Path, monkeypatch) -> None:
     clear_cache()
     build_timeline("run:run-1", store=store)
     assert len(calls) == 4
+
+
+def test_cache_sees_late_span_ending_before_the_max(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    first = build_timeline("run:run-1", store=store)
+    assert first is not None
+    assert not any(e.doc_id == "doc-late" for e in first.entities)
+    store.write(
+        F.to_store_rows(
+            [
+                F.row(
+                    "mailroom.node.sort",
+                    1,
+                    2,  # ends well before the run's newest end (16s)
+                    doc="doc-late",
+                    trace="l" * 32,
+                    station="sorter",
+                    attrs={"mailroom.node": "sort"},
+                )
+            ]
+        )
+    )
+    fresh = build_timeline("run:run-1", store=store)
+    assert fresh is not None and any(e.doc_id == "doc-late" for e in fresh.entities)
 
 
 def test_cache_is_bounded(tmp_path: Path) -> None:
