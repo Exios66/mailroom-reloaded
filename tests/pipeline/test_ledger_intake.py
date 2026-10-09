@@ -28,6 +28,13 @@ CORR_SUBCLASS = {
 U = Usage(prompt_tokens=5, completion_tokens=5, calls=1)
 
 
+def _reset_registry() -> None:
+    for registry in (run_ledger._open, run_ledger._invocations):
+        registry.clear()
+    for registry in (run_ledger._closed, run_ledger._rolled):
+        registry.clear()
+
+
 @pytest.fixture
 def fake_openai():
     server = FakeOpenAI()
@@ -54,8 +61,7 @@ def env(tmp_path, monkeypatch):
 
     settings.get_settings.cache_clear()
     monkeypatch.setattr(db, "_default_engine", None)
-    run_ledger._open.clear()
-    run_ledger._invocations.clear()
+    _reset_registry()
     try:
         yield tmp_path
     finally:
@@ -63,8 +69,7 @@ def env(tmp_path, monkeypatch):
         if db._default_engine is not None:
             db._default_engine.dispose()
         db._default_engine = None
-        run_ledger._open.clear()
-        run_ledger._invocations.clear()
+        _reset_registry()
         settings.get_settings.cache_clear()
 
 
@@ -369,3 +374,61 @@ def test_reconcile_archived_records_a_reconciled_document(env, monkeypatch) -> N
     outcomes = [e.payload["outcome"] for e in _entries(kind="doc_closed")]
     assert outcomes == ["completed", "reconciled"]
     assert _entries(kind="doc_closed")[1].payload["usage_complete"] is False
+
+
+def test_a_failed_run_opened_is_retried_by_the_next_document(env, monkeypatch) -> None:
+    _patch_handoff(monkeypatch)
+    monkeypatch.setattr(flow_mod, "_sort", _sort)
+    monkeypatch.setattr(flow_mod, "_extract", _extract())
+    ledger = get_ledger()
+    real_append = ledger.append
+    calls = {"n": 0}
+
+    def flaky(kind, *a, **k):
+        if kind == "run_opened":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return False
+        return real_append(kind, *a, **k)
+
+    monkeypatch.setattr(ledger, "append", flaky)
+    for name, text in (("a.txt", "first"), ("b.txt", "second")):
+        _, path = _inbox(env, name, text)
+        flow_mod.run_document(path, worker_id="w1")
+    kinds = [e.kind for e in _entries()]
+    assert kinds.count("run_opened") == 1 and kinds.count("doc_closed") == 2
+
+
+def test_a_closed_run_is_never_reopened_or_appended_to(env, monkeypatch) -> None:
+    _patch_handoff(monkeypatch)
+    monkeypatch.setattr(flow_mod, "_sort", _sort)
+    monkeypatch.setattr(flow_mod, "_extract", _extract())
+    monkeypatch.setenv("MAILROOM_RUN_ID", "pilot")
+    _, path = _inbox(env, "a.txt", "first")
+    flow_mod.run_document(path, worker_id="w1")
+    run_ledger.close_run(
+        get_ledger(), "pilot", "completed"
+    )  # e.g. rolled over by another process
+    _, path = _inbox(env, "b.txt", "second")
+    flow_mod.run_document(path, worker_id="w1")
+    es = _entries()
+    pilot = [e.kind for e in es if e.run_id == "pilot"]
+    assert pilot == [
+        "run_opened",
+        "doc_closed",
+        "run_closed",
+    ]  # one pair, nothing after the close
+    later = [e for e in es if e.run_id != "pilot"]
+    assert [e.kind for e in later] == ["run_opened", "doc_closed"] and later[
+        0
+    ].run_id.startswith("live-")
+    assert get_ledger().verify().ok
+
+
+def test_an_id_closed_in_the_ledger_by_another_process_is_not_reopened(env) -> None:
+    lg = get_ledger()
+    lg.append("run_opened", "old", payload={"kind": "live"})
+    lg.append("run_closed", "old", payload={"closed_by": "completed"})
+    lg.flush()
+    assert run_ledger.open_run(lg, "old", "live") is False
+    assert [e.kind for e in lg.entries(run_id="old")] == ["run_opened", "run_closed"]

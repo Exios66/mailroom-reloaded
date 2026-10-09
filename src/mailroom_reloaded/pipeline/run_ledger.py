@@ -2,7 +2,7 @@
 
 Every function here is best effort. A failure is logged and swallowed, so the
 ledger can never fail a document, change a document's outcome, or mask the
-exception that ended it (``tests/storage/test_ledger_intake.py``).
+exception that ended it (``tests/pipeline/test_ledger_intake.py``).
 
 * ``open_run`` / ``close_run`` write ``run_opened`` / ``run_closed``.
 * ``record_document`` writes one ``doc_closed`` per document **invocation**: the
@@ -22,6 +22,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -29,7 +30,7 @@ import structlog
 from mailroom_reloaded.llm.client import cost_for
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs.attrs import failure_class_for, failure_reason_for
-from mailroom_reloaded.obs.run_context import RunScope
+from mailroom_reloaded.obs.run_context import RunScope, live_run_id
 from mailroom_reloaded.schemas.ledger import canonical_json
 from mailroom_reloaded.settings import get_settings, load_taxonomy
 from mailroom_reloaded.storage import audit_log
@@ -54,6 +55,10 @@ logger = structlog.get_logger(__name__)
 _lock = threading.Lock()
 #: runs opened (or found open) by this process and not yet closed: run_id -> kind
 _open: dict[str, str] = {}
+#: live runs for which this process already did its rollover check
+_rolled: set[str] = set()
+#: runs closed (or found closed) by this process: they never receive another document
+_closed: set[str] = set()
 #: invocations recorded per (run_id, doc_id) by this process, seeded from the ledger
 _invocations: dict[tuple[str, str], int] = {}
 _OUTCOME = {"archived": "completed", "failed": "failed", "parked": "parked"}
@@ -118,32 +123,48 @@ def open_run(
     prompt_set: str = "",
     environment: str = "",
     source: str = "",
-) -> None:
-    """Write ``run_opened`` once per run (idempotent across threads and restarts)."""
+) -> bool:
+    """Write ``run_opened`` once per run id. Returns whether the run is open for new documents.
+
+    A run id has exactly one ``run_opened`` / ``run_closed`` pair: an id that was already
+    closed is never reopened (``False``), and a failed append leaves the run unregistered
+    so the next document retries.
+    """
     try:
-        with _lock:
+        with _lock:  # rare path (first document of a run per process), so the DB calls stay inside
+            if run_id in _closed:
+                return False
             if run_id in _open:
-                return
-            _open[run_id] = kind
-        if ledger.count("run_opened", run_id) > 0 and run_id in ledger.open_runs():
-            return  # an earlier process opened it and nobody closed it
-        ledger.append(
-            "run_opened",
-            run_id,
-            payload={
-                "kind": kind,
-                "mode": mode,
-                "posture_label": posture_label,
-                "model": model,
-                "prompt_set": prompt_set,
-                "config_sha": _config_sha(),
-                "environment": environment,
-                "source": source,
-                "pid": os.getpid(),
-            },
-        )
+                return True
+            if ledger.count("run_opened", run_id) > 0:
+                if run_id in ledger.open_runs():
+                    _open[run_id] = (
+                        kind  # an earlier process opened it and nobody closed it
+                    )
+                    return True
+                _closed.add(run_id)
+                return False
+            opened = ledger.append(
+                "run_opened",
+                run_id,
+                payload={
+                    "kind": kind,
+                    "mode": mode,
+                    "posture_label": posture_label,
+                    "model": model,
+                    "prompt_set": prompt_set,
+                    "config_sha": _config_sha(),
+                    "environment": environment,
+                    "source": source,
+                    "pid": os.getpid(),
+                },
+            )
+            if opened:
+                _open[run_id] = kind
+            return opened
     except Exception:
         logger.warning("ledger_open_run_failed", run_id=run_id, exc_info=True)
+        return False
 
 
 def close_run(
@@ -158,6 +179,7 @@ def close_run(
     try:
         with _lock:
             _open.pop(run_id, None)
+            _closed.add(run_id)
         payload: dict[str, Any] = {"closed_by": closed_by, "counts": counts or {}}
         if expected is not None:
             payload["expected"] = expected
@@ -166,14 +188,31 @@ def close_run(
         logger.warning("ledger_close_run_failed", run_id=run_id, exc_info=True)
 
 
-def ensure_live_run(ledger: Ledger, scope: RunScope) -> None:
-    """Open the live run for ``scope`` and lazily close any other live run (rollover)."""
+def _closed_snapshot() -> frozenset[str]:
+    with _lock:
+        return frozenset(_closed)
+
+
+def ensure_live_run(ledger: Ledger, scope: RunScope) -> str:
+    """Open the live run for ``scope`` and lazily close any other live run (rollover).
+
+    Returns the run id a document finishing now should be recorded under: ``scope.run_id``
+    normally, but the current live bucket when ``scope.run_id`` was already closed (a
+    document that outlived its day's rollover must not append after ``run_closed``).
+    """
     try:
         if scope.environment == "eval":
-            return  # eval runs are opened and closed by run_eval
+            return scope.run_id  # eval runs are opened and closed by run_eval
+        run_id = scope.run_id
+        with _lock:
+            stale = run_id in _closed
+        if stale:
+            run_id = live_run_id()
+            if run_id in _closed_snapshot():
+                run_id = f"live-{datetime.now(UTC):%Y%m%d}"  # never reopen: fall back to the date bucket
         open_run(
             ledger,
-            scope.run_id,
+            run_id,
             "live",
             mode="live",
             posture_label="live",
@@ -182,9 +221,17 @@ def ensure_live_run(ledger: Ledger, scope: RunScope) -> None:
             environment=scope.environment,
             source=scope.source,
         )
-        close_other_live_runs(ledger, scope.run_id)
+        with _lock:
+            first = run_id not in _rolled
+            _rolled.add(run_id)
+        if (
+            first
+        ):  # one rollover check per run id per process, not one query per document
+            close_other_live_runs(ledger, run_id)
+        return run_id
     except Exception:
         logger.warning("ledger_ensure_live_run_failed", exc_info=True)
+        return scope.run_id
 
 
 def close_other_live_runs(ledger: Ledger, keep_run_id: str) -> None:
@@ -282,6 +329,9 @@ def record_document(
 ) -> None:
     """Write the ``doc_closed`` entry of one document invocation."""
     try:
+        run_id = ensure_live_run(
+            ledger, scope
+        )  # a rollover may have closed the run mid-document
         outcome = "aborted" if aborted else _OUTCOME.get(state.status, "aborted")
         duration = time.monotonic() - base.started
         deltas = _role_deltas(state, base)
@@ -301,7 +351,7 @@ def record_document(
             outcome=outcome,
         )
         payload: dict[str, Any] = {
-            "invocation": _next_invocation(ledger, scope.run_id, state.doc_id),
+            "invocation": _next_invocation(ledger, run_id, state.doc_id),
             "outcome": outcome,
             "doc_type": doc_type,
             "audit_head": _audit_head(state.doc_id),
@@ -331,7 +381,7 @@ def record_document(
             )
         ledger.append(
             "doc_closed",
-            scope.run_id,
+            run_id,
             doc_id=state.doc_id,
             payload=payload,
             metrics=rows,

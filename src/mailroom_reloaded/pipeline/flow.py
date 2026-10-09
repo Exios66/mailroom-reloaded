@@ -887,10 +887,10 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     try:
         with ensure_run_scope("reconcile") as scope:
             ledger = run_ledger.ledger_for(None)
-            run_ledger.ensure_live_run(ledger, scope)
+            run_id = run_ledger.ensure_live_run(ledger, scope)
             run_ledger.record_reconciled(
                 ledger,
-                scope.run_id,
+                run_id,
                 manifest.doc_id,
                 str(payload.get("doc_type") or sort.get("doc_type") or "unknown"),
             )
