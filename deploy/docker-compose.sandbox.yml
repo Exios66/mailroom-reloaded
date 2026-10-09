@@ -1,0 +1,68 @@
+# mailroom-reloaded SANDBOX topology: the offline ingress simulation server.
+# Standalone (does not need docker-compose.yml or docker-compose.dev.yml).
+#
+#   scripts/sandbox.sh up                     # build + start, http://127.0.0.1:8100/ui
+#   docker compose -f deploy/docker-compose.sandbox.yml up -d --build
+#
+# One service, no LLM container, no observability stack: the pipeline runs
+# in-process against an offline mock LLM, the Correspondent is a rule-based
+# stand-in, and outbound mail is captured in a virtual outbox. Nothing here
+# needs, or is given, a network route out by the application.
+#
+# Exposure: the port is published on 127.0.0.1 by default. To serve other hosts
+# set SANDBOX_BIND (e.g. 0.0.0.0) AND MAILROOM_API_TOKEN, and set
+# SANDBOX_ALLOW_UNAUTH=0 so the app's own bind policy refuses to start without
+# the token. `scripts/sandbox.sh up --expose` does all three. See
+# docs/SANDBOX_SERVER.md.
+name: mailroom-sandbox
+
+services:
+  sandbox:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.sandbox
+      args:
+        APP_UID: ${APP_UID:-1000}
+    image: mailroom-sandbox:latest
+    restart: unless-stopped
+    command:
+      - mailroom
+      - sandbox
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+      - --content
+      - ${SANDBOX_CONTENT:-smoke}
+      - --data-dir
+      - /state
+      - --egress
+      - ${SANDBOX_EGRESS:-closed}
+    ports: ["${SANDBOX_BIND:-127.0.0.1}:${SANDBOX_PORT:-8100}:8100"]
+    environment:
+      MAILROOM_API_TOKEN: ${MAILROOM_API_TOKEN:-}
+      # Loopback-only publishing makes the in-container 0.0.0.0 bind safe; --expose flips this to 0.
+      MAILROOM_ALLOW_UNAUTHENTICATED_BIND: ${SANDBOX_ALLOW_UNAUTH:-1}
+      OTEL_SDK_DISABLED: "true"
+    volumes:
+      - sandbox_state:/state
+      # Optional full content bundle (extracted `mailroom sandbox content pull` result):
+      #   SANDBOX_CONTENT=/content SANDBOX_CONTENT_DIR=/path/to/.sandbox-content
+      - ${SANDBOX_CONTENT_DIR:-../src/mailroom_reloaded/sandbox/fixtures/smoke}:/content:ro
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+volumes:
+  sandbox_state:
