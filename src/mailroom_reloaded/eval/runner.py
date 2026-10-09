@@ -34,6 +34,7 @@ from mailroom_reloaded.eval.dataset import (
     sample,
 )
 from mailroom_reloaded.llm.usage import Usage
+from mailroom_reloaded.obs.run_context import run_scope
 from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.settings import get_settings, load_taxonomy
 from mailroom_reloaded.storage import db
@@ -500,5 +501,7 @@ def run_eval(cfg: EvalConfig) -> str:
     graded = select_graded(selected, cfg.judge_sample_rate, cfg.seed)
     engine = _engine()
     _ensure_table(engine)
-    asyncio.run(_run_all(cfg, run_id, selected, gts, graded, engine))
+    # asyncio tasks (and to_thread) copy this context, so every eval document inherits the scope
+    with run_scope(run_id, "eval", "eval", session_id=f"eval-{run_id}"):
+        asyncio.run(_run_all(cfg, run_id, selected, gts, graded, engine))
     return run_id

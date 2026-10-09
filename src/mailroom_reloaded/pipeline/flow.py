@@ -43,6 +43,7 @@ from mailroom_reloaded.ingest.bert import (
 )
 from mailroom_reloaded.ingest.clerk import ingest as _ingest
 from mailroom_reloaded.obs.metrics import M
+from mailroom_reloaded.obs.run_context import ensure_run_scope
 from mailroom_reloaded.pipeline.archivist import archive_document
 from mailroom_reloaded.pipeline.guards import (
     NODE_DEADLINES,
@@ -799,5 +800,7 @@ def run_document(
     state with ``status == "failed"``.
     """
     flow = MailroomFlow()
-    flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
-    return flow._drive()
+    # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
+    with ensure_run_scope("eval" if eval_ctx is not None else "watch"):
+        flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
+        return flow._drive()

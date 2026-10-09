@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Trace replay stack 1: `obs/run_context.py` (`run_scope`, `ensure_run_scope`, daily `live-<YYYYMMDD>` run id; opened inside `run_document` and `run_eval`) and `obs/attrs.py` (attribute keys, station map, span kinds, bounded `failure_class` / `failure_reason` vocabularies). No behaviour change yet.
 - Sandbox M0 contracts: top-level `schemas/` (scenario v2, registry v1, overlay v1, gen_spec v1, persona_behavior v1, content-file schemas copied from content v0.5.0; new relation-kind, signal-kind and event-kind enum schemas), `docs/SANDBOX_CONTENT.md` (IDs, vocabulary, schema-major compat policy), `sandbox` extra (`jsonschema`) and example-validation tests.
 
 ## [0.2.0] - 2026-10-08
