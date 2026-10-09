@@ -72,7 +72,7 @@ ask the owner**; do not invent a top-level directory.
 | Protocol / policy | `protocol/` |
 | Taxonomy | `taxonomy/strata.csv` is **generated** by `tools/sync_strata.py`; hand-edit only `offtaxonomy.csv` and `migrations/` |
 | Schemas | `schemas/` (copy of reloaded's root `schemas/`; see X-03) |
-| Tooling / tests | `tools/*.py|sh`; tests in `tests/` (unittest) |
+| Tooling / tests | `tools/*.py`, `tools/*.sh`; tests in `tests/` (unittest) |
 | Docs | `CONTENT_SPEC.md`, `README.md`, `CHANGELOG.md`, `docs/` (history only; the live plan is this file in reloaded) |
 | Generated / never commit | `dist/`, `release/`, `.cache/` |
 
