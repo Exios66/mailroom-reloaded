@@ -61,8 +61,7 @@ class ContentLock:
         Validation raises LockError; filesystem errors propagate as OSError.
         """
         self.validate()
-        lines = [f"{k}: {v!r}" if k == "schema_version" else f"{k}: {v}" for k, v in asdict(self).items()]
-        Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        Path(path).write_text(yaml.safe_dump(asdict(self), sort_keys=False), encoding="utf-8")
 
 
 def sha256_file(path: Path | str) -> str:

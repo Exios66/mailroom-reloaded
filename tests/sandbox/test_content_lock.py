@@ -34,14 +34,18 @@ def test_commit_length_boundaries_roundtrip(content_lock, tmp_path, length):
     assert ContentLock.read(path) == lock
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=LockError,
-    reason="ContentLock.write leaves numeric digests unquoted; YAML drops leading zeros on read",
-)
 def test_numeric_digest_roundtrip_preserves_leading_zeros(content_lock, tmp_path):
-    """Document the known round-trip failure for an unquoted all-zero digest."""
-    lock = replace(content_lock, bundle_sha256="0" * 64)
+    """Preserve leading zeros in numeric commit identifiers and digests."""
+    lock = replace(content_lock, commit="0000123", bundle_sha256="0" * 64)
+    path = tmp_path / "pin"
+    lock.write(path)
+    assert ContentLock.read(path) == lock
+
+
+@pytest.mark.parametrize("value", ["00123", "true", "null", "2026-10-09", "value: # note", "a'b\nnext"])
+def test_yaml_sensitive_strings_roundtrip(content_lock, tmp_path, value):
+    """Preserve YAML-sensitive strings in every unrestricted metadata field."""
+    lock = replace(content_lock, repo=value, tag=value, schema_version=value, dataset_revision=value)
     path = tmp_path / "pin"
     lock.write(path)
     assert ContentLock.read(path) == lock
