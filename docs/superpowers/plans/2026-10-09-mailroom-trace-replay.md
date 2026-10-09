@@ -16,7 +16,7 @@
 > 10. **External anchor, user-selectable.** `MAILROOM_ANCHOR=none (default) | export | postgres | supabase` pushes the ledger head `(seq, entry_hash)` off-host so truncation and rewrite are detectable. Postgres and Supabase are first-class; `export` is for manual operator pinning.
 > 11. **Showcase runs** shipped for new users: a clean run; one with retries and a boss escalation; one with parked and failed documents; one heavy on the judge and arbiter.
 > 12. **Complete LLM usage.** Judge, boss, arbiter, vision (and eval grading) usage is captured per role, flows into `usage_total`, metrics, the report, `eval_docs`, the audit ledger and the replay (Task 19). `usage_complete` is true unless a node raised mid-call.
-> 13. **Anchor defaults to HTTPS.** Supabase over PostgREST/httpx is the recommended backend; Postgres stays optional behind the locked `anchor` extra. `anchor_key` can come from an environment variable or a secrets file (`MAILROOM_ANCHOR_KEY_FILE`).
+> 13. **Anchor defaults to HTTPS.** Supabase over PostgREST/httpx is the recommended backend, using a dedicated insert-only database role (never the service key); Postgres stays optional behind the locked `anchor` extra. `anchor_key` can come from an environment variable or a secrets file (`MAILROOM_ANCHOR_KEY_FILE`).
 > 7. **`replay ↗` link in `/ui`** on each eval run, plus a `/tui#replay=run:<id>` deep link that actually opens the viewer.
 
 **Goal:** Add `replay`, an alternative viewer launched from `/tui`. It plays a mailroom pipeline session back from captured OpenTelemetry spans (falling back to the audit log) as a live, interactive, scrubbable visualisation. It has play/pause, speed and seek, a station "track" with documents moving along it, a document leaderboard, an event ticker, a per-document inspector, pluggable insight panels, and a follow-live mode.
@@ -861,7 +861,7 @@ Decided after review: the anchor uses HTTPS (Supabase over PostgREST) by default
 
 Still open:
 1. What does CrewAI's `token_usage` report for each provider configured in `taxonomy.yaml`? Task 19 checks this first; where a provider reports nothing, the entry says `usage_complete=false` instead of guessing.
-2. Should the Supabase key be a dedicated insert-only database role (recommended) or the service key? The doc recommends the role; the service key bypasses RLS, so grants are the real control.
+2. ~~Should the Supabase key be a dedicated insert-only database role or the service key?~~ **Decided:** a dedicated insert-only role. The anchor DDL creates `mailroom_anchor_writer` with INSERT and SELECT on `mailroom_anchor` only; the service key is never used or documented as an option.
 
 ## Design review (revision 4)
 
