@@ -148,6 +148,29 @@ def test_load_split_labeled_config_computes_missing_hash(monkeypatch):
     assert gts["fx.txt"].retry_expected is True
 
 
+@pytest.mark.parametrize("config", ["fixtures", "bundles"])
+@pytest.mark.parametrize("duplicate_name", ["fx.txt", " fx.txt "])
+def test_labeled_loader_rejects_duplicate_filenames(monkeypatch, config, duplicate_name):
+    from types import SimpleNamespace
+
+    rows = [
+        {"filename": "fx.txt", "doc_text": "hello", "expected": "contract"},
+        {
+            "filename": duplicate_name,
+            "doc_text": "different",
+            "expected": "correspondence",
+            # Duplicate identity must be rejected before validating the document.
+            "content_sha256": sha256_text("hello"),
+        },
+    ]
+    monkeypatch.setitem(
+        sys.modules, "datasets", SimpleNamespace(load_dataset=lambda *a, **k: rows)
+    )
+
+    with pytest.raises(DatasetIntegrityError, match=r"Duplicate ground truth filename: fx\.txt"):
+        load_split(config=config)
+
+
 @pytest.fixture
 def documents():
     """Build known, custom and unlabelled documents for sampling boundary tests."""

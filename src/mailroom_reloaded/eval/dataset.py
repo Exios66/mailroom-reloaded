@@ -440,6 +440,8 @@ def _load_labeled(
     gts: dict[str, GroundTruth] = {}
     for row in _load_hf_config(datasets, config, revision, split, repo):
         gt = _ground_truth_from_row(row)
+        if gt.filename in gts:
+            raise DatasetIntegrityError(f"Duplicate ground truth filename: {gt.filename}")
         text = str(_row_get(row, _TEXT_KEYS, "") or "")
         declared = _row_get(row, _SHA_KEYS)
         if declared is None:
