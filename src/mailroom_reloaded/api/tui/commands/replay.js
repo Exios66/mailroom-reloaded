@@ -5,6 +5,7 @@
 import { fail, flagText, parseIntFlag, text, validRunId } from './pipeline.js';
 import { SPEEDS, createClock } from '../replay/clock.js';
 import { createModel } from '../replay/model.js';
+import { listPanels } from '../replay/panels.js';
 import { fmtTime, renderFrame } from '../replay/grid.js';
 
 const PREFIXES = new Set(['run', 'session', 'doc', 'window']);
@@ -48,7 +49,8 @@ KEYS
     [ ] or - +   slower / faster        Home / End   seek to start / end
     0-9          seek to 0%..90%        up/down j/k  select document
     Enter or i   toggle inspector       l            toggle ledger panel
-    e            jump to next event     Esc or q     quit (Ctrl+C aborts)
+    p            cycle insight panels   e            jump to next event
+    Esc or q     quit (Ctrl+C aborts)
     The view is text only; every value is shown literally.`,
 };
 
@@ -197,6 +199,14 @@ async function openViewer(ctx, arg, flags) {
 
   const docCount = () => (Array.isArray(model.entities) ? model.entities.length : 0);
 
+  // none -> metrics -> tokens -> decisions -> latency -> fields -> none.
+  // From the inspector or ledger, p starts the insight cycle at its first panel.
+  const cyclePanel = () => {
+    const ids = listPanels().map((p) => p.id);
+    const at = ids.indexOf(panel);
+    panel = at < 0 ? (ids[0] ?? 'none') : at + 1 < ids.length ? ids[at + 1] : 'none';
+  };
+
   function onKey(e) {
     if (closed || !e || typeof e.key !== 'string') return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -221,7 +231,8 @@ async function openViewer(ctx, arg, flags) {
     else if (k === 'l') {
       panel = panel === 'ledger' ? 'none' : 'ledger';
       if (panel === 'ledger' && (ledger === null || ledger.unavailable)) loadLedger();
-    } else if (k === 'e') {
+    } else if (k === 'p') cyclePanel();
+    else if (k === 'e') {
       const t = clock.state().t;
       const next = (model.eventsBetween(t, dur) || []).find((x) => x && typeof x.t === 'number' && x.t > t);
       if (next) clock.seek(next.t);

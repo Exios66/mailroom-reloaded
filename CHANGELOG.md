@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- TUI replay panels: `api/tui/replay/panels.js` adds a pluggable `registerPanel({id, title, key, render})` registry (the f1-race-replay "pit wall window" counterpart) with five built-ins — `metrics`, `tokens`, `decisions`, `latency`, `fields` — cycled with `p` in the replay viewer; `grid.js`/`commands/replay.js` resolve a registered panel id and hostile strings stay literal text.
+- Trace replay stack 13: the `replay` viewer — `api/tui/replay/{clock,model,grid,stations}.js` (pure playback clock, timeline model, character-grid renderer), the `ctx.takeover` full-screen hook in `terminal.js`, and `commands/replay.js` (list sessions or open a run on a scrubbable timeline with inspector and ledger panels).
+- Trace replay stack 14: `/ui` gains a per-eval-run `replay ↗` link and `/tui#replay=run:<id>` deep link (`api/tui/deeplink.js`).
+- Trace replay stack 15: the `scripts/tui_replay_check.mjs` headless-Chromium check of the viewer; a run-scoped ledger verify of a run without ledger rows is softened to a warning.
 - TUI: `ledger` (list, `head`, `verify [run_id]`) and `runs pin|unpin|keep [set ...]` over the ledger API; ids and policy values are validated client-side and every value is printed as text.
 - Token-gated ledger API: `GET /v1/ledger` (filters, newest first), `/ledger/head`, `/ledger/verify`, `/ledger/keep`, and `POST /v1/ledger/pin`, `/unpin`, `/policy`; reads use a throwaway ledger (no anchor hook), writes the process-wide one; adds `Ledger.total()`, `retention.policy_source` and `is_valid_run_id`.
 - Trace replay stack 11: token-gated replay read API (`GET /v1/replay/sessions`, `/v1/replay/sessions/{id}/timeline`, `/export`; 400/404/410), `data_pruned` on `Session` and `SessionSummary`, and `window.complete = false` when a span read hits `span_store.READ_CAP`.
@@ -67,6 +71,10 @@ PR #5 audit hardening (PRs #9, #11, #12, #13).
 - Jev: schema-valid `noul`, crash-safe calibration, provider key precedence, and `verify_threshold` consumed by the three-tier decision.
 - Dev mock provider, dotenv parsing, state permissions and collector isolation.
 - Gate and calibration fitting rejects missing and non-train splits.
+
+### Fixed
+
+- `test_api.py::test_jev_status_off_by_default` now forces `MAILROOM_JEV_PROVIDER=off` instead of deleting the key, so a developer's local `.env` (environment wins over `.env`) can no longer make the suite red.
 
 ### Security
 
