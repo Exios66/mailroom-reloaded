@@ -127,11 +127,18 @@ def test_parse_accepts(raw, expected) -> None:
         "window:9-1",
         "window:1-2-3",
         "window:",
+        "window:1-9223372036854775808",  # hi > int64 max overflows SQLite
+        "window:99999999999999999999-99999999999999999999",
     ],
 )
 def test_parse_rejects(raw) -> None:
     with pytest.raises(ValueError):
         parse_session_id(raw)
+
+
+def test_parse_window_int64_boundary() -> None:
+    top = 2**63 - 1
+    assert parse_session_id(f"window:1-{top}") == ("window", f"1-{top}")
 
 
 def test_parse_limit_boundary() -> None:

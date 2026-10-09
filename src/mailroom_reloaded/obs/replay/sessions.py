@@ -43,6 +43,8 @@ _KINDS: tuple[str, ...] = ("run", "session", "doc", "window")
 _KEY_RE = re.compile(r"[A-Za-z0-9._:/@+=-]+")
 _WINDOW_RE = re.compile(r"([0-9]{1,20})-([0-9]{1,20})")
 _EVAL_RE = re.compile(r"eval[-_]")
+#: SQLite integers are signed 64-bit; larger bounds overflow when bound as a parameter.
+_MAX_NS = 2**63 - 1
 
 
 def parse_session_id(raw: str) -> tuple[str, str]:
@@ -80,7 +82,7 @@ def window_bounds_ns(key: str) -> tuple[int, int]:
     if m is None:
         raise ValueError("invalid session id")
     lo, hi = int(m.group(1)), int(m.group(2))
-    if lo >= hi:
+    if lo >= hi or hi > _MAX_NS:
         raise ValueError("invalid session id")
     return lo, hi
 

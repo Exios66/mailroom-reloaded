@@ -302,3 +302,104 @@ def test_run_without_eval_docs_table(tmp_path) -> None:
         assert tl is not None and tl.session.environment == "live"
     finally:
         eng.dispose()
+
+
+def _failed_then(engine, doc: str, tail: list[tuple[str, str, dict, float]]) -> None:
+    _chain(
+        engine,
+        doc,
+        [
+            ("sort", "completed", {"elapsed_s": 1.0}, 1.0),
+            ("extract", "node_failed", {"reason": "deadline_exceeded", "elapsed_s": 1.0}, 3.0),
+            *tail,
+        ],
+    )
+
+
+def test_recovered_failure_is_not_failed(engine) -> None:
+    _failed_then(
+        engine,
+        "dok",
+        [
+            ("extract", "completed", {"elapsed_s": 1.0}, 5.0),
+            ("archive", "archived", {"doc_type": "invoice"}, 6.0),
+        ],
+    )
+    tl = timeline_from_audit("doc", "dok", engine=engine)
+    assert tl is not None
+    (ent,) = tl.entities
+    assert ent.final_status == "archived" and ent.failure_class is None
+
+
+def test_archived_after_failure_wins(engine) -> None:
+    _failed_then(engine, "dar", [("archive", "archived", {}, 6.0)])
+    tl = timeline_from_audit("doc", "dar", engine=engine)
+    assert tl is not None and tl.entities[0].final_status == "archived"
+    assert tl.entities[0].failure_class is None
+
+
+def test_last_attempt_failed_stays_failed(engine) -> None:
+    _chain(
+        engine,
+        "dbad",
+        [
+            ("extract", "completed", {"elapsed_s": 1.0}, 2.0),
+            ("extract", "node_failed", {"reason": "deadline_exceeded", "elapsed_s": 1.0}, 4.0),
+        ],
+    )
+    tl = timeline_from_audit("doc", "dbad", engine=engine)
+    assert tl is not None
+    (ent,) = tl.entities
+    assert ent.final_status == "failed" and ent.failure_class is not None
+
+
+def test_truncation_marks_window_incomplete(engine, monkeypatch) -> None:
+    from mailroom_reloaded.obs.replay import audit_source
+
+    for i in range(3):
+        _happy(engine, f"t{i}")
+    lo = int((BASE - timedelta(minutes=1)).timestamp() * 1e9)
+    hi = int((BASE + timedelta(hours=1)).timestamp() * 1e9)
+    key = f"{lo}-{hi}"
+    full = timeline_from_audit("window", key, engine=engine)
+    assert full is not None and full.session.window.complete is True
+    monkeypatch.setattr(audit_source, "MAX_DOCS", 2)
+    cut = timeline_from_audit("window", key, engine=engine)
+    assert cut is not None
+    assert len(cut.entities) == 2 and cut.session.window.complete is False
+    monkeypatch.setattr(audit_source, "MAX_DOCS", 3)  # exactly at the cap: not truncated
+    exact = timeline_from_audit("window", key, engine=engine)
+    assert exact is not None and exact.session.window.complete is True
+
+
+def test_session_id_is_canonical(engine) -> None:
+    _happy(engine, "a/b@c+d=e")
+    tl = timeline_from_audit("doc", "a/b@c+d=e", engine=engine)
+    assert tl is not None and tl.session.id == "doc:a/b@c+d=e"
+
+
+def test_gate_reason_prose_does_not_survive(engine) -> None:
+    reasons = [
+        "Invoice from John Smith 12345",
+        "jev unknown action 'John Smith'",
+        "learned p=0.912 thr=0.5",
+        "confidence >= high 0.9",
+        "jev choice proceed p=0.950",
+    ]
+    _chain(
+        engine,
+        "dg",
+        [
+            ("gate_classify", "gate_decision", {"action": "proceed", "reason": r}, 1.0 + i)
+            for i, r in enumerate(reasons)
+        ],
+    )
+    tl = timeline_from_audit("doc", "dg", engine=engine)
+    assert tl is not None
+    assert [e.payload["reason"] for e in tl.events] == [
+        "other",
+        "jev unknown action",
+        "learned p=0.912 thr=0.5",
+        "confidence >= high 0.9",
+        "jev choice proceed p=0.950",
+    ]

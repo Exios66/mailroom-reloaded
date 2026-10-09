@@ -35,7 +35,11 @@ from sqlalchemy import Engine, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from mailroom_reloaded.obs import attrs
-from mailroom_reloaded.obs.replay.sessions import window_bounds_ns
+from mailroom_reloaded.obs.replay.sessions import (
+    format_session_id,
+    parse_session_id,
+    window_bounds_ns,
+)
 from mailroom_reloaded.schemas.replay import (
     Entity,
     ReplayEvent,
@@ -76,9 +80,31 @@ _PARK_REASONS = frozenset(
 _REVIEW_ACTIONS = frozenset({"approve", "correct", "reject"})
 _GATE_ACTIONS = frozenset({"proceed", "retry", "verify", "boss", "human_review"})
 _GATE_SOURCES = frozenset({"band", "model", "rule", "jev"})
-#: Gate reasons are short deterministic strings (``learned p=0.912 thr=0.5``); anything
-#: with other characters (paths, markup, newlines) collapses to ``other``.
-_GATE_REASON_RE = re.compile(r"[A-Za-z0-9_ =.,:()-]{1,64}")
+_NUM = r"(?:-?[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?|None)"
+#: Gate reasons the pipeline emits (``agents/gate.py``, ``agents/jev.py``); numbers are
+#: the only variable parts. Anything else (prose, paths, markup) collapses to ``other``.
+_GATE_REASON_RES = tuple(
+    re.compile(p.replace("NUM", _NUM))
+    for p in (
+        r"bert/sorter doc_type disagree",
+        r"confidence >= high NUM",
+        r"confidence < high NUM",
+        r"classify retries spent",
+        r"(?:length capped|schema invalid)(?:, retries spent)?",
+        r"confidence >= judge_band_high NUM",
+        r"NUM <= confidence < NUM",
+        r"confidence < low NUM",
+        r"extract retries spent below low",
+        r"learned p=NUM thr=NUM",
+        r"jev: no route answer",
+        r"jev confidence NUM < verify NUM",
+        r"jev noul NUM escalate",
+        r"jev confidence NUM in verify band \(< accept NUM\)",
+        r"jev confidence NUM < accept NUM",
+        r"jev choice (?:proceed|retry|verify|boss|human_review) p=NUM",
+    )
+)
+_JEV_UNKNOWN_ACTION = "jev unknown action"
 _TOKEN_BAD = re.compile(r"[^A-Za-z0-9_.:-]+")
 _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
 
@@ -86,6 +112,14 @@ _CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
 def _token(value: Any, limit: int = MAX_TOKEN) -> str:
     """A bounded identifier-like string (anything else becomes ``_``)."""
     return _TOKEN_BAD.sub("_", str(value))[:limit]
+
+
+def _gate_reason(value: Any) -> str:
+    """The reason if it is one of the pipeline's known shapes, else ``other``."""
+    reason = str(value or "")
+    if reason.startswith(_JEV_UNKNOWN_ACTION + " "):
+        return _JEV_UNKNOWN_ACTION  # the repr of the unrecognised action is dropped
+    return reason if any(r.fullmatch(reason) for r in _GATE_REASON_RES) else "other"
 
 
 def _filename(value: Any) -> str:
@@ -127,12 +161,16 @@ def _chunks(items: list[str]) -> list[list[str]]:
     return [items[i : i + _CHUNK] for i in range(0, len(items), _CHUNK)]
 
 
-def _doc_ids(engine: Engine, kind: str, key: str) -> list[str]:
-    """Document ids belonging to the session (empty when the kind has no audit data)."""
+def _doc_ids(engine: Engine, kind: str, key: str) -> tuple[list[str], bool]:
+    """Document ids of the session (empty when the kind has no audit data).
+
+    At most ``MAX_DOCS`` ids; the flag is true when more existed (one extra is fetched).
+    """
     ids: list[str] = []
+    cap = MAX_DOCS + 1
     with engine.connect() as conn:
         if kind == "doc":
-            return [key]
+            return [key], False
         if kind == "run":
             try:
                 rows = conn.execute(
@@ -140,7 +178,7 @@ def _doc_ids(engine: Engine, kind: str, key: str) -> list[str]:
                         "SELECT DISTINCT doc_id FROM eval_docs "
                         "WHERE run_id = :r AND doc_id IS NOT NULL LIMIT :n"
                     ),
-                    {"r": key, "n": MAX_DOCS},
+                    {"r": key, "n": cap},
                 )
                 ids += [str(r[0]) for r in rows]
             except SQLAlchemyError:
@@ -150,7 +188,7 @@ def _doc_ids(engine: Engine, kind: str, key: str) -> list[str]:
                 select(lt.c.doc_id)
                 .where(lt.c.run_id == key, lt.c.doc_id.is_not(None))
                 .distinct()
-                .limit(MAX_DOCS)
+                .limit(cap)
             )
             ids += [str(r[0]) for r in rows]
         elif kind == "window":
@@ -161,10 +199,11 @@ def _doc_ids(engine: Engine, kind: str, key: str) -> list[str]:
                 select(audit_table.c.doc_id)
                 .where(audit_table.c.ts >= t_lo, audit_table.c.ts < t_hi)
                 .distinct()
-                .limit(MAX_DOCS)
+                .limit(cap)
             )
             ids += [str(r[0]) for r in rows]
-    return list(dict.fromkeys(ids))[:MAX_DOCS]  # a session: has no audit ids
+    unique = list(dict.fromkeys(ids))  # a session: has no audit ids
+    return unique[:MAX_DOCS], len(unique) > MAX_DOCS
 
 
 def _audit_rows(engine: Engine, doc_ids: list[str]) -> list[Any]:
@@ -178,16 +217,18 @@ def _audit_rows(engine: Engine, doc_ids: list[str]) -> list[Any]:
     return out
 
 
-def _eval_rows(engine: Engine, run_id: str) -> dict[str, dict[str, Any]]:
+def _eval_rows(engine: Engine, run_id: str) -> tuple[dict[str, dict[str, Any]], bool]:
     try:
         with engine.connect() as conn:
             rows = conn.execute(
                 text("SELECT * FROM eval_docs WHERE run_id = :r LIMIT :n"),
-                {"r": run_id, "n": MAX_DOCS},
+                {"r": run_id, "n": MAX_DOCS + 1},
             ).mappings()
-            return {str(r["doc_id"]): dict(r) for r in rows if r["doc_id"]}
+            out = {str(r["doc_id"]): dict(r) for r in rows if r["doc_id"]}
     except SQLAlchemyError:
-        return {}
+        return {}, False
+    kept = dict(list(out.items())[:MAX_DOCS])
+    return kept, len(out) > MAX_DOCS
 
 
 def _catalog_rows(engine: Engine, doc_ids: list[str]) -> dict[str, Any]:
@@ -217,12 +258,11 @@ def _eval_cost(row: dict[str, Any]) -> float:
 
 def _event_payload(event: str, node: str, p: dict[str, Any]) -> dict[str, Any]:
     if event == "gate_decision":
-        reason = str(p.get("reason", ""))
         out: dict[str, Any] = {
             "stage": _token(node.removeprefix("gate_"), 32),
             "action": p.get("action") if p.get("action") in _GATE_ACTIONS else "other",
             "source": p.get("source") if p.get("source") in _GATE_SOURCES else "other",
-            "reason": reason if _GATE_REASON_RE.fullmatch(reason) else "other",
+            "reason": _gate_reason(p.get("reason")),
         }
         conf = _num(p.get("confidence"))
         if conf is not None:
@@ -266,13 +306,14 @@ def timeline_from_audit(
     from the earliest segment start; ``session.t0_iso`` is that instant.
     """
     engine = engine or get_engine()
-    doc_ids = _doc_ids(engine, kind, key)
+    doc_ids, truncated = _doc_ids(engine, kind, key)
     if not doc_ids:
         return None
     audit = _audit_rows(engine, doc_ids)
     if not audit:
         return None
-    evals = _eval_rows(engine, key) if kind == "run" else {}
+    evals, evals_truncated = _eval_rows(engine, key) if kind == "run" else ({}, False)
+    truncated = truncated or evals_truncated
     catalog = _catalog_rows(engine, doc_ids)
 
     # (doc, node, event, abs start, abs end/at, payload)
@@ -304,7 +345,7 @@ def timeline_from_audit(
 
     segments: list[Segment] = []
     attempts: dict[tuple[str, str], int] = defaultdict(int)
-    last_failed: dict[str, str] = {}
+    last_failed: dict[str, tuple[str, str, float]] = {}  # doc -> (node, reason, end)
     last_station: dict[str, str] = {}
     for doc, node, event, t0, t1, p in sorted(segs, key=lambda s: (s[3], s[4], s[0])):
         n = attempts[(doc, node)] = attempts[(doc, node)] + 1
@@ -315,7 +356,9 @@ def timeline_from_audit(
             reason = attrs.failure_reason_for(
                 p.get("reason") if isinstance(p.get("reason"), str) else None
             )
-            last_failed[doc] = reason
+            last_failed[doc] = (node, reason, rel(t1))
+        elif doc in last_failed and last_failed[doc][0] == node:
+            del last_failed[doc]  # a later attempt of the failed node completed
         last_station[doc] = station
         segments.append(
             Segment(
@@ -343,8 +386,13 @@ def timeline_from_audit(
         for doc, node, event, at, p in sorted(evs, key=lambda e: (e[3], e[0]))
     ]
     ev_kinds: dict[str, set[str]] = defaultdict(set)
+    archived_at: dict[str, float] = {}
     for e in events:
         ev_kinds[e.doc_id].add(e.kind)
+        if e.kind == "archived":
+            archived_at[e.doc_id] = max(e.t, archived_at.get(e.doc_id, e.t))
+    for doc in [d for d, f in last_failed.items() if archived_at.get(d, -1.0) >= f[2]]:
+        del last_failed[doc]  # archived after the last failure: the doc recovered
 
     entities: list[Entity] = []
     order = list(dict.fromkeys([*seen_docs, *evals]))
@@ -354,7 +402,7 @@ def timeline_from_audit(
         t_start = min((s.t0 for s in mine), default=0.0)
         t_end = max((s.t1 for s in mine), default=None)
         failure = (
-            attrs.failure_class_for(last_failed[doc]) if doc in last_failed else None
+            attrs.failure_class_for(last_failed[doc][1]) if doc in last_failed else None
         )
         kinds = ev_kinds.get(doc, set())
         if doc in last_failed:
@@ -424,17 +472,20 @@ def timeline_from_audit(
         cost_usd=round(sum(e.totals.cost_usd for e in entities), 8),
         tokens=sum(e.totals.tokens for e in entities),
     )
-    session_key = _token(key, 200)
+    try:
+        session_id = format_session_id(*parse_session_id(f"{kind}:{key}"))
+    except ValueError:  # a direct caller bypassed validation: sanitise rather than echo
+        session_id = f"{kind}:{_token(key, 200)}"
     return Timeline(
         session=Session(
-            id=f"{kind}:{session_key}",
+            id=session_id,
             kind=kind,  # type: ignore[arg-type]
             environment="eval" if evals or re.match(r"eval[-_]", key) else "live",
             t0_iso=base.isoformat(),
             duration_s=duration_s,
             source="audit",
             approx=True,
-            window=Window(from_s=0.0, to_s=duration_s, complete=True),
+            window=Window(from_s=0.0, to_s=duration_s, complete=not truncated),
             links={},
         ),
         stations=[
