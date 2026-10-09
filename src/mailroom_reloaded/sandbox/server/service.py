@@ -27,9 +27,9 @@ from mailroom_reloaded.sandbox.server.bossdesk import CATEGORIES, StandInBossDes
 from mailroom_reloaded.sandbox.server.content import SandboxContent
 from mailroom_reloaded.sandbox.server.correspondent import (
     AttachmentView,
-    CorrespondentResult,
     WireMessage,
     create_correspondent,
+    hostile_forward,
 )
 from mailroom_reloaded.sandbox.server.egress import VirtualOutbox
 from mailroom_reloaded.sandbox.server.evaluate import compare_scenario
@@ -42,43 +42,9 @@ from mailroom_reloaded.sandbox.server.ingress import (
 from mailroom_reloaded.sandbox.server.mailbox import BOSS, CORRESPONDENT, BossMailbox
 from mailroom_reloaded.sandbox.server.pipeline_runner import PipelineRunner
 
-__all__ = ["FLOWS", "SandboxService"]
+__all__ = ["FLOWS", "SandboxService", "hostile_forward"]
 
 FLOWS = ("correspondent", "pipeline")
-
-
-def hostile_forward(wire: WireMessage, res: CorrespondentResult) -> dict | None:
-    """Build the Correspondent -> Boss mailbox forward for a possible-attack result.
-
-    Include all ``possible_attack`` signals, even dismissed ones, with the message
-    content and attachment lanes. Return ``None`` when no such signals exist.
-    This builds the payload without posting it or changing attachment status.
-    """
-    attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
-    if not attacks:
-        return None
-    return {
-        "kind": "hostile_forward",
-        "payload": {
-            "message": {
-                "message_id": wire.message_id,
-                "from": wire.from_addr,
-                "subject": wire.subject,
-                "body": wire.body,
-                "auth": dict(wire.auth),
-            },
-            "attachment_lanes": [dict(x) for x in res.attachment_lanes],
-            "attack_classes": sorted(
-                {s.get("attack_class", "other") for s in attacks}
-            ),
-            "signals": [dict(s) for s in attacks],
-            "trust": res.trust,
-            "trust_reasons": list(res.trust_reasons),
-            "reasoning": list(res.reasons),
-            "summary": res.summary,
-            "held": "message and attachments are held; no reply sent",
-        },
-    }
 
 
 def extract_text(path: str) -> str:
@@ -149,6 +115,8 @@ class SandboxService:
         clock: Callable[[], float] = time.time,
         guard: NetworkGuard | None = None,
         pipeline: PipelineRunner | None = None,
+        correspondent: str = "standin",
+        correspondent_options: dict | None = None,
     ) -> None:
         """Configure isolated sandbox components and empty state without starting them."""
         self.content = content
@@ -163,7 +131,9 @@ class SandboxService:
         self._q: queue.Queue[tuple[str, list[str]]] = queue.Queue()
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
-        self.agent = create_correspondent("standin")
+        self.agent = create_correspondent(
+            correspondent, **(correspondent_options or {})
+        )
         self.desk = StandInBossDesk(content.policy.delegation)
         self.meter = IngressMeter(content.policy.ingress)
         self.pipeline = pipeline or PipelineRunner(self.data_dir)
@@ -680,8 +650,7 @@ class SandboxService:
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
             self._queue_drafts(msg, res.drafts)
-            fwd = hostile_forward(wire, res)
-            if fwd is not None:
+            for fwd in res.to_boss:
                 self._forward_to_boss(msg, fwd)
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:

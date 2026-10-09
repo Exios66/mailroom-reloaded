@@ -24,7 +24,8 @@ _TRUST_RANK = {"hostile": 0, "suspicious": 1, "unverified": 2, "verified": 3}
 def _primary(scenario: dict, emails: list[dict]) -> dict:
     """The email that ``expect.intent`` / ``expect.trust`` describe.
 
-    1. the message named by ``a`` of an expected relation (scenario ``ref``), else
+    1. the message named by ``a`` of an expected relation (scenario ``ref``), or the one
+       carrying the attachment it names, else
     2. for scenarios that expect a hostile or suspicious sender, the email the
        Correspondent rated least trusted (the scenario asserts the adversarial message;
        if nothing was rated that low, the first email is compared and fails), else
@@ -32,9 +33,14 @@ def _primary(scenario: dict, emails: list[dict]) -> dict:
     """
     expect = scenario.get("expect", {})
     by_ref = {m["truth"]["ref"]: m for m in emails if (m.get("truth") or {}).get("ref")}
+    by_att = {
+        a["ref"]: m for m in emails for a in m["wire"]["attachments"] if a.get("ref")
+    }
     for er in expect.get("relations", []) or []:
         if er["a"] in by_ref:
             return by_ref[er["a"]]
+        if er["a"] in by_att:  # the message that carries the document being related
+            return by_att[er["a"]]
     want = (expect.get("trust") or {}).get("sender_level")
     if want in {"hostile", "suspicious"}:
         low = min(emails, key=lambda m: _TRUST_RANK.get(m["correspondent"]["trust"], 9))
@@ -305,7 +311,10 @@ def compare_scenario(
                 )
             )
         elif inv == "comms_offpath":
-            ok = all(m["correspondent"]["llm_calls"] == 0 for m in emails)
+            ok = all(
+                m["correspondent"]["agent"].get("pipeline_tool_calls", 0) == 0
+                for m in emails
+            )
             checks.append(
                 _chk(
                     inv,

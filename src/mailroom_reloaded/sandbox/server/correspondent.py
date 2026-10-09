@@ -97,6 +97,40 @@ class Draft:
     evidence: list[str] = field(default_factory=list)
 
 
+def hostile_forward(msg: WireMessage, res: CorrespondentResult) -> dict | None:
+    """Build the Correspondent -> Boss mailbox forward for a possible-attack result.
+
+    Include all ``possible_attack`` signals, even dismissed ones, with the message
+    content and attachment lanes. Return ``None`` when no such signals exist.
+    This builds the payload without posting it or changing attachment status.
+    """
+    attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
+    if not attacks:
+        return None
+    return {
+        "kind": "hostile_forward",
+        "payload": {
+            "message": {
+                "message_id": msg.message_id,
+                "from": msg.from_addr,
+                "subject": msg.subject,
+                "body": msg.body,
+                "auth": dict(msg.auth),
+            },
+            "attachment_lanes": [dict(x) for x in res.attachment_lanes],
+            "attack_classes": sorted(
+                {s.get("attack_class", "other") for s in attacks}
+            ),
+            "signals": [dict(s) for s in attacks],
+            "trust": res.trust,
+            "trust_reasons": list(res.trust_reasons),
+            "reasoning": list(res.reasons),
+            "summary": res.summary,
+            "held": "message and attachments are held; no reply sent",
+        },
+    }
+
+
 @dataclass
 class CorrespondentResult:
     agent: dict
@@ -116,10 +150,14 @@ class CorrespondentResult:
     reasons: list[str]
     llm_calls: int = 0
     flags: list[str] = field(default_factory=list)
+    # messages this agent writes to the boss mailbox: [{"kind": ..., "payload": {...}}]
+    to_boss: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Serialize the result and its nested dataclasses as a dictionary."""
-        return asdict(self)
+        out = asdict(self)
+        out.pop("to_boss", None)  # mailbox entries travel on the mailbox, not in traces
+        return out
 
 
 class CorrespondentAgent(Protocol):
@@ -252,8 +290,16 @@ _EXFIL_IN_TEXT = re.compile(
     r"(forward|send|export|email)\b.{0,60}\b(documents|files|records)",
     re.IGNORECASE | re.DOTALL,
 )
+_PASSWORD = re.compile(
+    r"(password[- ]protected|encrypted|password (to follow|in (a )?separate|will follow))",
+    re.IGNORECASE,
+)
+_LEGAL_THREAT = re.compile(
+    r"(lawyer|attorney|legal action|sue\b|will be contacting you)", re.IGNORECASE
+)
+_REPROCESS = re.compile(r"(re-?run|re-?extract|reprocess)", re.IGNORECASE)
 _ANOMALY = re.compile(
-    r"((outside|unlike|different from)\b.{0,30}\b(normally|usually|typically)|which matter (this|it) should)",
+    r"((outside|unlike|different from)\b.{0,30}\b(normal|usual|typical)|which matter (this|it) should)",
     re.IGNORECASE | re.DOTALL,
 )
 _COURT_URGENT = re.compile(
@@ -363,7 +409,7 @@ _ASK = re.compile(
 )
 _CONTEXT = re.compile(
     r"(part \d+ of \d+|missing|\blate\b|left out|counterparty|read together|heads up"
-    r"|will follow|being sent|takes? effect|note it against)",
+    r"|will follow|being sent|takes? effect|note it against|password)",
     re.IGNORECASE,
 )
 _NO_CHANGE = re.compile(r"\bno (changes?|updates?) (to|in|on)\b", re.IGNORECASE)
@@ -557,10 +603,22 @@ class StandInCorrespondent:
             return ("suspicious" if bad else "unverified"), reasons
         return ("suspicious" if bad else "unverified"), reasons
 
+    def _triage_hook(self, msg, text, feats, tri, tools):
+        """Extension point: a subclass may return a replacement Triage (None keeps the rules)."""
+        return
+
     # ---------------------------------------------------------------- main
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Triage a message; hostile mail is also written to the Boss mailbox at detection."""
+        res = self._classify(msg, tools)
+        fwd = hostile_forward(msg, res)
+        if fwd is not None:
+            res.to_boss.append(fwd)
+        return res
+
+    def _classify(self, msg: WireMessage, tools: CorrespondentTools) -> CorrespondentResult:
         """Apply offline safety and triage rules to produce signals, lanes, and drafts."""
         text = f"{msg.subject}\n{msg.body}"
         reasons: list[str] = []
@@ -583,7 +641,12 @@ class StandInCorrespondent:
         )
         entities = {"refs": sorted(set(_REF.findall(text)))}
         trust, trust_reasons = self._trust(match, msg.auth)
-        agent = {"name": self.name, "stand_in": True, "llm_calls": 0}
+        agent = {
+            "name": self.name,
+            "stand_in": True,
+            "llm_calls": 0,
+            "pipeline_tool_calls": 0,
+        }
 
         def result(**kw: Any) -> CorrespondentResult:
             """Build a triage result from shared message context and branch overrides."""
@@ -638,7 +701,7 @@ class StandInCorrespondent:
                             "reason": "QR image attachment",
                         }
                     )
-                elif ext in _ARCHIVE_EXT:
+                elif ext in _ARCHIVE_EXT or _PASSWORD.search(msg.body):
                     out.append(
                         {
                             "name": a.name,
@@ -778,7 +841,15 @@ class StandInCorrespondent:
                 suppress and trust != "verified"
             )
             if bad_sender:
-                final_trust = "hostile"
+                # a registered sender whose authentication fails stays "suspicious"; a
+                # lookalike or unknown origin is hostile
+                final_trust = (
+                    "suspicious"
+                    if match
+                    and match["how"] in {"address", "domain"}
+                    and trust == "suspicious"
+                    else "hostile"
+                )
                 cb = self._callback(
                     client_view,
                     registry,
@@ -792,7 +863,7 @@ class StandInCorrespondent:
                         {
                             "kind": "possible_attack",
                             "attack_class": "payment_fraud",
-                            "priority": "critical",
+                            "priority": "critical" if suppress else "high",
                             "state": "pending",
                         }
                     ],
@@ -879,6 +950,7 @@ class StandInCorrespondent:
             },
         )
         tri = score_intents(text, feats, msg.subject)
+        tri = self._triage_hook(msg, text, feats, tri, tools) or tri
         intent = tri.intent
         issue = INTENT_ISSUE[intent]
         sig, pri = INTENT_SIGNAL[intent]
@@ -900,8 +972,12 @@ class StandInCorrespondent:
                 else ""
             )
         )
+        legal_attack = False
         if intent == "legal_notice" and trust == "suspicious":
             trust = "hostile"  # a legal demand that fails sender authentication
+            legal_attack = (
+                True  # also forwarded to the Boss as a possible impersonation
+            )
 
         if intent == "disclosure_request":
             return result(
@@ -965,6 +1041,16 @@ class StandInCorrespondent:
             }
         ]
 
+        if legal_attack:
+            signals.append(
+                {
+                    "kind": "possible_attack",
+                    "attack_class": "impersonation",
+                    "priority": "critical",
+                    "state": "pending",
+                }
+            )
+
         def extra(kind: str, priority: str) -> None:
             if all(x["kind"] != kind for x in signals):
                 signals.append({"kind": kind, "priority": priority, "state": "pending"})
@@ -986,6 +1072,13 @@ class StandInCorrespondent:
                 extra("missing_doc", "normal")
         if review_flag or feats.non_english and intent == "general_question":
             flags.append("needs_review")
+        if intent == "complaint" and _LEGAL_THREAT.search(text):
+            extra("urgent", "normal")  # a legal threat is escalated, not just answered
+            flags.append("needs_review")
+        if _REPROCESS.search(text):
+            flags.append(
+                "needs_review"
+            )  # reprocessing is a human decision (matrix: reprocessing_request)
         if _ANOMALY.search(text) and has_att:
             flags.append("annotate")
         if intent == "correction_or_amendment":
@@ -1102,17 +1195,19 @@ class StandInCorrespondent:
                     evid.append("sender is verified")
                 if score >= 0.5:
                     k = kind or "references"
-                    out.append(
-                        {
-                            "a": a.name,
-                            "b": doc["filename"],
-                            "b_doc_id": doc["doc_id"],
-                            "kind": k,
-                            "confidence": round(min(score, 0.95), 2),
-                            "evidence": evid,
-                            "auto_link": score >= 0.8,
-                        }
-                    )
+                    for rk in [k, "references"] if k != "references" else [k]:
+                        # a stronger relation (completes, supersedes, ...) also references the document
+                        out.append(
+                            {
+                                "a": a.name,
+                                "b": doc["filename"],
+                                "b_doc_id": doc["doc_id"],
+                                "kind": rk,
+                                "confidence": round(min(score, 0.95), 2),
+                                "evidence": evid,
+                                "auto_link": score >= 0.8,
+                            }
+                        )
         return out
 
     def _drafts(
@@ -1145,8 +1240,8 @@ class StandInCorrespondent:
         row = _matrix_row(tools, intent)
         quarantined = any(ln["lane"] == "quarantine" for ln in lane_list)
         if intent == "status_request":
-            if not asked:
-                return []  # the sender is reporting status, not asking for it
+            if not asked or (row and not _matrix_drafts(row)):
+                return []  # the sender is reporting status, or the matrix drafts no reply
             refs = entities.get("refs", [])
             facts, ev = [], []
             for doc in tools.lookup_catalog():
@@ -1169,7 +1264,12 @@ class StandInCorrespondent:
                         intent="clarifying_question",
                     )
                 ]
-            if not (relations or _CONFIRM.search(msg.body) or _CONTEXT.search(text)):
+            if not (
+                relations
+                or _CONFIRM.search(msg.body)
+                or _CONTEXT.search(text)
+                or not msg.body.strip()
+            ):
                 return []  # a bare transmittal needs no acknowledgement draft
             ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
             body = _T_SUBMISSION.render(names=names, doc_ids=ids, relations=relations)
@@ -1214,10 +1314,14 @@ class StandInCorrespondent:
 AGENTS: dict[str, type] = {"standin": StandInCorrespondent}
 
 
-def create_correspondent(kind: str = "standin") -> CorrespondentAgent:
+def create_correspondent(kind: str = "standin", **options: Any) -> CorrespondentAgent:
     """Factory seam: register the real agent under another key to replace the stand-in."""
+    if kind == "llm":
+        from mailroom_reloaded.sandbox.server.llm_correspondent import LLMCorrespondent
+
+        return LLMCorrespondent(**options)
     try:
-        return AGENTS[kind]()  # type: ignore[no-any-return]
+        return AGENTS[kind](**options)  # type: ignore[no-any-return]
     except KeyError:
         raise ValueError(
             f"unknown correspondent {kind!r}; available: {sorted(AGENTS)}"

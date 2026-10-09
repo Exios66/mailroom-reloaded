@@ -33,6 +33,19 @@ def serve(
         "--autonomy",
         help="human (drafts wait for approval) | sandbox (auto-approve into the sink).",
     ),
+    correspondent: str = typer.Option(
+        "standin",
+        "--correspondent",
+        help="standin (rules, default) | llm (optional, loopback endpoint, falls back to rules).",
+    ),
+    llm_base_url: str = typer.Option(
+        "",
+        "--llm-base-url",
+        help="OpenAI-compatible loopback URL for --correspondent llm.",
+    ),
+    llm_model: str = typer.Option(
+        "sandbox-correspondent", "--llm-model", help="Model name sent to the endpoint."
+    ),
     expected: bool = typer.Option(
         True,
         "--expected/--no-expected",
@@ -79,6 +92,21 @@ def serve(
             err=True,
         )
         raise typer.Exit(code=1)
+    if correspondent not in {"standin", "llm"}:
+        typer.echo("--correspondent must be standin|llm", err=True)
+        raise typer.Exit(code=2)
+    options: dict = {}
+    if correspondent == "llm":
+        from mailroom_reloaded.sandbox.server.llm_correspondent import _check_loopback
+
+        try:
+            if not llm_base_url:
+                raise ValueError("--correspondent llm needs --llm-base-url")
+            _check_loopback(llm_base_url)
+        except ValueError as exc:
+            typer.echo(f"mailroom sandbox serve: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+        options = {"base_url": llm_base_url, "model": llm_model}
     silence_exporters()
     guard = NetworkGuard().install()
     service = SandboxService(
@@ -88,6 +116,8 @@ def serve(
         autonomy=autonomy,
         show_expected=expected,
         guard=guard,
+        correspondent=correspondent,
+        correspondent_options=options,
     )
     typer.echo(
         f"mailroom sandbox: content={loaded.kind} {root} data={data_dir.resolve()} (offline: network guard on)"
