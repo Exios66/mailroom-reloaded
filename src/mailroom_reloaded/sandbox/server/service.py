@@ -650,7 +650,10 @@ class SandboxService:
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
             self._queue_drafts(msg, res.drafts)
-            for fwd in res.to_boss:
+            # the forward is derived from the result for every agent, so an agent that
+            # reports a possible_attack signal is held for the Boss even without to_boss
+            fwd = hostile_forward(wire, res)
+            if fwd is not None:
                 self._forward_to_boss(msg, fwd)
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:

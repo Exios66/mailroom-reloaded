@@ -121,7 +121,7 @@ def make_client(tmp_path):
     """Yield a client factory that injects hostile mail and cleans up its guards."""
     made = []
 
-    def _make(autonomy="human"):
+    def _make(autonomy="human", agent=None):
         """Create a guarded sandbox client and inject the wire-change scenario."""
         guard = NetworkGuard().install()
         svc = SandboxService(
@@ -130,6 +130,8 @@ def make_client(tmp_path):
             guard=guard,
             autonomy=autonomy,
         )
+        if agent is not None:
+            svc.agent = agent
         cm = TestClient(create_sandbox_app(svc))
         client = cm.__enter__()
         made.append((cm, guard))
@@ -141,6 +143,26 @@ def make_client(tmp_path):
     for cm, guard in made:
         cm.__exit__(None, None, None)
         guard.uninstall()
+
+
+class _NoToBossAgent(StandInCorrespondent):
+    """A replacement agent that reports the attack signal but writes no to_boss entries."""
+
+    def handle(self, msg, tools):
+        """Triage as the stand-in does, then drop its mailbox entries."""
+        res = super().handle(msg, tools)
+        res.to_boss = []
+        return res
+
+
+def test_forward_is_derived_from_the_result_for_any_agent(make_client):
+    """Verify an agent that emits possible_attack without to_boss is still held for the Boss."""
+    client, _svc = make_client(agent=_NoToBossAgent())
+    fwd = _mailbox(client, kind="hostile_forward")
+    assert len(fwd) == 1
+    assert fwd[0]["direction"] == "correspondent->boss"
+    pend = client.get(f"{API}/boss/pending").json()
+    assert pend["count"] == 1
 
 
 def test_hostile_is_held_for_the_boss_and_sender_gets_nothing(make_client):
