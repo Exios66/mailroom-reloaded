@@ -37,6 +37,7 @@ class VirtualOutbox:
         clock: Callable[[], float],
         profile: str = "closed",
     ) -> None:
+        """Initialize virtual drafts, recipient routes, and policy-based capture guards."""
         self.policy = policy
         self.routes = {k.lower(): v for k, v in routes.items()}
         self.data_dir = Path(data_dir)
@@ -55,20 +56,24 @@ class VirtualOutbox:
 
     # ------------------------------------------------------------------ state
     def set_profile(self, profile: str) -> None:
+        """Select a supported egress profile, raising ValueError for unknown names."""
         if profile not in PROFILES:
             raise ValueError(f"profile must be one of {PROFILES}")
         self.profile = profile
 
     def dump(self) -> dict:
+        """Return the outbox items, sequence counter, and profile for persistence."""
         return {"items": self.items, "seq": self._seq, "profile": self.profile}
 
     def load(self, state: dict) -> None:
+        """Restore items and sequence state, retaining the profile when unspecified."""
         self.items = state.get("items", {})
         self._seq = state.get("seq", 0)
         self.profile = state.get("profile", self.profile)
 
     # ------------------------------------------------------------------ policy
     def check_recipient(self, addr: str, profile: str | None = None) -> dict:
+        """Evaluate an address against the chosen profile and explain the decision."""
         profile = profile or self.profile
         a = addr.strip().lower()
         dom = a.rsplit("@", 1)[-1] if "@" in a else ""
@@ -103,10 +108,12 @@ class VirtualOutbox:
         }
 
     def probe(self, addr: str) -> dict:
+        """Return recipient-policy decisions for both supported profiles."""
         return {p: self.check_recipient(addr, p) for p in PROFILES}
 
     # ------------------------------------------------------------------ drafts
     def _next_id(self) -> str:
+        """Advance the sequence counter and return a unique outbox identifier."""
         self._seq += 1
         return f"out_{self._seq:04d}"
 
@@ -118,6 +125,7 @@ class VirtualOutbox:
         draft: dict,
         source: str = "correspondent",
     ) -> dict:
+        """Store a draft with content hashes and recipient probes, then emit its event."""
         oid = self._next_id()
         item = {
             "id": oid,
@@ -152,6 +160,7 @@ class VirtualOutbox:
         return item
 
     def reject(self, oid: str, by: str = "reviewer") -> dict:
+        """Mark a nonterminal draft rejected and record the reviewer and event."""
         item = self.items[oid]
         if item["state"] in {"captured", "rejected"}:
             return item
@@ -161,12 +170,14 @@ class VirtualOutbox:
         return item
 
     def _kill_switch(self) -> bool:
+        """Check the environment flag and local file that freeze outbound capture."""
         return (
             os.environ.get("MAILROOM_SEND_KILL_SWITCH") == "1"
             or (self.data_dir / "comms" / "KILL_SWITCH").exists()
         )
 
     def approve(self, oid: str, by: str = "reviewer") -> dict:
+        """Capture an approved draft only after recipient, cap, and duplicate checks."""
         item = self.items[oid]
         if (
             item["state"] == "captured"
@@ -213,9 +224,11 @@ class VirtualOutbox:
                 caps.get("max_bytes_per_send", 1048576)
             ):
                 block = "message exceeds max_bytes_per_send"
-            elif sum(1 for i in captured if now - i["created_ts"] < 3600) >= int(
-                caps.get("max_sends_per_hour_total", 90)
-            ):
+            elif sum(
+                1
+                for i in captured
+                if now - i.get("captured_ts", i["created_ts"]) < 3600
+            ) >= int(caps.get("max_sends_per_hour_total", 90)):
                 block = "max_sends_per_hour_total reached"
             elif sum(1 for i in captured if i["thread_id"] == item["thread_id"]) >= int(
                 caps.get("max_sends_per_thread_per_day", 2)
@@ -243,6 +256,7 @@ class VirtualOutbox:
         return item
 
     def _finish_block(self, item: dict) -> dict:
+        """Record the blocking reason in draft history and emit a send-blocked event."""
         item["history"].append(
             {"state": "blocked", "reason": item["block"]["reason"], "ts": self.clock()}
         )
@@ -266,6 +280,7 @@ class VirtualOutbox:
         return self.approve(item["id"], by="manual")
 
     def summary(self) -> dict[str, Any]:
+        """Count items by state and report the profile and zero real transmissions."""
         counts: dict[str, int] = {}
         for i in self.items.values():
             counts[i["state"]] = counts.get(i["state"], 0) + 1

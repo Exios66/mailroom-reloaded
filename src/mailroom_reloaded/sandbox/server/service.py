@@ -70,11 +70,13 @@ class _Tools:
     def __init__(
         self, svc: SandboxService, att_paths: dict[str, str], quarantined: set[str]
     ) -> None:
+        """Bind read-only tools to a service and message-specific attachment access rules."""
         self.svc = svc
         self.att_paths = att_paths
         self.quarantined = quarantined
 
     def registry(self) -> dict[str, dict]:
+        """Return the content pack registry clients."""
         return self.svc.content.registry_clients
 
     def delegation(self) -> dict[str, dict]:
@@ -82,6 +84,7 @@ class _Tools:
         return self.svc.content.policy.delegation
 
     def lookup_catalog(self) -> list[dict]:
+        """Snapshot document identifiers, filenames, statuses, and text under the lock."""
         with self.svc._lock:
             return [
                 {
@@ -94,6 +97,7 @@ class _Tools:
             ]
 
     def read_attachment_text(self, att: AttachmentView) -> str:
+        """Extract attachment text unless its name is explicitly quarantined."""
         if att.name in self.quarantined:
             raise PermissionError("quarantined attachments are never opened")
         return extract_text(self.att_paths.get(att.name, ""))
@@ -159,6 +163,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ lifecycle
     def start(self, worker: bool = True) -> SandboxService:
+        """Activate the pipeline, restore saved state, and optionally start the worker."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.pipeline.activate()
         self._load()
@@ -185,6 +190,7 @@ class SandboxService:
         self.pipeline.deactivate()
 
     def _run_worker(self) -> None:
+        """Process queued messages serially, recording failures and completing each task."""
         while not self._stop.is_set():
             mid, flows = self._q.get()
             try:
@@ -265,14 +271,26 @@ class SandboxService:
                 if m["state"] == "processing":
                     m["state"] = "admitted"
 
+    def _drain_queue(self) -> None:
+        """Discard pending queue entries while balancing unfinished-task accounting."""
+        while True:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                return
+            self._q.task_done()
+
     def reset(self) -> None:
         """Clear messages, events, reviews, mailbox, outbox items, and pipeline state.
 
         Reset admission counters and remove held/quarantined attachment storage,
         then save the empty snapshot. Filesystem and persistence errors propagate.
+        Drain queued work and wait for processing before acquiring the locks.
         """
+        self._drain_queue()
+        self.wait_idle(30)
         with self._work_lock, self._lock:
-            self.wait_idle(30)
+            self._drain_queue()
             self.messages, self.events, self.docs, self.batches = {}, [], {}, []
             self.reviews = {}
             self.mailbox.clear()
@@ -287,6 +305,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ events
     def emit(self, kind: str, ref_id: str, payload: dict | None = None) -> dict:
+        """Append and return a timestamped event with the next sequence number."""
         with self._lock:
             ev = {
                 "seq": len(self.events) + 1,
@@ -301,6 +320,7 @@ class SandboxService:
     def events_since(
         self, since: int = 0, ref_id: str | None = None, limit: int = 500
     ) -> list[dict]:
+        """Copy events after a sequence number, optionally filtering by reference."""
         with self._lock:
             out = [
                 e
@@ -420,6 +440,7 @@ class SandboxService:
         }
 
     def _admit(self, msg: dict) -> None:
+        """Apply admission policy, update message state, and record any shed hold."""
         with self._lock:
             if msg["kind"] == "document":
                 dec = self.meter.admit_document(msg["sim_ts"])
@@ -449,6 +470,7 @@ class SandboxService:
             self._hold_shed(msg)
 
     def _hold_shed(self, msg: dict) -> None:
+        """Write a shed-message marker and reason under comms/pending."""
         d = self.data_dir / "comms" / "pending" / msg["id"]
         d.mkdir(parents=True, exist_ok=True)
         (d / "message.json").write_text(
@@ -470,12 +492,14 @@ class SandboxService:
 
     # ------------------------------------------------------------------ processing
     def _get(self, mid: str) -> dict:
+        """Return the mutable stored message or raise KeyError for an unknown identifier."""
         with self._lock:
             if mid not in self.messages:
                 raise KeyError(mid)
             return self.messages[mid]
 
     def run_message(self, mid: str, flows: list[str]) -> dict:
+        """Queue selected flows for a message, refusing messages still in a shed state."""
         msg = self._get(mid)
         if msg["state"] == "shed":
             raise ValueError("message is shed; release it first")
@@ -485,6 +509,7 @@ class SandboxService:
         return self.message(mid)
 
     def _fail(self, mid: str, exc: Exception) -> None:
+        """Record a processing error and event if the message still exists."""
         if mid in self.messages:
             with self._lock:
                 self.messages[mid]["state"] = "error"
@@ -492,6 +517,7 @@ class SandboxService:
             self.emit("run.error", mid, {"error": str(exc)})
 
     def _process(self, mid: str, flows: list[str]) -> None:
+        """Run selected flows under the work lock, record completion, and persist state."""
         with self._work_lock:
             msg = self._get(mid)
             if msg["state"] in {"shed", "skipped"}:
@@ -508,6 +534,7 @@ class SandboxService:
             self._save()
 
     def _run_pipeline_for(self, msg: dict, entry: dict, path: str) -> None:
+        """Process an attachment and record its handoff result, catalog view, and events."""
         self.emit(
             "pipeline.started",
             msg["id"],
@@ -545,6 +572,7 @@ class SandboxService:
         )
 
     def _process_document(self, msg: dict, flows: list[str]) -> None:
+        """Run a resolved document feed through Flow B once when requested."""
         att = msg["wire"]["attachments"][0]
         if "pipeline" not in flows or "pipeline" in msg["flows_done"]:
             return
@@ -574,6 +602,7 @@ class SandboxService:
         msg["flows_done"].append("pipeline")
 
     def _wire(self, msg: dict) -> WireMessage:
+        """Build agent-visible message data without scenario truth or attachment paths."""
         w = msg["wire"]
         return WireMessage(
             message_id=msg["id"],
@@ -699,38 +728,38 @@ class SandboxService:
         and records the response on the mailbox. Outbox and mailbox errors propagate.
         """
         for d in drafts:
-            item = self.outbox.add_draft(
-                message_id=msg["id"],
-                thread_id=msg["thread_id"],
-                draft={
-                    "to": d.to,
-                    "subject": d.subject,
-                    "body": d.body,
-                    "intent": d.intent,
-                    "evidence": d.evidence,
-                },
-            )
             with self._lock:
+                item = self.outbox.add_draft(
+                    message_id=msg["id"],
+                    thread_id=msg["thread_id"],
+                    draft={
+                        "to": d.to,
+                        "subject": d.subject,
+                        "body": d.body,
+                        "intent": d.intent,
+                        "evidence": d.evidence,
+                    },
+                )
                 msg["outbox_ids"].append(item["id"])
-            self.mailbox.post(
-                sender=CORRESPONDENT,
-                recipient=BOSS,
-                kind="draft_for_approval",
-                thread_id=msg["thread_id"],
-                message_id=msg["id"],
-                payload={
-                    "outbox_id": item["id"],
-                    "to": d.to,
-                    "subject": d.subject,
-                    "intent": d.intent,
-                },
-            )
-            if self.autonomy == "sandbox":
-                self.outbox.approve(item["id"], by="boss-desk(autonomy=sandbox)")
-                self._mailbox_answer_draft(item, True, "boss-desk(autonomy=sandbox)")
-                for a in msg["bossdesk"]:
-                    if a["action"] == "approve_outbound":
-                        a["state"] = "done"
+                self.mailbox.post(
+                    sender=CORRESPONDENT,
+                    recipient=BOSS,
+                    kind="draft_for_approval",
+                    thread_id=msg["thread_id"],
+                    message_id=msg["id"],
+                    payload={
+                        "outbox_id": item["id"],
+                        "to": d.to,
+                        "subject": d.subject,
+                        "intent": d.intent,
+                    },
+                )
+                if self.autonomy == "sandbox":
+                    self.outbox.approve(item["id"], by="boss-desk(autonomy=sandbox)")
+                    self._mailbox_answer_draft(item, True, "boss-desk(autonomy=sandbox)")
+                    for a in msg["bossdesk"]:
+                        if a["action"] == "approve_outbound":
+                            a["state"] = "done"
 
     # ------------------------------------------------------------------ boss_mailbox
     def _mailbox_answer_draft(self, item: dict, approved: bool, by: str) -> None:
@@ -955,6 +984,7 @@ class SandboxService:
         self._queue_drafts(msg, drafts)
 
     def _apply_lane(self, msg: dict, entry: dict, att: dict | None) -> None:
+        """Apply a handoff lane by recording quarantine, copying a hold, or deferring work."""
         mid, lane = msg["id"], entry["lane"]
         if lane == "quarantine":
             d = self.data_dir / "comms" / "quarantine" / mid
@@ -1025,9 +1055,9 @@ class SandboxService:
         no mail is transmitted. Unknown IDs raise ``KeyError``. Mailbox and
         persistence errors propagate after approval effects.
         """
-        item = self.outbox.approve(oid, by)
-        self._mailbox_answer_draft(item, True, by)
         with self._lock:
+            item = self.outbox.approve(oid, by)
+            self._mailbox_answer_draft(item, True, by)
             msg = self.messages.get(item["message_id"])
             if msg:
                 for a in msg["bossdesk"]:
@@ -1042,18 +1072,22 @@ class SandboxService:
         Already captured or rejected items retain their state. Unknown IDs raise
         ``KeyError``; mailbox and persistence errors propagate after outbox effects.
         """
-        item = self.outbox.reject(oid, by)
-        self._mailbox_answer_draft(item, False, by)
+        with self._lock:
+            item = self.outbox.reject(oid, by)
+            self._mailbox_answer_draft(item, False, by)
         self._save()
         return item
 
     def set_egress_profile(self, profile: str) -> None:
-        self.outbox.set_profile(profile)
+        """Change the outbox profile under the lock, emit its event, and persist state."""
+        with self._lock:
+            self.outbox.set_profile(profile)
         self.emit("config.changed", "config", {"egress_profile": profile})
         self._save()
 
     # ------------------------------------------------------------------ views
     def _public(self, msg: dict) -> dict:
+        """Copy a message with local paths removed and truth hidden when configured."""
         m = copy.deepcopy(msg)
         if not self.show_expected:
             m.pop("truth", None)
@@ -1062,6 +1096,7 @@ class SandboxService:
         return m
 
     def message(self, mid: str) -> dict:
+        """Return an independent public view of one stored message."""
         with self._lock:
             return self._public(self._get(mid))
 
@@ -1072,6 +1107,7 @@ class SandboxService:
         scenario: str | None = None,
         batch: str | None = None,
     ) -> list[dict]:
+        """Return filtered public message views with bodies truncated for list display."""
         with self._lock:
             out = [
                 self._public(m)
@@ -1085,6 +1121,7 @@ class SandboxService:
         return out
 
     def scenario_messages(self, name: str) -> list[dict]:
+        """Copy messages from the most recent batch containing the named scenario."""
         with self._lock:
             msgs = [m for m in self.messages.values() if m["scenario"] == name]
             if not msgs:
@@ -1093,6 +1130,7 @@ class SandboxService:
             return [copy.deepcopy(m) for m in msgs if m["batch_id"] == last]
 
     def evaluation(self, name: str) -> dict | None:
+        """Evaluate the latest scenario batch when expectations are visible and data exists."""
         if not self.show_expected:
             return None
         msgs = self.scenario_messages(name)
@@ -1161,12 +1199,14 @@ class SandboxService:
         }
 
     def documents(self) -> list[dict]:
+        """Snapshot document summaries with extracted text omitted."""
         with self._lock:
             return [
                 {k: v for k, v in d.items() if k != "text"} for d in self.docs.values()
             ]
 
     def status(self) -> dict:
+        """Summarize content, component configuration, message counts, and runtime counters."""
         with self._lock:
             counts: dict[str, int] = {}
             for m in self.messages.values():

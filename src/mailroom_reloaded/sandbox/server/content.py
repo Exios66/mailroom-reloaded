@@ -65,6 +65,7 @@ def resolve_content_spec(
 
 
 def _sha(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file for policy provenance."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -127,13 +128,16 @@ class SandboxContent:
 
     @property
     def kind(self) -> str:
+        """Return the loaded content-set kind, such as smoke or full."""
         return self.cs.kind
 
     @property
     def registry_clients(self) -> dict[str, dict]:
+        """Return registry clients, defaulting to an empty mapping."""
         return (self.cs.registry or {}).get("clients", {}) or {}
 
     def scenario_ids(self) -> list[str]:
+        """Return smoke-set scenario order when specified, otherwise sorted names."""
         if self.cs.kind == "smoke":
             ids = (
                 yaml.safe_load((self.root / "smoke_set.yaml").read_text("utf-8")) or {}
@@ -143,6 +147,7 @@ class SandboxContent:
         return sorted(self.cs.scenarios)
 
     def template_path(self, name: str) -> Path | None:
+        """Find a named Jinja template in either supported content layout."""
         for d in ("templates", "gen/templates"):
             p = self.root / d / f"{name}.j2"
             if p.is_file():
@@ -150,9 +155,11 @@ class SandboxContent:
         return None
 
     def attachment_path(self, filename: str) -> Path | None:
+        """Look up a packaged attachment by filename, returning None if absent."""
         return self.attachments.get(filename)
 
     def info(self) -> dict:
+        """Summarize content metadata, validation results, and policy provenance."""
         meta = self.cs.meta
         return {
             "root": str(self.root),
@@ -169,6 +176,7 @@ class SandboxContent:
 
 
 def load_sandbox_content(root: Path | str = SMOKE_DIR) -> SandboxContent:
+    """Load local content, policy, personas, and an attachment index without downloads."""
     root = Path(root)
     cs = load_content(root)
     personas: dict[str, dict] = {}

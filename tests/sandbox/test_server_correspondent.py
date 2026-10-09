@@ -25,24 +25,30 @@ OK = {"spf": "pass", "dkim": "pass", "dmarc": "pass"}
 
 class _Tools:
     def registry(self):
+        """Return the smoke content registry for deterministic rule tests."""
         return REG
 
     def lookup_catalog(self):
+        """Provide an empty catalog so rule tests need no pipeline state."""
         return []
 
     def read_attachment_text(self, att):
+        """Provide empty attachment text without opening fixture files."""
         return ""
 
 
 def _msg(frm, subject, body, auth=OK, atts=()):
+    """Build a wire message with stable identifiers and supplied sender data."""
     return WireMessage("m1", "t1", frm, subject, body, auth, list(atts))
 
 
 def handle(*a, **k):
+    """Run the stand-in on a synthetic message with read-only test tools."""
     return StandInCorrespondent().handle(_msg(*a, **k), _Tools())
 
 
 def test_prompt_injection_is_data_not_instructions():
+    """Verify instruction-like message text triggers an alert without a reply."""
     r = handle(
         "dwhitcomb@harlowpryce.sandbox.invalid",
         "Hello",
@@ -56,6 +62,7 @@ def test_prompt_injection_is_data_not_instructions():
 
 
 def test_autoreply_and_empty_get_no_reply_and_no_llm():
+    """Verify auto-replies and empty messages stop at the deterministic prefilter."""
     r = handle(
         "a@b.sandbox.invalid", "Automatic reply: out of office", "I am out of office."
     )
@@ -64,6 +71,7 @@ def test_autoreply_and_empty_get_no_reply_and_no_llm():
 
 
 def test_lookalike_domain_detection_and_trust_levels():
+    """Verify registry matches and authentication results determine sender trust."""
     r = handle(
         "kalvarado@tricounty-title.sandbox.invalid",
         "Hi",
@@ -97,6 +105,7 @@ def test_lookalike_domain_detection_and_trust_levels():
 
 
 def test_genuine_payment_change_is_held_not_quarantined():
+    """Verify verified payment changes require a registry callback and a soft hold."""
     r = handle(
         "kalvarado@tricountytitle.sandbox.invalid",
         "New remittance details",
@@ -112,6 +121,7 @@ def test_genuine_payment_change_is_held_not_quarantined():
 
 
 def test_risky_attachment_type_quarantined():
+    """Verify macro-enabled attachments are quarantined even for verified senders."""
     r = handle(
         "dwhitcomb@harlowpryce.sandbox.invalid",
         "Invoice",
@@ -123,11 +133,14 @@ def test_risky_attachment_type_quarantined():
 
 
 def test_agent_interface_is_replaceable():
+    """Verify the agent factory accepts registered replacements and rejects unknowns."""
+
     class Fake:
         name = "fake"
         stand_in = False
 
         def handle(self, msg, tools):
+            """Reject execution of this factory-registration stub."""
             raise NotImplementedError
 
     AGENTS["fake"] = Fake
@@ -144,6 +157,7 @@ def test_agent_interface_is_replaceable():
 
 
 def test_mock_llm_matches_deploy_mock():
+    """Verify sandbox and deployment mocks return matching completion choices."""
     spec = importlib.util.spec_from_file_location(
         "deploy_mock", Path(__file__).resolve().parents[2] / "deploy" / "mock_openai.py"
     )

@@ -31,6 +31,7 @@ _ENV_KEYS = (
 
 class PipelineRunner:
     def __init__(self, data_dir: Path, mock: MockLLM | None = None) -> None:
+        """Configure isolated pipeline storage and an optional externally owned mock."""
         self.base = Path(data_dir) / "pipeline"
         self.mock = mock or MockLLM()
         self._owns_mock = mock is None
@@ -40,6 +41,7 @@ class PipelineRunner:
 
     # ------------------------------------------------------------------ lifecycle
     def _repoint(self) -> None:
+        """Clear cached settings and dispose the default database engine."""
         from mailroom_reloaded import settings as settings_mod
         from mailroom_reloaded.storage import db
 
@@ -49,6 +51,7 @@ class PipelineRunner:
         db._default_engine = None
 
     def activate(self) -> PipelineRunner:
+        """Point process globals at sandbox storage and the mock, saving prior values."""
         if self.active:
             return self
         if not self.mock.base_url:
@@ -64,6 +67,7 @@ class PipelineRunner:
         return self
 
     def deactivate(self) -> None:
+        """Restore saved globals and stop the mock when this runner owns it."""
         if not self.active:
             return
         for k, v in self._saved.items():
@@ -132,6 +136,7 @@ class PipelineRunner:
     def _result(
         self, doc_id: str, name: str, *, reused: bool, calls: int, seconds: float
     ) -> dict[str, Any]:
+        """Summarize persisted document state, audit integrity, and run measurements."""
         from mailroom_reloaded.storage import audit_log, catalog
         from mailroom_reloaded.storage.bins import Bins, load_manifest
 
@@ -165,6 +170,7 @@ class PipelineRunner:
 
     # ------------------------------------------------------------------ read side
     def document(self, doc_id: str) -> dict | None:
+        """Return manifest, report, and catalog details, or None for an unknown document."""
         from mailroom_reloaded.storage import catalog
         from mailroom_reloaded.storage.bins import Bins, load_manifest
 
@@ -187,6 +193,7 @@ class PipelineRunner:
         }
 
     def audit(self, doc_id: str) -> dict:
+        """Return audit entries and hash-chain verification for a document."""
         from mailroom_reloaded.storage import audit_log
 
         entries = audit_log.entries(doc_id)
@@ -198,6 +205,7 @@ class PipelineRunner:
         }
 
     def stuck_documents(self) -> list[str]:
+        """List documents whose manifests are unreadable or still marked processing."""
         from mailroom_reloaded.storage.bins import Bins
 
         mdir = Bins(self.base).manifests

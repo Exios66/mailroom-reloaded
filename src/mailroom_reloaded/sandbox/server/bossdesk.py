@@ -39,6 +39,7 @@ class StandInBossDesk:
     stand_in = True
 
     def __init__(self, delegation: dict[str, dict]) -> None:
+        """Store the delegation rules used to derive stand-in Boss Desk actions."""
         self.delegation = delegation
 
     def decide(self, res: CorrespondentResult) -> list[dict]:
@@ -56,6 +57,7 @@ class StandInBossDesk:
         def add(
             name: str, params: str | None = None, state: str = "done", why: str = ""
         ) -> None:
+            """Append an action with policy context unless its name and parameters exist."""
             if any(a["action"] == name and a.get("params") == params for a in actions):
                 return
             actions.append(

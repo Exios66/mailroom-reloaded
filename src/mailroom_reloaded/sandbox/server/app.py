@@ -90,6 +90,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Start the service for the application lifetime and stop it on shutdown."""
         service.start()
         try:
             yield
@@ -107,10 +108,12 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/status")
     def status() -> dict:
+        """Return service configuration, counters, and component status."""
         return service.status()
 
     @api.get("/scenarios")
     def scenarios() -> dict:
+        """List available scenarios with timeline counts and optional verdicts."""
         out = []
         for name in service.content.scenario_ids():
             sc = service.content.cs.scenarios[name]
@@ -138,6 +141,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/scenarios/{name}")
     def scenario(name: str) -> dict:
+        """Return a scenario and its evaluation, honoring expected-outcome visibility."""
         sc = service.content.cs.scenarios.get(name)
         if sc is None:
             raise HTTPException(404, f"unknown scenario {name}")
@@ -148,6 +152,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.post("/inject")
     def inject(body: InjectBody) -> dict:
+        """Inject a batch of scenarios and optionally wait for processing."""
         res = _wrap(
             lambda: service.inject(
                 body.scenario_ids,
@@ -165,19 +170,23 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
     def messages(
         state: str | None = None, scenario: str | None = None, batch: str | None = None
     ) -> dict:
+        """List messages matching the optional state, scenario, and batch filters."""
         rows = service.list_messages(state=state, scenario=scenario, batch=batch)
         return {"messages": rows, "count": len(rows)}
 
     @api.get("/messages/{mid}")
     def message(mid: str) -> dict:
+        """Return the public message view or a not-found error."""
         return _wrap(lambda: service.message(mid))
 
     @api.get("/messages/{mid}/trace")
     def trace(mid: str) -> dict:
+        """Return the ingress, processing, and egress trace for a message."""
         return _wrap(lambda: service.trace(mid))
 
     @api.post("/messages/{mid}/run")
     def run(mid: str, body: RunBody) -> dict:
+        """Queue the requested flows for a message and optionally wait for completion."""
         res = _wrap(lambda: service.run_message(mid, body.flows))
         if body.wait:
             service.wait_idle()
@@ -186,10 +195,12 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.post("/messages/{mid}/release")
     def release(mid: str) -> dict:
+        """Release a shed message for processing through its selected flows."""
         return _wrap(lambda: service.release_message(mid))
 
     @api.post("/messages/{mid}/attachments/{name}/release")
     def release_attachment(mid: str, name: str, body: ReviewBody | None = None) -> dict:
+        """Release a held attachment into the pipeline with reviewer attribution."""
         return _wrap(
             lambda: service.release_attachment(
                 mid, name, (body.by if body else "human")
@@ -202,11 +213,13 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
         ref: str | None = None,
         limit: int = Query(default=500, ge=1, le=5000),
     ) -> dict:
+        """Return events after a sequence number, optionally filtered by reference."""
         rows = service.events_since(since, ref, limit)
         return {"events": rows, "last_seq": rows[-1]["seq"] if rows else since}
 
     @api.get("/ingress")
     def ingress() -> dict:
+        """Return admission-meter counters, message counts, and pending work."""
         s = service.status()
         return {
             "meter": s["ingress"],
@@ -216,6 +229,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/outbox")
     def outbox() -> dict:
+        """List outbound drafts and their capture or blocking summary."""
         with service._lock:
             items = sorted(
                 (dict(i) for i in service.outbox.items.values()), key=lambda i: i["id"]
@@ -224,26 +238,31 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.post("/outbox/{oid}/approve")
     def approve(oid: str, body: ReviewBody | None = None) -> dict:
+        """Apply approval and send-policy checks to an outbound draft."""
         return _wrap(
             lambda: service.approve_outbound(oid, (body.by if body else "reviewer"))
         )
 
     @api.post("/outbox/{oid}/reject")
     def reject(oid: str, body: ReviewBody | None = None) -> dict:
+        """Reject an outbound draft with optional reviewer attribution."""
         return _wrap(
             lambda: service.reject_outbound(oid, (body.by if body else "reviewer"))
         )
 
     @api.post("/egress/attempt")
     def attempt(body: AttemptBody) -> dict:
+        """Run a manual send attempt through the virtual outbox."""
         return service.outbox.attempt(to=body.to, subject=body.subject, body=body.body)
 
     @api.get("/egress/probe")
     def probe(to: str) -> dict:
+        """Check an address against both simulated recipient-policy profiles."""
         return service.outbox.probe(to)
 
     @api.post("/config")
     def config(body: ProfileBody) -> dict:
+        """Update the requested egress profile or autonomy mode and return both."""
         if body.egress_profile:
             service.set_egress_profile(body.egress_profile)
         if body.autonomy:
@@ -252,11 +271,13 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/documents")
     def documents() -> dict:
+        """List document summaries recorded by sandbox pipeline runs."""
         rows = service.documents()
         return {"documents": rows, "count": len(rows)}
 
     @api.get("/documents/{doc_id}")
     def document(doc_id: str) -> dict:
+        """Return pipeline details for a document or a not-found error."""
         d = service.pipeline.document(doc_id)
         if d is None:
             raise HTTPException(404, f"unknown document {doc_id}")
@@ -264,10 +285,12 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/documents/{doc_id}/audit")
     def audit(doc_id: str) -> dict:
+        """Return a document audit trail and its chain-verification result."""
         return service.pipeline.audit(doc_id)
 
     @api.get("/policy")
     def policy() -> dict:
+        """Expose the loaded policy rules, provenance, and file hashes."""
         p = service.content.policy
         return {
             "source": p.source,
@@ -280,6 +303,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.get("/conformance")
     def conformance() -> dict:
+        """Summarize scenario verdicts, refusing access when expectations are hidden."""
         if not service.show_expected:
             raise HTTPException(
                 403, "expected outcomes are hidden (server started with --no-expected)"
@@ -374,6 +398,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @api.post("/reset")
     def reset() -> dict:
+        """Clear sandbox state and return a reset acknowledgment."""
         service.reset()
         return {"reset": True}
 
@@ -381,6 +406,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        """Add content-security, MIME-sniffing, and cache-control response headers."""
         resp: Response = await call_next(request)
         resp.headers.setdefault("Content-Security-Policy", CSP)
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -389,13 +415,16 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, Any]:
+        """Return public liveness information and the current timestamp."""
         return {"status": "ok", "service": "mailroom-sandbox", "ts": time.time()}
 
     @app.get("/")
     def root() -> RedirectResponse:
+        """Redirect the root path to the sandbox UI."""
         return RedirectResponse("/ui")
 
     def _static(name: str, media: str) -> FileResponse:
+        """Serve a packaged UI asset or raise a not-found error if absent."""
         p = UI_DIR / name
         if not p.is_file():
             raise HTTPException(404, "UI is not packaged")
@@ -404,10 +433,12 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
     @app.get("/ui")
     @app.get("/ui/")
     def ui() -> FileResponse:
+        """Serve the sandbox HTML page."""
         return _static("index.html", "text/html")
 
     @app.get("/ui/app.js")
     def ui_js() -> FileResponse:
+        """Serve the sandbox browser script."""
         return _static("app.js", "text/javascript")
 
     @app.get("/ui/mailbox.js")
@@ -417,6 +448,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
 
     @app.get("/ui/app.css")
     def ui_css() -> FileResponse:
+        """Serve the sandbox stylesheet."""
         return _static("app.css", "text/css")
 
     return app

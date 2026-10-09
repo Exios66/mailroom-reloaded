@@ -10,7 +10,7 @@
 #   scripts/sandbox.sh reset          stop and delete the sandbox state volume
 #
 # Environment: SANDBOX_PORT (8100), SANDBOX_CONTENT (smoke | locked | path), SANDBOX_EGRESS (closed|egress),
-# MAILROOM_API_TOKEN (required for --expose), SANDBOX_STATE_DIR (host mode, default ./.sandbox-state).
+# SANDBOX_BIND (127.0.0.1; non-loopback requires --expose), MAILROOM_API_TOKEN (required for --expose), SANDBOX_STATE_DIR (host mode, default ./.sandbox-state).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,6 +28,15 @@ need_docker() {
   docker compose version >/dev/null 2>&1 || { echo "sandbox.sh: the 'docker compose' plugin is required." >&2; exit 127; }
 }
 
+loopback_bind() {
+  case "$1" in localhost|::1|'[::1]') return 0 ;; esac
+  [[ "$1" =~ ^127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  local octet
+  for octet in "${BASH_REMATCH[@]:1}"; do
+    (( 10#$octet <= 255 )) || return 1
+  done
+}
+
 auth_header() {
   if [[ -n "${MAILROOM_API_TOKEN:-}" ]]; then printf 'Authorization: Bearer %s' "$MAILROOM_API_TOKEN"; else printf 'X-Sandbox: none'; fi
 }
@@ -38,12 +47,14 @@ cd "$ROOT"
 
 case "$cmd" in
   up)
-    need_docker
     expose=0
     for a in "$@"; do [[ "$a" == "--expose" ]] && expose=1; done
     if [[ "$expose" == 1 ]]; then
-      [[ -n "${MAILROOM_API_TOKEN:-}" ]] || fail "--expose needs MAILROOM_API_TOKEN (the sandbox refuses an unauthenticated off-loopback bind)"
+      [[ "${MAILROOM_API_TOKEN:-}" =~ [^[:space:]] ]] || fail "--expose needs MAILROOM_API_TOKEN (the sandbox refuses an unauthenticated off-loopback bind)"
+    elif ! loopback_bind "${SANDBOX_BIND:-127.0.0.1}"; then
+      fail "non-loopback SANDBOX_BIND requires --expose and MAILROOM_API_TOKEN"
     fi
+    need_docker
     export APP_UID="$(id -u)"
     [[ "$APP_UID" -gt 0 ]] || fail "run as a non-root host user"
     if [[ "$expose" == 1 ]]; then

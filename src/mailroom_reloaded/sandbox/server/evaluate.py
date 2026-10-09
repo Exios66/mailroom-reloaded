@@ -50,6 +50,7 @@ def _primary(scenario: dict, emails: list[dict]) -> dict:
 
 
 def _chk(key: str, expected: Any, actual: Any, ok: bool | None, note: str = "") -> dict:
+    """Package an expected-versus-actual check with a tri-state result and note."""
     return {"key": key, "expected": expected, "actual": actual, "ok": ok, "note": note}
 
 
