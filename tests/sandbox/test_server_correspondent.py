@@ -188,3 +188,51 @@ def test_mock_llm_matches_deploy_mock():
             a.post("/v1/chat/completions", json=body).json()["choices"]
             == b.post("/v1/chat/completions", json=body).json()["choices"]
         )
+
+
+@pytest.mark.parametrize("references_first", [False, True])
+def test_submission_draft_uses_one_named_relation_per_attachment_and_target(
+    references_first,
+):
+    relations = []
+    for attachment, target, name in [
+        ("new.pdf", "old-1", "original.pdf"),
+        ("second.pdf", "old-1", "original.pdf"),
+        ("new.pdf", "old-2", "other.pdf"),
+    ]:
+        kinds = (
+            ["references", "supersedes"]
+            if references_first
+            else ["supersedes", "references"]
+        )
+        relations.extend(
+            {"a": attachment, "b": name, "b_doc_id": target, "kind": kind}
+            for kind in kinds
+        )
+    relations.append(
+        {
+            "a": "new.pdf",
+            "b": "context.pdf",
+            "b_doc_id": "context",
+            "kind": "references",
+        }
+    )
+    msg = _msg(
+        "dwhitcomb@harlowpryce.sandbox.invalid",
+        "Submission",
+        "Please confirm receipt.",
+        atts=[
+            AttachmentView("new.pdf", doc_id="new"),
+            AttachmentView("second.pdf", doc_id="second"),
+        ],
+    )
+    drafts = StandInCorrespondent()._drafts(
+        msg, "document_submission", "verified", [], relations, _Tools(), {}
+    )
+    assert len(drafts) == 1
+    body = drafts[0].body
+    assert body.count("It appears to supersedes original.pdf;") == 2
+    assert body.count("It appears to supersedes other.pdf;") == 1
+    assert body.count("It appears to references context.pdf;") == 1
+    assert body.count("It appears to") == 4
+    assert len(relations) == 7

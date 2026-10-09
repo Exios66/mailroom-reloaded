@@ -456,7 +456,7 @@ _T_STATUS = _ENV.from_string(
 _T_SUBMISSION = _ENV.from_string(
     "Hello,\n\nThank you. We received {{ names }} and logged it for processing"
     "{% if doc_ids %} (reference {{ doc_ids }}){% endif %}.\n"
-    "{% for r in relations %}It appears to {{ r.kind }} {{ r.b_name }}; this is a proposed link pending review, not a confirmed change.\n{% endfor %}"
+    "{% for r in relations %}It appears to {{ r.kind }} {{ r.b }}; this is a proposed link pending review, not a confirmed change.\n{% endfor %}"
     "\nBest regards,\nMailroom Correspondent\n"
 )
 _T_HOLD = _ENV.from_string(
@@ -1288,7 +1288,17 @@ class StandInCorrespondent:
             ):
                 return []  # a bare transmittal needs no acknowledgement draft
             ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
-            body = _T_SUBMISSION.render(names=names, doc_ids=ids, relations=relations)
+            draft_relations = {}
+            for relation in relations:
+                key = (relation["a"], relation["b_doc_id"])
+                if (
+                    key not in draft_relations
+                    or draft_relations[key]["kind"] == "references"
+                ):
+                    draft_relations[key] = relation
+            body = _T_SUBMISSION.render(
+                names=names, doc_ids=ids, relations=draft_relations.values()
+            )
             return [
                 Draft(
                     **base,

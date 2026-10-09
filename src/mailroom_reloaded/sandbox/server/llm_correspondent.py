@@ -180,6 +180,8 @@ class LLMCorrespondent(StandInCorrespondent):
 
         Model confidence below 0.5 forces review regardless of its review flag.
         """
+        if tri.intent in {"disclosure_request", "spam_or_phishing"}:
+            return None
         out = self._ask(msg, tools)
         if out is None:
             return None

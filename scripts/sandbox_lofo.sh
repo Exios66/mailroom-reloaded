@@ -13,5 +13,6 @@ CONTENT="${1:?usage: sandbox_lofo.sh <content dir> [out_dir]}"
 OUT="${2:-$ROOT/tests/sandbox}"
 export OTEL_SDK_DISABLED=true
 cd "$ROOT"
+mkdir -p "$OUT"
 exec uv run --offline --extra sandbox mailroom sandbox conformance --content "$CONTENT" \
   --data-dir "${TMPDIR:-/tmp}/sandbox-lofo-state" --json "$OUT/conformance_baseline.json" --slim --lofo "$OUT/lofo_baseline.json"

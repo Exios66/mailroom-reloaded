@@ -106,7 +106,7 @@ def lofo(rows: list[dict]) -> dict[str, Any]:
     requires tuning without seeing the held-out family beforehand.
 
     A fold without training rows has a ``None`` training rate. Empty input
-    raises ``ZeroDivisionError`` when computing aggregate rates.
+    has ``None`` aggregate rates and no folds.
     """
     fams = sorted({family_of(r["scenario"]) for r in rows})
     folds = []
@@ -134,10 +134,14 @@ def lofo(rows: list[dict]) -> dict[str, Any]:
         "protocol": "leave-one-family-out over series letters",
         "macro_mean_held_out_rate": round(
             sum(f["held_out_rate"] for f in folds) / len(folds), 3
-        ),
+        )
+        if folds
+        else None,
         "micro_pass_rate": round(
             sum(r["verdict"] == "pass" for r in rows) / len(rows), 3
-        ),
+        )
+        if rows
+        else None,
         "folds": folds,
     }
 
@@ -154,9 +158,11 @@ def format_lofo(rep: dict[str, Any]) -> str:
         lines.append(
             f"{f['held_out_family']:<24}{f['held_out_n']:>3}{f['held_out_pass']:>6}{f['held_out_rate']:>7.2f}   {training_rate}"
         )
-    lines.append(
-        f"macro mean held-out rate {rep['macro_mean_held_out_rate']:.3f}; micro pass rate {rep['micro_pass_rate']:.3f}"
-    )
+    macro = rep["macro_mean_held_out_rate"]
+    micro = rep["micro_pass_rate"]
+    macro_rate = "n/a" if macro is None else f"{macro:.3f}"
+    micro_rate = "n/a" if micro is None else f"{micro:.3f}"
+    lines.append(f"macro mean held-out rate {macro_rate}; micro pass rate {micro_rate}")
     return "\n".join(lines)
 
 
