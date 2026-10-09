@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailroom Sandbox</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<header>
+  <div class="brand"><strong>Mailroom Sandbox</strong> <span class="muted">ingress simulation, fully offline</span></div>
+  <div id="chips" class="chips"></div>
+  <div class="tokenbox">
+    <label>API token <input id="token" type="password" autocomplete="off" placeholder="only if the server needs one"></label>
+  </div>
+</header>
+<div class="banner" id="banner">
+  Stand-ins in this view: the <b>Correspondent</b> and <b>Boss Desk</b> are deterministic rule-based placeholders (the real agent does not exist yet).
+  The <b>pipeline</b> is the real mailroom-reloaded flow on an offline mock LLM, in its own data dir. Outbound mail is <b>captured, never sent</b>.
+</div>
+<main>
+  <section id="col-scn" class="panel">
+    <h2>Scenarios</h2>
+    <div class="toolbar">
+      <label><input type="checkbox" id="fl-corr" checked> Flow A Correspondent</label>
+      <label><input type="checkbox" id="fl-pipe" checked> Flow B pipeline</label>
+      <label>stagger s <input type="number" id="stagger" value="120" min="0" max="3600" style="width:4.5em"></label>
+      <button id="inject-all" class="primary">Inject all</button>
+      <button id="reset" class="danger">Reset</button>
+    </div>
+    <div id="scenarios"></div>
+  </section>
+  <section id="col-mid" class="panel">
+    <nav class="tabs" id="tabs">
+      <button data-tab="messages" class="active">Ingress queue</button>
+      <button data-tab="outbox">Outbox / egress sink</button>
+      <button data-tab="events">Events</button>
+      <button data-tab="conformance">Expected vs actual</button>
+      <button data-tab="docs">Pipeline documents</button>
+      <button data-tab="policy">Policy</button>
+    </nav>
+    <div id="tab-body"></div>
+  </section>
+  <section id="col-trace" class="panel">
+    <h2>Trace <span id="trace-id" class="muted"></span></h2>
+    <div id="trace"><p class="muted">Inject a scenario, then select a message.</p></div>
+  </section>
+</main>
+<script src="/ui/app.js"></script>
+</body>
+</html>

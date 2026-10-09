@@ -338,6 +338,9 @@ gmail_app = typer.Typer(
 app.add_typer(gmail_app, name="gmail")
 
 from mailroom_reloaded.sandbox.content.cli import sandbox_app
+from mailroom_reloaded.sandbox.server import (
+    cli as _sandbox_server_cli,  # noqa: F401  (registers `sandbox serve`)
+)
 
 app.add_typer(sandbox_app, name="sandbox")
 
