@@ -281,7 +281,7 @@ test('upload uses the injected picker and prints queued line', async () => {
     { pickFile: async (a) => ((accept = a), file) },
   );
   await dispatch(setup(), ctx, 'upload');
-  assert.equal(accept, '.txt,.md,.pdf,.docx,.rtf,.html,.htm');
+  assert.equal(accept, '.txt,.md,.text,.pdf,.docx,.png,.jpg,.jpeg');
   assert.equal(calls[0].file, file);
   assert.deepEqual(lines(out), [`queued ${HOSTILE} · d1`]);
 });
@@ -315,7 +315,7 @@ test('upload falls back to a DOM file input', async () => {
     const { ctx, out } = makeCtx({ UPLOAD: { doc_id: 'd2', file: 'f.txt' } });
     await dispatch(setup(), ctx, 'upload');
     assert.equal(made[0].type, 'file');
-    assert.equal(made[0].accept, '.txt,.md,.pdf,.docx,.rtf,.html,.htm');
+    assert.equal(made[0].accept, '.txt,.md,.text,.pdf,.docx,.png,.jpg,.jpeg');
     assert.deepEqual(lines(out), ['queued f.txt · d2']);
   } finally {
     globalThis.document = prev;

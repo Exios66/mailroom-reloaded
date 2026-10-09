@@ -37,6 +37,8 @@ INTAKE_SECTION_ROLES: tuple[str, ...] = (
 )
 
 _TEXT_SUFFIXES = {".txt", ".md", ".text"}
+#: Every upload suffix the clerk can parse; the API accepts exactly these.
+SUPPORTED_EXTENSIONS = frozenset(_TEXT_SUFFIXES | {".pdf", ".docx", ".png", ".jpg", ".jpeg"})
 
 
 @dataclass

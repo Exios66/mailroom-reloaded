@@ -56,6 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from mailroom_reloaded import __version__
+from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS
 from mailroom_reloaded.intake import gmail as gmail_intake
 from mailroom_reloaded.review import resolve_review
 from mailroom_reloaded.settings import get_settings
@@ -73,7 +74,7 @@ MAX_UPLOAD_BYTES = int(
 
 #: Accepted upload extensions. Kept local so the API does not depend on the
 #: taxonomy's current ``file_extensions`` block.
-_ACCEPTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".rtf", ".html", ".htm"}
+_ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 #: Hosts considered loopback; anything else is an off-loopback bind.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}

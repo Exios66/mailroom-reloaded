@@ -217,7 +217,7 @@ Modal tiers price at `0.0` because cost is GPU-time, not tokens.
 | `field_scoring` | `taxonomy.yaml:193-221` | only if `scoring.configure_from_taxonomy` is called | **Not auto-wired**: no repo code calls it, so scoring uses library defaults (`scoring/field_scoring.py:77-81`, `scoring/config.py:591`). |
 | `vision` | `taxonomy.yaml:235-260` | vision path | Model substring allow/exclude lists and `max_pages`/`dpi` for image input. Image uploads (`.png .jpg .jpeg`), Gmail image attachments and scanned PDFs are sent page by page to the configured vision provider: each page is a paid model call, and the image content leaves this host when that provider is remote. |
 | `doc_classes` | `taxonomy.yaml:262-354` | `settings.py:96`, sorter/specialists | The five classes, their schema names, specialist roles, descriptions and `field_types`. |
-| `file_extensions` | `taxonomy.yaml:405-417` | **not** the API | The API keeps its own allow-list as `.txt .md .pdf .docx .rtf .html .htm` (`api/app.py:64-66`); ingest accepts `.txt/.md/.text` and `.pdf` (`ingest/clerk.py:38`, `ingest/clerk.py:149-166`). |
+| `file_extensions` | `taxonomy.yaml:405-417` | **not** the API | The API accepts the clerk's `SUPPORTED_EXTENSIONS` (`.txt .md .text .pdf .docx .png .jpg .jpeg`, `ingest/clerk.py`), so every accepted upload has a parser. |
 
 **Unconfirmed / inert blocks:** `pipeline.bins`, `pipeline.pdf_direct_chars_per_page`,
 `chunking`, and the `field_scoring` auto-wiring are present in the file but not

@@ -675,3 +675,10 @@ def test_upload_is_claimable_only_after_complete_write(client, env, monkeypatch)
     assert response.status_code == 202
     assert seen == [LETTER]
     assert response.json()["doc_id"] == hashlib.sha256(LETTER).hexdigest()[:16]
+
+
+@pytest.mark.parametrize('suffix', ['.rtf', '.html', '.htm'])
+def test_unsupported_parser_is_rejected_before_queueing(client, env, suffix):
+    response = client.post('/v1/documents', files={'file': ('document' + suffix, b'document')})
+    assert response.status_code == 400
+    assert not list(Bins(env).inbox.iterdir())
