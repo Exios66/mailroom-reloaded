@@ -801,6 +801,7 @@ def run_document(
     """
     flow = MailroomFlow()
     # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
-    with ensure_run_scope("eval" if eval_ctx is not None else "watch"):
+    eval_run_id = getattr(eval_ctx, "run_id", None) if eval_ctx is not None else None
+    with ensure_run_scope("eval" if eval_ctx is not None else "watch", eval_run_id):
         flow._configure(Path(path), worker_id, resume_from, overrides, eval_ctx)
         return flow._drive()
