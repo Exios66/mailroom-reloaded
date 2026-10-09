@@ -186,6 +186,8 @@ class Settings(BaseSettings):
     gmail_push_audience: str | None = None
     gmail_push_service_account: str | None = None
     trace_mask: bool = False
+    #: SQLite file for the local span store; ``None`` means ``<base_dir>/traces.db``.
+    trace_store_path: Path | None = None
     gpu_usd_per_hour: float = 0.80
 
 
