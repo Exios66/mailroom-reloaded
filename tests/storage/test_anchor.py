@@ -1192,3 +1192,366 @@ def test_cli_export_head_works_with_any_setting(cli, monkeypatch) -> None:
     assert _invoke("export-head").exit_code == 0
     _set_env(monkeypatch, anchor="bogus")
     assert _invoke("export-head").exit_code == 0
+
+
+# --------------------------------------------------------------------------- review regressions
+def _recorder(calls: list):
+    return lambda *a, **kw: calls.append((a, kw))
+
+
+def test_cli_idle_ledger_never_stale_after_anchor(cli, monkeypatch) -> None:
+    lg = _seed()
+    _supabase_env(monkeypatch)
+    assert _invoke("anchor").exit_code == 0
+    assert [e.kind for e in lg.entries()].count("anchor") == 0
+    real = anchor.verify_external
+    later = datetime.now(UTC) + timedelta(hours=25)
+    monkeypatch.setattr(
+        anchor, "verify_external", lambda l, c, b: real(l, c, b, now=later)
+    )
+    res = _invoke("verify", "--external")
+    assert (
+        res.exit_code == 0 and "anchor: OK" in res.output and "STALE" not in res.output
+    )
+
+
+def test_verify_external_idle_after_push_not_stale(ledger) -> None:
+    _fill(ledger)
+    be = MemBackend()
+    anchor.push_head(ledger, be)
+    later = datetime.now(UTC) + timedelta(hours=25)
+    res = anchor.verify_external(ledger, _cfg(), be, now=later)
+    assert (res.status, res.exit_code) == ("ok", 0)
+
+
+@pytest.mark.parametrize(
+    "dsn", ["postgresql://u:pw@h:bad/db", "notaurl SECRET"], ids=["badport", "nourl"]
+)
+def test_cli_bad_postgres_url_exits_4(cli, monkeypatch, dsn) -> None:
+    _seed()
+    _set_env(monkeypatch, anchor="postgres", anchor_url=dsn)
+    for args in (("verify", "--external"), ("anchor",)):
+        res = _invoke(*args)
+        assert res.exit_code == 4, res.output
+        assert "SECRET" not in res.output and ":pw@" not in res.output
+        assert "Traceback" not in res.output
+
+
+@pytest.mark.parametrize("bad", ["https://h:bad/", "https://ex\nample"])
+def test_cli_malformed_supabase_url_exits_4(cli, monkeypatch, bad) -> None:
+    _seed()
+    _set_env(monkeypatch, anchor="supabase", anchor_key=SECRET, anchor_url=bad)
+    for args in (("verify", "--external"), ("anchor",)):
+        res = _invoke(*args)
+        assert res.exit_code == 4, res.output
+        assert SECRET not in res.output and "Traceback" not in res.output
+    assert cli.requests == []
+
+
+def test_cli_odd_but_parsable_supabase_url_is_never_tamper(cli, monkeypatch) -> None:
+    """httpx accepts 'https://exa mple'; the failure surfaces at request time, not as exit 1."""
+    _seed()
+    _set_env(
+        monkeypatch, anchor="supabase", anchor_key=SECRET, anchor_url="https://exa mple"
+    )
+    cli.fail = httpx.ConnectError("bad host")
+    for args in (("verify", "--external"), ("anchor",)):
+        res = _invoke(*args)
+        assert res.exit_code in (3, 4), res.output
+        assert SECRET not in res.output and "Traceback" not in res.output
+
+
+def _rows_backend(body) -> SupabaseBackend:
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, json=body))
+    return SupabaseBackend(URL, SECRET, transport=transport)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [{"entry_hash": H1}],
+        [{"seq": 1}],
+        [{"seq": "abc", "entry_hash": H1}],
+        [{"seq": None, "entry_hash": H1}],
+        [{"seq": [1], "entry_hash": H1}],
+        [1],
+        ["x"],
+        [None],
+    ],
+)
+def test_supabase_malformed_head_row_is_unreachable(body) -> None:
+    with pytest.raises(AnchorUnreachable):
+        _rows_backend(body).head()
+
+
+@pytest.mark.parametrize("body", [[{"seq": 1}], [1], ["x"], [None]])
+def test_supabase_malformed_get_row_is_unreachable(body) -> None:
+    with pytest.raises(AnchorUnreachable):
+        _rows_backend(body).get(1)
+
+
+def test_cli_unexpected_verify_error_exits_3_without_leak(cli, monkeypatch) -> None:
+    _seed()
+    _supabase_env(monkeypatch)
+
+    def boom(*a, **kw):
+        raise RuntimeError(f"kaboom {SECRET}")
+
+    monkeypatch.setattr(anchor, "verify_external", boom)
+    res = _invoke("verify", "--external")
+    assert res.exit_code == 3
+    assert SECRET not in res.output and "Traceback" not in res.output
+
+
+def test_cli_unexpected_push_error_exits_3_without_leak(cli, monkeypatch) -> None:
+    _seed()
+    _supabase_env(monkeypatch)
+
+    def boom(*a, **kw):
+        raise RuntimeError(f"kaboom {SECRET}")
+
+    monkeypatch.setattr(anchor, "push_head", boom)
+    res = _invoke("anchor")
+    assert res.exit_code == 3
+    assert SECRET not in res.output and "Traceback" not in res.output
+
+
+def test_tail_naive_aware_mismatch_does_not_raise(ledger) -> None:
+    _fill(ledger, 3)
+    be = MemBackend()
+    be.rows[1] = _hash(ledger, 1)
+    naive = datetime.now() + timedelta(hours=1)  # noqa: DTZ005 - deliberately naive
+    res = anchor.verify_external(ledger, _cfg(), be, now=naive)
+    assert res.exit_code == 0 and res.unanchored == 2
+    assert (
+        anchor.verify_external(ledger, _cfg(), MemBackend(), now=naive).exit_code == 0
+    )
+
+
+def test_config_repr_and_redact_hide_percent_encoded_dsn_password() -> None:
+    dsn = "postgresql://u:p%40ss@h/db"
+    cfg = AnchorConfig("postgres", dsn)
+    assert "p%40ss" not in repr(cfg) and "p@ss" not in repr(cfg)
+    assert "p%40ss" not in cfg.redact(f"boom {dsn}")
+    assert "p@ss" not in cfg.redact("boom postgresql://u:p@ss@h/db")
+
+
+def test_redact_short_password_does_not_mangle_other_text() -> None:
+    cfg = AnchorConfig("postgres", "postgresql://u:pw@h/db")
+    out = cfg.redact("pwned by postgresql://u:pw@h/db")
+    assert out.startswith("pwned by ") and ":pw@" not in out and "***ned" not in out
+    assert "pw" not in repr(cfg).replace("postgres", "")
+
+
+def test_settings_repr_hides_anchor_secrets(monkeypatch) -> None:
+    _set_env(
+        monkeypatch,
+        anchor="postgres",
+        anchor_key="KEY-SECRET-777",
+        anchor_url="postgresql://u:dsn-pass-42@h/db",
+    )
+    shown = repr(get_settings()) + str(get_settings())
+    assert "KEY-SECRET-777" not in shown and "dsn-pass-42" not in shown
+
+
+def test_push_with_retries_config_error_log_is_redacted(ledger, monkeypatch) -> None:
+    _fill(ledger)
+    _set_env(
+        monkeypatch,
+        anchor="supabase",
+        anchor_key=SECRET,
+        anchor_url="postgresql://u:dsn-pass-42@h/db",
+    )
+    logged: list[dict] = []
+    monkeypatch.setattr(anchor.logger, "warning", lambda event, **kw: logged.append(kw))
+    monkeypatch.setattr(anchor.time, "sleep", lambda s: None)
+
+    def boom():
+        raise RuntimeError(f"cfg failed {SECRET} postgresql://u:dsn-pass-42@h/db")
+
+    monkeypatch.setattr(anchor, "get_config", boom)
+    assert anchor._push_with_retries(ledger, delays=(0.0, 0.0)) is False
+    assert len(logged) == 2
+    blob = str(logged)
+    assert SECRET not in blob and "dsn-pass-42" not in blob and "***" in blob
+
+
+def _config_in_thread() -> tuple[bool, object]:
+    import threading
+
+    box: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            box["cfg"] = anchor.get_config()
+        except BaseException as exc:  # noqa: BLE001
+            box["exc"] = exc
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(5)
+    return (not t.is_alive()), box.get("exc", box.get("cfg"))
+
+
+def test_key_file_fifo_fails_closed_promptly(monkeypatch, tmp_path) -> None:
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no mkfifo")
+    fifo = tmp_path / "key"
+    os.mkfifo(fifo)
+    _set_env(monkeypatch, anchor="supabase", anchor_url=URL, anchor_key_file=str(fifo))
+    finished, result = _config_in_thread()
+    if not finished:  # unblock the leaked thread before failing
+        fd = os.open(fifo, os.O_RDWR)
+        os.close(fd)
+    assert finished, "reading a FIFO key file hung"
+    assert isinstance(result, AnchorNotConfigured)
+
+
+def test_key_file_symlink_is_followed(monkeypatch, tmp_path) -> None:
+    real = tmp_path / "real-key"
+    real.write_text(SECRET + "\n")
+    real.chmod(0o600)
+    link = tmp_path / "key"
+    link.symlink_to(real)
+    _set_env(monkeypatch, anchor="supabase", anchor_url=URL, anchor_key_file=str(link))
+    assert anchor.get_config().key == SECRET
+
+
+def test_key_file_device_is_rejected(monkeypatch) -> None:
+    if not os.path.exists("/dev/zero"):
+        pytest.skip("no /dev/zero")
+    _set_env(
+        monkeypatch, anchor="supabase", anchor_url=URL, anchor_key_file="/dev/zero"
+    )
+    finished, result = _config_in_thread()
+    assert finished
+    assert isinstance(result, AnchorNotConfigured)
+    assert "regular" in str(result)
+
+
+@pytest.fixture
+def captured_engine(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import sqlalchemy
+
+    seen: dict[str, object] = {}
+
+    def fake_create_engine(url, **kw):
+        seen["url"] = url
+        seen["connect_args"] = kw.get("connect_args", {})
+        return MagicMock()
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
+    return seen
+
+
+def test_postgres_remote_host_forces_sslmode_require(captured_engine) -> None:
+    SqlBackend("postgresql://u:pw@db.example.test/db")
+    args = captured_engine["connect_args"]
+    assert args["sslmode"] == "require" and "connect_timeout" in args
+
+
+def test_postgres_remote_host_without_password_also_requires_tls(
+    captured_engine,
+) -> None:
+    SqlBackend("postgres://u@db.example.test:5432/db", "pw-from-key")
+    assert captured_engine["connect_args"]["sslmode"] == "require"
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://u@db.example.test/db?sslmode=disable",
+        "postgresql://u@db.example.test/db?sslmode=verify-full",
+        "postgresql://u@127.0.0.1/db",
+        "postgresql://u@localhost:5432/db",
+        "postgresql://u@[::1]/db",
+    ],
+)
+def test_postgres_tls_not_forced_when_chosen_or_loopback(captured_engine, dsn) -> None:
+    SqlBackend(dsn)
+    assert "sslmode" not in captured_engine["connect_args"]
+    assert "connect_timeout" in captured_engine["connect_args"]
+
+
+def test_sqlite_gets_no_postgres_connect_args(captured_engine, tmp_path) -> None:
+    be = SqlBackend(f"sqlite:///{tmp_path / 'a.db'}")
+    assert captured_engine["connect_args"] == {}
+    del be
+
+
+def test_supabase_trigger_rejection_with_higher_head_is_conflict() -> None:
+    store = FakeStore()
+    store.rows[7] = H1
+    store.post_status = 403  # the trigger refuses a non-increasing seq
+    be = store.backend()
+    with pytest.raises(AnchorConflict, match="ahead"):
+        be.push(5, H2)
+    with pytest.raises(AnchorConflict):
+        be.push(7, H2)  # equal seq, different hash: get(7) is H1
+    assert store.rows == {7: H1}
+
+
+def test_supabase_trigger_rejection_head_at_seq_without_row_is_conflict() -> None:
+    """head >= seq but get(seq) is None (gap below the head)."""
+    store = FakeStore()
+    store.rows[9] = H1
+    store.post_status = 400
+    with pytest.raises(AnchorConflict):
+        store.backend().push(4, H2)
+
+
+def test_supabase_rejection_with_lower_head_stays_unreachable() -> None:
+    store = FakeStore()
+    store.rows[2] = H1
+    store.post_status = 403
+    with pytest.raises(AnchorUnreachable, match="403"):
+        store.backend().push(5, H2)
+
+
+def _readonly_probe(monkeypatch):
+    installs: list = []
+    schedules: list = []
+    threads: list = []
+    monkeypatch.setattr(anchor, "install", _recorder(installs))
+    monkeypatch.setattr(anchor, "schedule_push", _recorder(schedules))
+    monkeypatch.setattr(anchor.threading, "Thread", lambda **kw: threads.append(kw))
+    return installs, schedules, threads
+
+
+def test_cli_read_only_commands_never_install_anchor(cli, monkeypatch) -> None:
+    import threading
+
+    _seed()
+    _supabase_env(monkeypatch)
+    cli.rows[3] = _hash(get_ledger(anchor=False), 3)
+    installs, schedules, threads = _readonly_probe(monkeypatch)
+    for args in (
+        ("verify",),
+        ("export-head",),
+        ("verify", "--external"),
+        ("anchor",),
+    ):
+        reset_ledger()  # force a fresh ledger so an install would be visible
+        res = _invoke(*args)
+        assert res.exit_code == 0, (args, res.output)
+    assert installs == [] and schedules == [] and threads == []
+    assert not [t for t in threading.enumerate() if t.name == "ledger-anchor"]
+
+
+def test_get_ledger_default_installs_hook_once(cli, monkeypatch) -> None:
+    installs: list = []
+    monkeypatch.setattr(anchor, "install", _recorder(installs))
+    reset_ledger()
+    lg = get_ledger()
+    assert get_ledger() is lg
+    assert len(installs) == 1 and installs[0][0] == (lg,)
+
+
+def test_get_ledger_anchor_false_skips_hook(cli, monkeypatch) -> None:
+    installs: list = []
+    monkeypatch.setattr(anchor, "install", _recorder(installs))
+    reset_ledger()
+    get_ledger(anchor=False)
+    assert installs == []
