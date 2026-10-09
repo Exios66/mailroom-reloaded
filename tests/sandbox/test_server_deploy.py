@@ -16,10 +16,12 @@ SCRIPT = ROOT / "scripts" / "sandbox.sh"
 
 
 def _svc() -> dict:
+    """Read the sandbox service definition from its Compose configuration."""
     return yaml.safe_load(COMPOSE.read_text())["services"]["sandbox"]
 
 
 def test_compose_single_offline_service_published_on_loopback_by_default():
+    """Verify Compose defaults to one restricted sandbox service bound to loopback."""
     doc = yaml.safe_load(COMPOSE.read_text())
     assert list(doc["services"]) == ["sandbox"]
     svc = _svc()
@@ -41,12 +43,14 @@ def test_compose_single_offline_service_published_on_loopback_by_default():
 
 
 def test_dockerfile_builds_the_sandbox_extra_only():
+    """Verify the image installs the sandbox extra and uses an unprivileged user."""
     text = (ROOT / "deploy" / "Dockerfile.sandbox").read_text()
     assert "--extra sandbox" in text and "--extra dev" not in text
     assert "USER app" in text and "sandbox" in text.split("CMD")[-1]
 
 
 def test_script_is_executable_and_parses():
+    """Verify shell syntax, executable permissions, help text, and invalid-command exit."""
     assert os.access(SCRIPT, os.X_OK)
     subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
     out = subprocess.run(
@@ -61,6 +65,7 @@ def test_script_is_executable_and_parses():
 
 
 def test_expose_without_token_refuses(monkeypatch):
+    """Verify explicit exposure fails when no API token is configured."""
     env = {k: v for k, v in os.environ.items() if k != "MAILROOM_API_TOKEN"}
     res = subprocess.run(
         [str(SCRIPT), "up", "--expose"],
@@ -74,6 +79,7 @@ def test_expose_without_token_refuses(monkeypatch):
 
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not available")
 def test_compose_config_validates():
+    """Validate Compose interpolation when the Docker Compose CLI is available."""
     res = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE), "config", "-q"],
         capture_output=True,
@@ -104,6 +110,7 @@ def test_compose_config_validates():
     ],
 )
 def test_startup_bind_policy(tmp_path, bind, expose, token, allowed):
+    """Verify bind-address and exposure rules before a stubbed Docker launch."""
     docker = tmp_path / "docker"
     docker.write_text(
         "#!/bin/bash\n"

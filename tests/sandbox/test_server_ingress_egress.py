@@ -13,6 +13,7 @@ from mailroom_reloaded.sandbox.server.service import SandboxService
 
 
 def test_render_a1_and_e1_from_templates_with_attachments():
+    """Verify rendered messages, attachment resolution, timing, and truth separation."""
     c = load_sandbox_content()
     (a1,) = plan_scenario(c, "A1_status_inquiry")
     assert a1.wire["subject"] == "Status check on HP-2026-0417"
@@ -37,6 +38,7 @@ def test_render_a1_and_e1_from_templates_with_attachments():
 
 
 def test_token_bucket_burst_then_queue_then_shed():
+    """Verify a burst fills the bounded queue before excess arrivals are shed."""
     policy = copy.deepcopy(load_sandbox_content().policy.ingress)
     policy["sources"]["emails"]["rate"] = {"max_items_per_minute": 60, "burst": 2}
     policy["queues"]["pipeline_ingress"]["depth_max"] = 3
@@ -51,6 +53,7 @@ def test_token_bucket_burst_then_queue_then_shed():
 
 
 def test_per_sender_hourly_cap_sheds():
+    """Verify arrivals beyond the sender hourly cap are shed."""
     m = IngressMeter(load_sandbox_content().policy.ingress)
     res = [
         m.admit_email(i * 30.0, "same@x.sandbox.invalid", "t")["status"]
@@ -60,6 +63,7 @@ def test_per_sender_hourly_cap_sheds():
 
 
 def test_shed_goes_to_pending_and_human_release(idle_service: SandboxService):
+    """Verify shedding records a pending hold that can be released only once."""
     svc = idle_service
     svc.content.policy.ingress["correspondent_inbox"]["max_admissions_per_hour"] = 2
     svc.meter.reset()
@@ -78,6 +82,7 @@ def test_shed_goes_to_pending_and_human_release(idle_service: SandboxService):
 
 
 def _outbox(tmp_path, profile="closed"):
+    """Build a virtual outbox with fixture routes, a fixed clock, and event capture."""
     c = load_sandbox_content()
     events = []
     routes = {
@@ -97,6 +102,7 @@ def _outbox(tmp_path, profile="closed"):
 
 
 def test_recipient_policy_profiles(tmp_path):
+    """Verify closed-domain rules and the additional egress route requirement."""
     ob, _ = _outbox(tmp_path)
     assert ob.check_recipient("a@b.sandbox.invalid")["allowed"]
     assert not ob.check_recipient("a@gmail.com")["allowed"]
@@ -112,6 +118,7 @@ def test_recipient_policy_profiles(tmp_path):
 
 
 def test_send_guards_kill_switch_idempotency_and_thread_cap(tmp_path, monkeypatch):
+    """Verify capture caps, duplicate suppression, and file or environment kill switches."""
     ob, events = _outbox(tmp_path)
     d = {
         "to": "x@brightwaterpg.sandbox.invalid",
@@ -156,6 +163,7 @@ def test_send_guards_kill_switch_idempotency_and_thread_cap(tmp_path, monkeypatc
     ],
 )
 def test_inbox_caps_do_not_consume_bucket_capacity(cap, sender, thread, reason):
+    """Verify sender, hourly, and thread caps preserve token-bucket capacity."""
     meter = IngressMeter(load_sandbox_content().policy.ingress)
     setattr(meter, cap, 1)
     assert meter.admit_email(0, "first", "t1")["status"] == "admitted"
@@ -167,6 +175,7 @@ def test_inbox_caps_do_not_consume_bucket_capacity(cap, sender, thread, reason):
 
 @pytest.mark.parametrize("email_tokens", [1.0, 0.0])
 def test_second_bucket_shed_refunds_email_capacity(email_tokens):
+    """Verify downstream shedding refunds the email token and preserves inbox counters."""
     meter = IngressMeter(load_sandbox_content().policy.ingress)
     emails = meter.buckets["emails"]
     emails.tokens = email_tokens
@@ -184,6 +193,7 @@ def test_second_bucket_shed_refunds_email_capacity(email_tokens):
 
 @pytest.mark.parametrize("legacy", [False, True])
 def test_hourly_send_cap_uses_capture_time_with_legacy_fallback(tmp_path, legacy):
+    """Verify hourly caps use capture time and support legacy records without it."""
     ob, _ = _outbox(tmp_path)
     ob.policy.send_schedule["caps"]["max_sends_per_hour_total"] = 1
     now = 0.0
@@ -202,6 +212,7 @@ def test_hourly_send_cap_uses_capture_time_with_legacy_fallback(tmp_path, legacy
 
 
 def test_thread_cap_counts_old_captures_only_on_matching_thread(tmp_path):
+    """Verify old captures count toward the same thread cap without blocking others."""
     ob, _ = _outbox(tmp_path)
     ob.policy.send_schedule["caps"]["max_sends_per_thread_per_day"] = 1
     draft = {"to": "x@brightwaterpg.sandbox.invalid", "subject": "s", "body": "b"}

@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 def test_reset_discards_pending_work_and_arrivals_while_waiting(
     idle_service, monkeypatch
 ):
+    """Verify reset discards queued work, including arrivals during its idle wait."""
     svc = idle_service
     svc.inject(["A1_status_inquiry"], flows=["correspondent"])
     assert svc._q.unfinished_tasks == 1
@@ -17,6 +18,7 @@ def test_reset_discards_pending_work_and_arrivals_while_waiting(
     monkeypatch.setattr(svc.pipeline, "reset", lambda: None)
 
     def wait_idle(timeout):
+        """Simulate a new queue entry arriving after the initial reset drain."""
         assert svc._q.unfinished_tasks == 0
         # An injection races with reset before it acquires the locks.
         svc._q.put(("stale", []))
@@ -30,6 +32,7 @@ def test_reset_discards_pending_work_and_arrivals_while_waiting(
 
 
 def test_reset_lets_dequeued_worker_finish_before_clearing(idle_service, monkeypatch):
+    """Verify reset lets an active worker finish before clearing shared state."""
     svc = idle_service
     svc.inject(["A1_status_inquiry"], flows=["correspondent"])
     dequeued = threading.Event()
@@ -38,12 +41,14 @@ def test_reset_lets_dequeued_worker_finish_before_clearing(idle_service, monkeyp
     original_wait = svc.wait_idle
 
     def process(mid, flows):
+        """Pause a dequeued message until reset permits processing, then stop the worker."""
         dequeued.set()
         assert proceed.wait(2)
         original_process(mid, flows)
         svc._stop.set()
 
     def wait_idle(timeout):
+        """Release the worker and verify it can acquire the work lock during reset."""
         proceed.set()
         assert original_wait(2), "reset must let the worker acquire _work_lock"
         return True
@@ -65,10 +70,12 @@ def test_reset_lets_dequeued_worker_finish_before_clearing(idle_service, monkeyp
 
 
 def test_outbox_mutations_exclude_concurrent_state_access(idle_service, monkeypatch):
+    """Verify outbox writes hold the service lock against a competing reader."""
     svc = idle_service
     called = []
 
     def competing_reader():
+        """Try to acquire the state lock without blocking and report success."""
         acquired = svc._lock.acquire(blocking=False)
         if acquired:
             svc._lock.release()
@@ -77,9 +84,11 @@ def test_outbox_mutations_exclude_concurrent_state_access(idle_service, monkeypa
     with ThreadPoolExecutor(max_workers=1) as readers:
 
         def protect(name):
+            """Wrap an outbox method to assert that its caller holds the state lock."""
             original = getattr(svc.outbox, name)
 
             def checked(*args, **kwargs):
+                """Verify the competing reader is excluded before recording and delegating a call."""
                 assert not readers.submit(competing_reader).result(timeout=2), name
                 called.append(name)
                 return original(*args, **kwargs)

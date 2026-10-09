@@ -69,14 +69,17 @@ class _Tools:
     def __init__(
         self, svc: SandboxService, att_paths: dict[str, str], quarantined: set[str]
     ) -> None:
+        """Bind read-only tools to a service and message-specific attachment access rules."""
         self.svc = svc
         self.att_paths = att_paths
         self.quarantined = quarantined
 
     def registry(self) -> dict[str, dict]:
+        """Return the content pack registry clients."""
         return self.svc.content.registry_clients
 
     def lookup_catalog(self) -> list[dict]:
+        """Snapshot document identifiers, filenames, statuses, and text under the lock."""
         with self.svc._lock:
             return [
                 {
@@ -89,6 +92,7 @@ class _Tools:
             ]
 
     def read_attachment_text(self, att: AttachmentView) -> str:
+        """Extract attachment text unless its name is explicitly quarantined."""
         if att.name in self.quarantined:
             raise PermissionError("quarantined attachments are never opened")
         return extract_text(self.att_paths.get(att.name, ""))
@@ -107,6 +111,7 @@ class SandboxService:
         guard: NetworkGuard | None = None,
         pipeline: PipelineRunner | None = None,
     ) -> None:
+        """Configure isolated sandbox components and empty state without starting them."""
         self.content = content
         self.data_dir = Path(data_dir)
         self.state_dir = self.data_dir / "sandbox"
@@ -141,6 +146,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ lifecycle
     def start(self, worker: bool = True) -> SandboxService:
+        """Activate the pipeline, restore saved state, and optionally start the worker."""
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.pipeline.activate()
         self._load()
@@ -153,6 +159,7 @@ class SandboxService:
         return self
 
     def stop(self) -> None:
+        """Request worker shutdown, persist state, and deactivate the pipeline."""
         self._stop.set()
         if self._worker is not None:
             self._q.put(("", []))
@@ -162,6 +169,7 @@ class SandboxService:
         self.pipeline.deactivate()
 
     def _run_worker(self) -> None:
+        """Process queued messages serially, recording failures and completing each task."""
         while not self._stop.is_set():
             mid, flows = self._q.get()
             try:
@@ -192,6 +200,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ persistence
     def _save(self) -> None:
+        """Atomically replace the persisted JSON snapshot while holding the state lock."""
         with self._lock:
             blob = {
                 "messages": self.messages,
@@ -210,6 +219,7 @@ class SandboxService:
             os.replace(tmp, self.state_dir / "state.json")
 
     def _load(self) -> None:
+        """Restore readable saved state and mark interrupted processing as admitted."""
         path = self.state_dir / "state.json"
         if not path.is_file():
             return
@@ -231,6 +241,7 @@ class SandboxService:
                     m["state"] = "admitted"
 
     def _drain_queue(self) -> None:
+        """Discard pending queue entries while balancing unfinished-task accounting."""
         while True:
             try:
                 self._q.get_nowait()
@@ -239,6 +250,7 @@ class SandboxService:
             self._q.task_done()
 
     def reset(self) -> None:
+        """Drain queued work, wait for processing, then clear sandbox and pipeline state."""
         self._drain_queue()
         self.wait_idle(30)
         with self._work_lock, self._lock:
@@ -255,6 +267,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ events
     def emit(self, kind: str, ref_id: str, payload: dict | None = None) -> dict:
+        """Append and return a timestamped event with the next sequence number."""
         with self._lock:
             ev = {
                 "seq": len(self.events) + 1,
@@ -269,6 +282,7 @@ class SandboxService:
     def events_since(
         self, since: int = 0, ref_id: str | None = None, limit: int = 500
     ) -> list[dict]:
+        """Copy events after a sequence number, optionally filtering by reference."""
         with self._lock:
             out = [
                 e
@@ -286,6 +300,7 @@ class SandboxService:
         stagger_seconds: int = 0,
         process: bool = True,
     ) -> dict:
+        """Render and meter scenarios in simulated-time order, optionally queuing work."""
         flows = list(flows) if flows is not None else list(FLOWS)
         bad = [f for f in flows if f not in FLOWS]
         if bad:
@@ -380,6 +395,7 @@ class SandboxService:
         }
 
     def _admit(self, msg: dict) -> None:
+        """Apply admission policy, update message state, and record any shed hold."""
         with self._lock:
             if msg["kind"] == "document":
                 dec = self.meter.admit_document(msg["sim_ts"])
@@ -409,6 +425,7 @@ class SandboxService:
             self._hold_shed(msg)
 
     def _hold_shed(self, msg: dict) -> None:
+        """Write a shed-message marker and reason under comms/pending."""
         d = self.data_dir / "comms" / "pending" / msg["id"]
         d.mkdir(parents=True, exist_ok=True)
         (d / "message.json").write_text(
@@ -430,12 +447,14 @@ class SandboxService:
 
     # ------------------------------------------------------------------ processing
     def _get(self, mid: str) -> dict:
+        """Return the mutable stored message or raise KeyError for an unknown identifier."""
         with self._lock:
             if mid not in self.messages:
                 raise KeyError(mid)
             return self.messages[mid]
 
     def run_message(self, mid: str, flows: list[str]) -> dict:
+        """Queue selected flows for a message, refusing messages still in a shed state."""
         msg = self._get(mid)
         if msg["state"] == "shed":
             raise ValueError("message is shed; release it first")
@@ -445,6 +464,7 @@ class SandboxService:
         return self.message(mid)
 
     def _fail(self, mid: str, exc: Exception) -> None:
+        """Record a processing error and event if the message still exists."""
         if mid in self.messages:
             with self._lock:
                 self.messages[mid]["state"] = "error"
@@ -452,6 +472,7 @@ class SandboxService:
             self.emit("run.error", mid, {"error": str(exc)})
 
     def _process(self, mid: str, flows: list[str]) -> None:
+        """Run selected flows under the work lock, record completion, and persist state."""
         with self._work_lock:
             msg = self._get(mid)
             if msg["state"] in {"shed", "skipped"}:
@@ -468,6 +489,7 @@ class SandboxService:
             self._save()
 
     def _run_pipeline_for(self, msg: dict, entry: dict, path: str) -> None:
+        """Process an attachment and record its handoff result, catalog view, and events."""
         self.emit(
             "pipeline.started",
             msg["id"],
@@ -505,6 +527,7 @@ class SandboxService:
         )
 
     def _process_document(self, msg: dict, flows: list[str]) -> None:
+        """Run a resolved document feed through Flow B once when requested."""
         att = msg["wire"]["attachments"][0]
         if "pipeline" not in flows or "pipeline" in msg["flows_done"]:
             return
@@ -534,6 +557,7 @@ class SandboxService:
         msg["flows_done"].append("pipeline")
 
     def _wire(self, msg: dict) -> WireMessage:
+        """Build agent-visible message data without scenario truth or attachment paths."""
         w = msg["wire"]
         return WireMessage(
             message_id=msg["id"],
@@ -557,6 +581,7 @@ class SandboxService:
         )
 
     def _process_email(self, msg: dict, flows: list[str]) -> None:
+        """Run requested correspondence and pipeline flows, recording decisions and drafts."""
         mid = msg["id"]
         atts = {a["name"]: a for a in msg["wire"]["attachments"]}
         if "correspondent" in flows and "correspondent" not in msg["flows_done"]:
@@ -666,6 +691,7 @@ class SandboxService:
             msg["flows_done"].append("pipeline")
 
     def _apply_lane(self, msg: dict, entry: dict, att: dict | None) -> None:
+        """Apply a handoff lane by recording quarantine, copying a hold, or deferring work."""
         mid, lane = msg["id"], entry["lane"]
         if lane == "quarantine":
             d = self.data_dir / "comms" / "quarantine" / mid
@@ -730,6 +756,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ outbox
     def approve_outbound(self, oid: str, by: str = "reviewer") -> dict:
+        """Apply outbox approval under the state lock, update Boss actions, and persist."""
         with self._lock:
             item = self.outbox.approve(oid, by)
             msg = self.messages.get(item["message_id"])
@@ -741,12 +768,14 @@ class SandboxService:
         return item
 
     def reject_outbound(self, oid: str, by: str = "reviewer") -> dict:
+        """Reject an outbox item under the state lock and persist the result."""
         with self._lock:
             item = self.outbox.reject(oid, by)
         self._save()
         return item
 
     def set_egress_profile(self, profile: str) -> None:
+        """Change the outbox profile under the lock, emit its event, and persist state."""
         with self._lock:
             self.outbox.set_profile(profile)
         self.emit("config.changed", "config", {"egress_profile": profile})
@@ -754,6 +783,7 @@ class SandboxService:
 
     # ------------------------------------------------------------------ views
     def _public(self, msg: dict) -> dict:
+        """Copy a message with local paths removed and truth hidden when configured."""
         m = copy.deepcopy(msg)
         if not self.show_expected:
             m.pop("truth", None)
@@ -762,6 +792,7 @@ class SandboxService:
         return m
 
     def message(self, mid: str) -> dict:
+        """Return an independent public view of one stored message."""
         with self._lock:
             return self._public(self._get(mid))
 
@@ -772,6 +803,7 @@ class SandboxService:
         scenario: str | None = None,
         batch: str | None = None,
     ) -> list[dict]:
+        """Return filtered public message views with bodies truncated for list display."""
         with self._lock:
             out = [
                 self._public(m)
@@ -785,6 +817,7 @@ class SandboxService:
         return out
 
     def scenario_messages(self, name: str) -> list[dict]:
+        """Copy messages from the most recent batch containing the named scenario."""
         with self._lock:
             msgs = [m for m in self.messages.values() if m["scenario"] == name]
             if not msgs:
@@ -793,6 +826,7 @@ class SandboxService:
             return [copy.deepcopy(m) for m in msgs if m["batch_id"] == last]
 
     def evaluation(self, name: str) -> dict | None:
+        """Evaluate the latest scenario batch when expectations are visible and data exists."""
         if not self.show_expected:
             return None
         msgs = self.scenario_messages(name)
@@ -809,6 +843,7 @@ class SandboxService:
         )
 
     def trace(self, mid: str) -> dict:
+        """Assemble a message trace across ingress, both flows, outbox, events, and checks."""
         msg = self.message(mid)
         with self._lock:
             out = [
@@ -854,12 +889,14 @@ class SandboxService:
         }
 
     def documents(self) -> list[dict]:
+        """Snapshot document summaries with extracted text omitted."""
         with self._lock:
             return [
                 {k: v for k, v in d.items() if k != "text"} for d in self.docs.values()
             ]
 
     def status(self) -> dict:
+        """Summarize content, component configuration, message counts, and runtime counters."""
         with self._lock:
             counts: dict[str, int] = {}
             for m in self.messages.values():

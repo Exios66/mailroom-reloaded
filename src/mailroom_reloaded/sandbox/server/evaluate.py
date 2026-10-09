@@ -15,6 +15,7 @@ _BENIGN_ROLES = {"real", "personal-address"}
 
 
 def _chk(key: str, expected: Any, actual: Any, ok: bool | None, note: str = "") -> dict:
+    """Package an expected-versus-actual check with a tri-state result and note."""
     return {"key": key, "expected": expected, "actual": actual, "ok": ok, "note": note}
 
 
@@ -26,6 +27,7 @@ def compare_scenario(
     stuck: list[str],
     personas: dict[str, dict],
 ) -> dict:
+    """Compare recorded outcomes with scenario expectations and summarize the verdict."""
     expect = scenario.get("expect", {})
     emails = [m for m in msgs if m["kind"] == "email" and m.get("correspondent")]
     checks: list[dict] = []

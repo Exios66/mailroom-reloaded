@@ -67,6 +67,7 @@ _SUBJECT = re.compile(r"^\s*Subject:\s*(.*?)\s*$", re.MULTILINE)
 
 
 def _local_name(addr: str) -> str:
+    """Return the part of an email address before the first at-sign."""
     return addr.split("@", 1)[0]
 
 
@@ -116,6 +117,7 @@ def _attachment(
 def _render_email(
     content: SandboxContent, client: dict, attachments: list[dict]
 ) -> tuple[str, str, list[str]]:
+    """Render a local template into subject, body, and notes about missing inputs."""
     notes: list[str] = []
     name = client["template"]
     path = content.template_path(name)
@@ -234,6 +236,7 @@ def plan_scenario(content: SandboxContent, name: str) -> list[PlannedItem]:
 
 class _Bucket:
     def __init__(self, per_min: float, burst: float, depth_max: int) -> None:
+        """Initialize a full token bucket with a refill rate and bounded queue depth."""
         self.rate = per_min / 60.0
         self.burst = float(burst)
         self.tokens = float(burst)
@@ -241,6 +244,7 @@ class _Bucket:
         self.depth_max = depth_max
 
     def take(self, t: float) -> dict:
+        """Refill at simulated time t and admit, queue, or shed one item."""
         if self.last is not None and t > self.last:
             self.tokens = min(self.burst, self.tokens + (t - self.last) * self.rate)
         self.last = t if self.last is None else max(self.last, t)
@@ -274,6 +278,7 @@ class IngressMeter:
     THREAD_OPEN_S = 1800.0
 
     def __init__(self, policy: dict) -> None:
+        """Build admission buckets and inbox-cap counters from the ingress policy."""
         self.policy = policy
         src = policy.get("sources", {})
         queues = policy.get("queues", {})
@@ -307,11 +312,13 @@ class IngressMeter:
         self._threads: dict[str, float] = {}  # thread -> last activity (sim s)
 
     def reset(self) -> None:
+        """Reinitialize all admission counters and buckets from the current policy."""
         self.__init__(self.policy)  # type: ignore[misc]
 
     def _decision(
         self, edges: list[dict], status: str, reason: str | None, t: float
     ) -> dict:
+        """Combine edge decisions into a status, reason, and simulated admission time."""
         wait = max((e.get("wait_s", 0.0) for e in edges), default=0.0)
         return {
             "status": status,
@@ -321,11 +328,13 @@ class IngressMeter:
         }
 
     def admit_document(self, t: float) -> dict:
+        """Meter a document at simulated time t through the document bucket."""
         e = {"edge": "documents", **self.buckets["documents"].take(t)}
         status = "shed" if e["status"] == "shed" else e["status"]
         return self._decision([e], status, e.get("reason"), t)
 
     def admit_email(self, t: float, sender: str, thread_id: str) -> dict:
+        """Apply inbox caps and both email buckets, refunding capacity on shedding."""
         edges: list[dict] = []
         hist = self._sender.setdefault(sender.lower(), deque())
         while hist and t - hist[0] >= 3600:
@@ -361,6 +370,7 @@ class IngressMeter:
         return self._decision(edges, status, None, t)
 
     def snapshot(self) -> dict:
+        """Return current bucket balances, tracked inbox counts, and configured caps."""
         return {
             "buckets": {
                 k: {

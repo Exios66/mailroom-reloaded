@@ -15,6 +15,7 @@ runner = CliRunner()
 
 
 def test_serve_is_registered_with_documented_options():
+    """Verify sandbox serve exposes the documented command-line options."""
     res = runner.invoke(cli.app, ["sandbox", "serve", "--help"])
     assert res.exit_code == 0
     for opt in (
@@ -30,6 +31,7 @@ def test_serve_is_registered_with_documented_options():
 
 
 def test_serve_defaults_are_loopback_8100_smoke():
+    """Verify serve defaults to loopback port 8100 and the offline smoke set."""
     import inspect
 
     from mailroom_reloaded.sandbox.server.cli import serve
@@ -43,6 +45,7 @@ def test_serve_defaults_are_loopback_8100_smoke():
 
 
 def test_off_loopback_bind_requires_token(monkeypatch):
+    """Verify an unauthenticated non-loopback bind is refused by default."""
     monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", raising=False)
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     res = runner.invoke(cli.app, ["sandbox", "serve", "--host", "0.0.0.0"])
@@ -51,6 +54,7 @@ def test_off_loopback_bind_requires_token(monkeypatch):
 
 
 def test_bad_arguments_exit_nonzero(monkeypatch):
+    """Verify missing content and invalid egress profiles return error exit codes."""
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     assert (
         runner.invoke(
@@ -64,6 +68,7 @@ def test_bad_arguments_exit_nonzero(monkeypatch):
 
 
 def test_content_spec_resolution(tmp_path):
+    """Verify smoke and directory resolution and errors for unavailable content."""
     assert resolve_content_spec("smoke").name == "smoke"
     assert resolve_content_spec(str(tmp_path)) == tmp_path
     with pytest.raises(ContentSpecError):

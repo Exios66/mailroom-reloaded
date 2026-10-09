@@ -16,6 +16,7 @@ from mailroom_reloaded.sandbox.server.guard import (
 
 
 def test_guard_blocks_remote_connect_resolve_and_smtp():
+    """Verify remote sockets, DNS, and SMTP are blocked and patches are restored."""
     original = socket.socket.connect
     with NetworkGuard() as g:
         with pytest.raises(NetworkBlocked):
@@ -33,6 +34,7 @@ def test_guard_blocks_remote_connect_resolve_and_smtp():
 
 
 def test_guard_allows_loopback_only():
+    """Verify a real loopback connection succeeds and its destination is recorded."""
     srv = socket.socket()
     srv.bind(("127.0.0.1", 0))
     srv.listen(1)
@@ -65,12 +67,14 @@ def test_full_flow_opened_only_loopback_sockets(live):
 
 @pytest.mark.parametrize("resolver", ["gethostbyname", "gethostbyname_ex"])
 def test_legacy_resolvers_check_before_delegating_and_restore(monkeypatch, resolver):
+    """Verify legacy DNS wrappers reject remote hosts before calling the resolver."""
     calls = []
     result = (
         "127.0.0.1" if resolver == "gethostbyname" else ("localhost", [], ["127.0.0.1"])
     )
 
     def original(host):
+        """Record calls to the stub resolver and return its configured loopback result."""
         calls.append(host)
         return result
 

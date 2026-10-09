@@ -40,6 +40,7 @@ class NetworkGuard:
     """Install/uninstall socket and smtplib patches; usable as a context manager."""
 
     def __init__(self) -> None:
+        """Initialize attempt logs and patch state without installing the guard."""
         self.blocked: list[tuple[str, str]] = []
         self.connects: list[tuple[str, int]] = []
         self.installed = False
@@ -48,6 +49,7 @@ class NetworkGuard:
 
     # -- recording
     def _check(self, kind: str, host: Any, port: Any = None) -> None:
+        """Record loopback connects or log and reject a non-loopback network attempt."""
         if is_loopback_host(host):
             if kind == "connect":
                 with self._lock:
@@ -58,12 +60,14 @@ class NetworkGuard:
         raise NetworkBlocked(f"sandbox network guard: refused {kind} to {host!r}")
 
     def _addr_host(self, address: Any) -> tuple[Any, Any]:
+        """Extract a host and optional port from a socket address."""
         if isinstance(address, tuple) and address:
             return address[0], address[1] if len(address) > 1 else None
         return address, None  # AF_UNIX path (str/bytes): local, allowed
 
     # -- install
     def install(self) -> Self:
+        """Install process-wide socket and SMTP guards, preserving the original methods."""
         if self.installed:
             return self
         guard = self
@@ -83,28 +87,34 @@ class NetworkGuard:
         }
 
         def connect(self_sock, address):  # type: ignore[no-untyped-def]
+            """Check IP socket destinations before delegating to the original connect."""
             if isinstance(address, tuple):
                 guard._check("connect", *guard._addr_host(address))
             return orig_connect(self_sock, address)
 
         def connect_ex(self_sock, address):  # type: ignore[no-untyped-def]
+            """Check IP destinations before delegating to the original connect_ex."""
             if isinstance(address, tuple):
                 guard._check("connect", *guard._addr_host(address))
             return orig_connect_ex(self_sock, address)
 
         def getaddrinfo(host, *args, **kwargs):  # type: ignore[no-untyped-def]
+            """Reject remote hosts before calling the original address resolver."""
             guard._check("resolve", host)
             return orig_getaddrinfo(host, *args, **kwargs)
 
         def gethostbyname(host):  # type: ignore[no-untyped-def]
+            """Check the host before delegating to the original IPv4 resolver."""
             guard._check("resolve", host)
             return orig_gethostbyname(host)
 
         def gethostbyname_ex(host):  # type: ignore[no-untyped-def]
+            """Check the host before delegating to the extended IPv4 resolver."""
             guard._check("resolve", host)
             return orig_gethostbyname_ex(host)
 
         def smtp_connect(self_smtp, host="localhost", port=0, source_address=None):  # type: ignore[no-untyped-def]
+            """Record and reject every SMTP connection, including loopback attempts."""
             with guard._lock:
                 guard.blocked.append(("smtp", f"{host}:{port}"))
             raise NetworkBlocked(
@@ -121,6 +131,7 @@ class NetworkGuard:
         return self
 
     def uninstall(self) -> None:
+        """Restore original socket and SMTP methods if this guard is installed."""
         if not self.installed:
             return
         socket.socket.connect = self._orig["connect"]  # type: ignore[method-assign]
@@ -132,12 +143,15 @@ class NetworkGuard:
         self.installed = False
 
     def __enter__(self) -> Self:
+        """Install the guard when entering its context."""
         return self.install()
 
     def __exit__(self, *exc: object) -> None:
+        """Restore the original network methods when leaving the context."""
         self.uninstall()
 
     def summary(self) -> dict:
+        """Snapshot guard status, connection counts, and the latest blocked attempts."""
         with self._lock:
             return {
                 "installed": self.installed,

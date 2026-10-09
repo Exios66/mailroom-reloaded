@@ -66,9 +66,17 @@ class WireMessage:
 class CorrespondentTools(Protocol):
     """Read-only tool surface (protocol 1.1): no pipeline-mutating tools exist."""
 
-    def registry(self) -> dict[str, dict]: ...
-    def lookup_catalog(self) -> list[dict]: ...
-    def read_attachment_text(self, att: AttachmentView) -> str: ...
+    def registry(self) -> dict[str, dict]:
+        """Return registered clients and their verified contact information."""
+        ...
+
+    def lookup_catalog(self) -> list[dict]:
+        """Return document records available to correspondence decisions."""
+        ...
+
+    def read_attachment_text(self, att: AttachmentView) -> str:
+        """Read attachment text, refusing access to quarantined attachments."""
+        ...
 
 
 @dataclass
@@ -101,6 +109,7 @@ class CorrespondentResult:
     llm_calls: int = 0
 
     def to_dict(self) -> dict:
+        """Serialize the result and its nested dataclasses as a dictionary."""
         return asdict(self)
 
 
@@ -110,7 +119,9 @@ class CorrespondentAgent(Protocol):
 
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
-    ) -> CorrespondentResult: ...
+    ) -> CorrespondentResult:
+        """Triage a wire-visible message using the supplied read-only tools."""
+        ...
 
 
 # --------------------------------------------------------------------------- heuristics
@@ -206,10 +217,12 @@ _HOMOGLYPH = str.maketrans({"0": "o", "1": "l", "3": "e", "5": "s", "-": "", "_"
 
 
 def _norm_domain(domain: str) -> str:
+    """Normalize common lookalike characters for heuristic domain comparison."""
     return domain.lower().translate(_HOMOGLYPH).replace("rn", "m").replace("vv", "w")
 
 
 def _lev(a: str, b: str) -> int:
+    """Return the Levenshtein edit distance between two strings."""
     prev = list(range(len(b) + 1))
     for i, ca in enumerate(a, 1):
         cur = [i]
@@ -220,14 +233,17 @@ def _lev(a: str, b: str) -> int:
 
 
 def _ext(name: str) -> str:
+    """Return the lowercase final filename extension, or an empty string."""
     return "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 
 def _domain(addr: str) -> str:
+    """Return the lowercase email domain, or an empty string without an at-sign."""
     return addr.rsplit("@", 1)[-1].lower() if "@" in addr else ""
 
 
 def _titles(text: str) -> str:
+    """Extract the first nonblank text line with parenthesized annotations removed."""
     first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
     return re.sub(r"\s*\(.*?\)\s*", " ", first).strip()
 
@@ -276,6 +292,7 @@ class StandInCorrespondent:
     def _resolve_client(
         self, msg: WireMessage, registry: dict[str, dict]
     ) -> tuple[dict | None, str | None]:
+        """Match a sender to registry data using addresses, domains, or name hints."""
         addr, dom = msg.from_addr.lower(), _domain(msg.from_addr)
         for cid, c in registry.items():
             if addr in [a.lower() for a in c.get("verified_addresses", [])]:
@@ -312,6 +329,7 @@ class StandInCorrespondent:
         return None, None
 
     def _trust(self, match: dict | None, auth: dict[str, str]) -> tuple[str, list[str]]:
+        """Derive sender trust and reasons from the registry match and email auth."""
         vals = [auth.get(k, "none") for k in ("spf", "dkim", "dmarc")]
         ok = all(v == "pass" for v in vals)
         bad = any(v in {"fail", "softfail", "permerror"} for v in vals)
@@ -336,6 +354,7 @@ class StandInCorrespondent:
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Apply offline safety and triage rules to produce signals, lanes, and drafts."""
         text = f"{msg.subject}\n{msg.body}"
         reasons: list[str] = []
         registry = tools.registry()
@@ -360,6 +379,7 @@ class StandInCorrespondent:
         agent = {"name": self.name, "stand_in": True, "llm_calls": 0}
 
         def result(**kw: Any) -> CorrespondentResult:
+            """Build a triage result from shared message context and branch overrides."""
             base = {
                 "agent": agent,
                 "prefilter": None,
@@ -379,6 +399,7 @@ class StandInCorrespondent:
             return CorrespondentResult(**base)
 
         def lanes(default: str, why: str) -> list[dict]:
+            """Assign attachment lanes, overriding the default for missing or risky files."""
             out = []
             for a in msg.attachments:
                 if not a.resolved:
@@ -723,6 +744,7 @@ class StandInCorrespondent:
     def _callback(
         self, client_view: dict | None, registry: dict, reason: str
     ) -> dict | None:
+        """Build a callback task using registry contact details when a client is known."""
         if not client_view:
             return {
                 "client": None,
@@ -741,6 +763,7 @@ class StandInCorrespondent:
         }
 
     def _relations(self, msg, text, lane_list, tools, trust, reasons) -> list[dict]:
+        """Propose catalog relations from hashes, text, references, and sender trust."""
         kind = (
             "supersedes"
             if _SUPERSEDE.search(text)
@@ -812,6 +835,7 @@ class StandInCorrespondent:
     def _drafts(
         self, msg, intent, trust, lane_list, relations, tools, entities
     ) -> list[Draft]:
+        """Render permitted reply drafts from intent, trust, and available catalog facts."""
         if trust in {"hostile", "suspicious"} or intent in {
             "auto_reply",
             "bounce",

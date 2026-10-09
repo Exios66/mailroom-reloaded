@@ -11,6 +11,7 @@ from mailroom_reloaded.sandbox.server.service import SandboxService
 
 
 def test_health_ui_and_static_are_offline(live):
+    """Verify public health and UI assets load with a local-only content policy."""
     client, _svc, _ = live
     assert client.get("/health").json()["service"] == "mailroom-sandbox"
     ui = client.get("/ui")
@@ -25,6 +26,7 @@ def test_health_ui_and_static_are_offline(live):
 
 
 def test_status_scenarios_policy(live):
+    """Verify status, scenario metadata, and vendored policies are exposed correctly."""
     client, _svc, _ = live
     st = client.get(f"{API}/status").json()
     assert st["stand_ins"]["correspondent"]["stand_in"] is True
@@ -51,6 +53,7 @@ def test_status_scenarios_policy(live):
 
 
 def _trace(client, scenario: str, index: int = 0) -> dict:
+    """Fetch the trace for an indexed email in a scenario."""
     mid = [m for m in messages_of(client, scenario) if m["kind"] == "email"][index][
         "id"
     ]
@@ -58,6 +61,7 @@ def _trace(client, scenario: str, index: int = 0) -> dict:
 
 
 def test_a1_trace_status_request_draft_waits_for_approval(live):
+    """Verify A1 produces a catalog-backed draft that awaits human approval."""
     client, _svc, _ = live
     t = _trace(client, "A1_status_inquiry")
     c = t["correspondent"]
@@ -84,6 +88,7 @@ def test_a1_trace_status_request_draft_waits_for_approval(live):
 
 
 def test_e1_trace_quarantine_no_reply_registry_callback_and_benign_companion(live):
+    """Verify E1 quarantines the attack and processes its benign companion safely."""
     client, _svc, _ = live
     attack = _trace(client, "E1_lookalike_wire_change", 0)
     c = attack["correspondent"]
@@ -150,12 +155,14 @@ def test_flows_interoperate_on_same_messages(live):
 
 
 def test_conformance_all_smoke_scenarios_pass(live):
+    """Verify all six smoke scenarios match their expected outcomes."""
     client, _svc, _ = live
     d = client.get(f"{API}/conformance").json()
     assert d["fail"] == 0 and d["pass"] == 6, d
 
 
 def test_egress_sink_blocks_by_profile_and_never_transmits(live):
+    """Verify egress approval enforces recipient routes and only captures mail."""
     client, _svc, _ = live
     items = {i["to"]: i for i in client.get(f"{API}/outbox").json()["outbox"]}
     f1 = items["tomas.reyes.personal@mailbox.sandbox.invalid"]
@@ -180,6 +187,7 @@ def test_egress_sink_blocks_by_profile_and_never_transmits(live):
 
 
 def test_held_attachment_needs_human_release_and_quarantine_never_opens(live):
+    """Verify held attachments can be released while quarantine rejects release."""
     client, _svc, _ = live
     f1 = messages_of(client, "F1_personal_address_lockout")[0]
     t = client.get(f"{API}/messages/{f1['id']}/trace").json()
@@ -199,6 +207,7 @@ def test_held_attachment_needs_human_release_and_quarantine_never_opens(live):
 
 
 def test_token_required_when_configured(monkeypatch, tmp_path):
+    """Verify configured tokens protect JSON routes while health and UI stay public."""
     monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
     svc = SandboxService(load_sandbox_content(), tmp_path / "s")
     client = TestClient(create_sandbox_app(svc))  # no lifespan: nothing starts

@@ -44,6 +44,7 @@ _MARKER = re.compile(r"\[confidence:(\d?\.\d+)\]")
 
 
 def _marker_confidence(body: dict) -> float | None:
+    """Read the first confidence marker from chat messages and clamp it to [0, 1]."""
     for message in body.get("messages", []):
         content = message.get("content")
         if isinstance(content, list):
@@ -57,15 +58,18 @@ def _marker_confidence(body: dict) -> float | None:
 
 
 def build_mock_app(stats: dict[str, int] | None = None) -> FastAPI:
+    """Build an offline completion API that records request counts in the given mapping."""
     stats = stats if stats is not None else {}
     app = FastAPI(title="sandbox-mock-llm")
 
     @app.get("/health")
     def health() -> dict:
+        """Return the mock endpoint liveness status."""
         return {"status": "ok"}
 
     @app.post("/v1/chat/completions")
     def complete(body: dict) -> dict:
+        """Return synthetic non-streaming completions for supported request schemas."""
         if body.get("stream"):
             raise HTTPException(400, "The mock supports non-streaming requests only")
         schema = (
@@ -110,6 +114,7 @@ class MockLLM:
     """Run the mock on an ephemeral 127.0.0.1 port in a daemon thread."""
 
     def __init__(self) -> None:
+        """Initialize counters and inactive loopback server resources."""
         self.stats: dict[str, int] = {}
         self.base_url = ""
         self._server: Any = None
@@ -117,6 +122,7 @@ class MockLLM:
         self._sock: socket.socket | None = None
 
     def start(self) -> MockLLM:
+        """Start the mock on an ephemeral loopback port or raise if startup times out."""
         import uvicorn
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -141,6 +147,7 @@ class MockLLM:
         return self
 
     def stop(self) -> None:
+        """Request server shutdown, join its thread, and close the listening socket."""
         if self._server is not None:
             self._server.should_exit = True
         if self._thread is not None:
@@ -150,4 +157,5 @@ class MockLLM:
         self._server = self._thread = self._sock = None
 
     def structured_calls(self) -> int:
+        """Return the number of structured classification and extraction requests."""
         return self.stats.get("structured", 0)
