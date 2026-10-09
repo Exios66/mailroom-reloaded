@@ -1,0 +1,57 @@
+{
+ "folds": [
+  {
+   "held_out_failed_checks": {},
+   "held_out_family": "A",
+   "held_out_n": 2,
+   "held_out_pass": 2,
+   "held_out_rate": 1.0,
+   "training_n": 4,
+   "training_pass": 4,
+   "training_rate": 1.0
+  },
+  {
+   "held_out_failed_checks": {},
+   "held_out_family": "B",
+   "held_out_n": 1,
+   "held_out_pass": 1,
+   "held_out_rate": 1.0,
+   "training_n": 5,
+   "training_pass": 5,
+   "training_rate": 1.0
+  },
+  {
+   "held_out_failed_checks": {},
+   "held_out_family": "D",
+   "held_out_n": 1,
+   "held_out_pass": 1,
+   "held_out_rate": 1.0,
+   "training_n": 5,
+   "training_pass": 5,
+   "training_rate": 1.0
+  },
+  {
+   "held_out_failed_checks": {},
+   "held_out_family": "E",
+   "held_out_n": 1,
+   "held_out_pass": 1,
+   "held_out_rate": 1.0,
+   "training_n": 5,
+   "training_pass": 5,
+   "training_rate": 1.0
+  },
+  {
+   "held_out_failed_checks": {},
+   "held_out_family": "F",
+   "held_out_n": 1,
+   "held_out_pass": 1,
+   "held_out_rate": 1.0,
+   "training_n": 5,
+   "training_pass": 5,
+   "training_rate": 1.0
+  }
+ ],
+ "macro_mean_held_out_rate": 1.0,
+ "micro_pass_rate": 1.0,
+ "protocol": "leave-one-family-out over series letters"
+}

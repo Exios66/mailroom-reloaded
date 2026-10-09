@@ -1,0 +1,74 @@
+{
+ "all": {
+  "fail": 0,
+  "not_run": 0,
+  "pass": 6,
+  "shed": 0,
+  "total": 6
+ },
+ "failed_checks": {},
+ "heldout": {
+  "fail": 0,
+  "not_run": 0,
+  "pass": 2,
+  "shed": 0,
+  "total": 2
+ },
+ "scenarios": [
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "A1_status_inquiry",
+   "shed_messages": 0,
+   "split": "tuned",
+   "verdict": "pass"
+  },
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "A3_supersession",
+   "shed_messages": 0,
+   "split": "tuned",
+   "verdict": "pass"
+  },
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "B1_amendment_by_title",
+   "shed_messages": 0,
+   "split": "heldout",
+   "verdict": "pass"
+  },
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "D1_vendor_cold_outreach",
+   "shed_messages": 0,
+   "split": "tuned",
+   "verdict": "pass"
+  },
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "E1_lookalike_wire_change",
+   "shed_messages": 0,
+   "split": "tuned",
+   "verdict": "pass"
+  },
+  {
+   "error_messages": 0,
+   "failed_checks": [],
+   "scenario": "F1_personal_address_lockout",
+   "shed_messages": 0,
+   "split": "heldout",
+   "verdict": "pass"
+  }
+ ],
+ "tuned": {
+  "fail": 0,
+  "not_run": 0,
+  "pass": 4,
+  "shed": 0,
+  "total": 4
+ }
+}
