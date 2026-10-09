@@ -194,7 +194,9 @@ untouched), prints a per-scenario table, the per-fold report and the failed-chec
 No scenario was shed when run alone. Committed baselines: `tests/sandbox/conformance_baseline.json`
 and `tests/sandbox/lofo_baseline.json`. They were regenerated on this branch from the committed
 smoke fixture (6 scenarios), because the v0.5.0 bundle that `content.lock` pins is not published
-and could not be pulled. They are **not** the 88-scenario pack figures quoted below.
+and could not be pulled. They are **not** the 88-scenario pack figures quoted below. The LOFO
+macro of 1.000 on six tuning scenarios is not a generalisation measure. Regenerate both files with
+`scripts/sandbox_lofo.sh <real pack dir>` once v0.5.0 is published.
 
 ### Correspondent stand-in v2 (`rule-based-standin/v2`)
 
@@ -307,13 +309,13 @@ owner.
 | D3, A6 | intent, signal | negated/dual urgency (A6 expects complaint with urgent; D3 a status check) | 3 |
 
 Optional LLM-backed Correspondent (`--correspondent llm --llm-base-url http://127.0.0.1:PORT/v1
-[--llm-model NAME]`, default off): only the triage step is delegated; the endpoint must be on
-loopback; the prompt is built from the delegation matrix; output is validated against a strict
-JSON schema and limited to benign intents, including `legal_notice`. Safety-screen
-findings precede triage; deterministic post-triage rules may also add attack signals,
-including possible impersonation for suspicious legal notices. Any transport, status,
-parse, schema or disallowed-intent failure falls back to the rules; hostile-no-reply
-and quarantine are enforced
+[--llm-model NAME]`, default off): the endpoint must be on loopback; the prompt is built from the
+delegation matrix; output is validated against a strict JSON schema and limited to benign intents
+(`legal_notice` included in the bypass). The rules run first. Mail the rules flag (trust
+`hostile` or `suspicious`, or any `possible_attack` signal), and attack or legal-notice intents,
+are decided by the rules and never sent to the model, so the model cannot downgrade a rules flag.
+The model only triages mail the rules leave clean. Any transport, status, parse, schema or
+disallowed-intent failure falls back to the rules; hostile-no-reply and quarantine are enforced
 in code after the model. **Its quality is unmeasured**: no real model was available, it is
 tested only against the in-process mock (`[mock-intent:...]` markers).
 
