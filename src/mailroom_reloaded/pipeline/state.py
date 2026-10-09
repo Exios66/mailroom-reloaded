@@ -59,6 +59,7 @@ class MailroomState(BaseModel):
     # retry counters
     classify_attempts: int = 0
     extract_attempts: int = 0
+    boss_reassignments: int = 0
     resorted: bool = False
 
     # trail and run outputs

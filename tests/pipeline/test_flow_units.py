@@ -649,3 +649,21 @@ def test_arbiter_cannot_retry_forever(flow, monkeypatch):
     assert len(calls) == 3
     escalation.assert_called_once_with('human_review', 'arbiter_retries_spent')
 
+
+def test_boss_cannot_reassign_forever(flow, monkeypatch):
+    flow._resume_from = 'boss'
+    monkeypatch.setattr(flow, '_extract_route', lambda: 'do_boss')
+    calls = []
+
+    def boss():
+        calls.append('boss')
+        assert len(calls) <= 3, 'unbounded boss loop'
+        flow.state.boss = BossDecision(action='reassign_class', doc_type='contract')
+
+    monkeypatch.setattr(flow, '_node_boss', boss)
+    monkeypatch.setattr(flow, 'extract', Mock())
+    escalation = Mock()
+    monkeypatch.setattr(flow, '_escalation', escalation)
+    assert flow._drive().status == 'parked'
+    assert len(calls) == 2
+    assert escalation.call_args_list[-1] == (('human_review', 'boss_reassignments_spent'), {})

@@ -886,6 +886,10 @@ class MailroomFlow(Flow[MailroomState]):
                 action = state.boss.action if state.boss is not None else "accept"
                 trace_capture.emit_event("boss", action=action)
                 if action == "reassign_class":
+                    if state.boss_reassignments >= 1:
+                        self._escalation("human_review", "boss_reassignments_spent")
+                        return self._park("boss_reassignments_spent")
+                    state.boss_reassignments += 1
                     self._retry_kind = "retry_extract"
                     self._resume_done.discard("extract")
                     node = "extract"

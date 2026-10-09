@@ -412,3 +412,12 @@ def test_arbiter_retry_budget_park_reason_is_kept(engine) -> None:
     assert tl is not None
     parked = next(e for e in tl.events if e.kind == "parked")
     assert parked.payload == {"reason": "arbiter_retries_spent"}
+
+
+def test_boss_reassignment_park_reason_is_kept(engine) -> None:
+    _chain(engine, "dz", [("human_review", "parked", {"reason": "boss_reassignments_spent"}, 3.5)])
+    _eval(engine, "live-1", "z.pdf", "dz")
+    tl = timeline_from_audit("run", "live-1", engine=engine)
+    assert tl is not None
+    parked = next(e for e in tl.events if e.kind == "parked")
+    assert parked.payload == {"reason": "boss_reassignments_spent"}
