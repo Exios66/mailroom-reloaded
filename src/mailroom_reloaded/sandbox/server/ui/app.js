@@ -88,6 +88,7 @@ async function renderTab() {
   const body = $("tab-body");
   try {
     if (state.tab === "messages") body.replaceChildren(await messagesView());
+    else if (state.tab === "boss") body.replaceChildren(await bossView());
     else if (state.tab === "outbox") body.replaceChildren(await outboxView());
     else if (state.tab === "events") body.replaceChildren(await eventsView());
     else if (state.tab === "conformance") body.replaceChildren(await conformanceView());
@@ -107,6 +108,77 @@ async function messagesView() {
       el("td", {}, m.flows_done.join(", "))));
   }
   return el("div", {}, head, d.messages.length ? t : el("p", { class: "muted" }, "No messages yet. Inject a scenario."));
+}
+// Shared across review cards and the mailbox, including views rebuilt by polling.
+const decidingMessages = new Set();
+function syncDecisionButtons() {
+  document.querySelectorAll("button[data-decision-message]").forEach((b) => {
+    b.disabled = decidingMessages.has(b.dataset.decisionMessage);
+  });
+}
+async function decide(messageId, decision, reason) {
+  if (decidingMessages.has(messageId)) return;
+  decidingMessages.add(messageId);
+  syncDecisionButtons();
+  try {
+    await post("/boss/decisions", { message_id: messageId, decision, reason });
+    await refreshAll();
+    await pollMailbox();
+  } finally {
+    decidingMessages.delete(messageId);
+    syncDecisionButtons();
+  }
+}
+/**
+ * Build a review card; withButtons enables decisions using the entered reason.
+ * Decision clicks post to the API and refresh views, alerting on errors.
+ */
+function reviewCard(c, withButtons) {
+  const reason = el("input", { placeholder: "reason (recorded)", size: 30 });
+  const onDecide = (decision) => guarded(() => decide(c.message_id, decision, reason.value));
+  const decisionAttrs = { "data-decision-message": c.message_id, disabled: decidingMessages.has(c.message_id) };
+  return el("div", { class: "flow e" },
+    el("div", {}, chip(c.state, c.state === "pending" ? "warn" : c.state === "released" ? "ok" : "bad"), " ", c.message_id, " ",
+      c.attack_classes.map((a) => chip(a + "/" + c.priority, "bad")), " ", chip(c.category)),
+    el("div", { class: "muted" }, "held attachments: " + (c.attachments.join(", ") || "none") + " | signal channel: possible_attack"),
+    c.decision ? el("div", {}, `decision: ${c.decision} by ${c.decided_by}: ${c.reason || ""}`) : null,
+    withButtons ? el("div", {}, reason, " ", el("button", { ...decisionAttrs, class: "small primary", onclick: () => onDecide("legitimate") }, "Release (legitimate)"), " ",
+      el("button", { ...decisionAttrs, class: "small danger", onclick: () => onDecide("quarantine") }, "Quarantine")) : null);
+}
+// ---------------------------------------------------------------- boss mailbox dock (always live)
+const mbx = { entries: [], last: 0, open: false, timer: null };
+/**
+ * Refresh cached entries, the unread badge, and the open dock without marking entries read.
+ * Fetch at most 5,000 entries; suppress polling errors and retain existing content on fetch failure.
+ */
+async function pollMailbox() {
+  try {
+    const p = await api("/boss/pending");
+    const upd = await api("/boss/mailbox?limit=5000");  // statuses change, so re-read the whole queue
+    mbx.entries = upd.entries; mbx.last = upd.last_seq;
+    const pending = new Set(p.pending.map((c) => c.message_id));
+    $("mbx-badge").textContent = String(window.sbxMailbox.unread(mbx.entries, pending));
+    $("mbx-badge").className = "chip " + (pending.size ? "bad" : "");
+    if (mbx.open) $("mbx-body").replaceChildren(window.sbxMailbox.renderMailbox(mbx.entries, {
+      pending, isDeciding: (mid) => decidingMessages.has(mid),
+      onDecide: (mid, decision, reason) => guarded(() => decide(mid, decision, reason)),
+    }));
+  } catch (e) { /* offline or no token yet: keep the last view */ }
+}
+$("mbx-toggle").addEventListener("click", () => { mbx.open = !mbx.open; $("mbx-dock").classList.toggle("open", mbx.open); pollMailbox(); });
+mbx.timer = setInterval(pollMailbox, 2000);
+pollMailbox();
+
+/** Build pending and decided review cards; API failures reject the returned promise. */
+async function bossView() {
+  const p = await api("/boss/pending");
+  const d = await api("/boss/decisions");
+  const wrap = el("div", {}, el("p", { class: "muted" }, "Hostile mail arrives here from the Correspondent's possible_attack signals. The message and attachments are held and the sender gets no reply until you decide."));
+  for (const c of p.pending) wrap.append(reviewCard(c, true));
+  if (!p.pending.length) wrap.append(el("p", { class: "muted" }, "Nothing is waiting for the Boss."));
+  if (d.decisions.length) wrap.append(el("h3", {}, "Decided"));
+  for (const c of d.decisions) wrap.append(reviewCard(c, false));
+  return wrap;
 }
 async function outboxView() {
   const d = await api("/outbox");
@@ -201,6 +273,7 @@ function traceSections(t) {
     out.push(el("h3", {}, "Boss Desk actions ", chip("STAND-IN", "warn")));
     out.push(el("div", {}, t.bossdesk.map((a) => el("div", {}, chip(a.state, stateKind(a.state)), " ", a.action + (a.params ? "(" + a.params + ")" : ""), " ", el("span", { class: "muted" }, a.source + (a.why ? " - " + a.why : ""))))));
   }
+  if (t.boss_review) { out.push(el("h3", {}, "Boss review")); out.push(reviewCard(t.boss_review, t.boss_review.state === "pending")); }
   out.push(el("h3", {}, "3. Flow B: real pipeline (isolated data dir, mock LLM)"));
   if (!t.pipeline.length) out.push(el("p", { class: "muted" }, "No attachment reached the pipeline."));
   for (const h of t.pipeline) {

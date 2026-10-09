@@ -23,10 +23,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mailroom_reloaded.sandbox.server.bossdesk import StandInBossDesk
+from mailroom_reloaded.sandbox.server.bossdesk import CATEGORIES, StandInBossDesk
 from mailroom_reloaded.sandbox.server.content import SandboxContent
 from mailroom_reloaded.sandbox.server.correspondent import (
     AttachmentView,
+    CorrespondentResult,
     WireMessage,
     create_correspondent,
 )
@@ -38,11 +39,46 @@ from mailroom_reloaded.sandbox.server.ingress import (
     plan_scenario,
     thread_id_for,
 )
+from mailroom_reloaded.sandbox.server.mailbox import BOSS, CORRESPONDENT, BossMailbox
 from mailroom_reloaded.sandbox.server.pipeline_runner import PipelineRunner
 
 __all__ = ["FLOWS", "SandboxService"]
 
 FLOWS = ("correspondent", "pipeline")
+
+
+def hostile_forward(wire: WireMessage, res: CorrespondentResult) -> dict | None:
+    """Build the Correspondent -> Boss mailbox forward for a possible-attack result.
+
+    Derived from the message's typed ``possible_attack`` signals so the mailbox is the
+    only route between the two roles. Return ``None`` when the result reports no
+    attack, so benign mail is never forwarded.
+    """
+    attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
+    if not attacks:
+        return None
+    return {
+        "kind": "hostile_forward",
+        "payload": {
+            "message": {
+                "message_id": wire.message_id,
+                "from": wire.from_addr,
+                "subject": wire.subject,
+                "body": wire.body,
+                "auth": dict(wire.auth),
+            },
+            "attachment_lanes": [dict(x) for x in res.attachment_lanes],
+            "attack_classes": sorted(
+                {s.get("attack_class", "other") for s in attacks}
+            ),
+            "signals": [dict(s) for s in attacks],
+            "trust": res.trust,
+            "trust_reasons": list(res.trust_reasons),
+            "reasoning": list(res.reasons),
+            "summary": res.summary,
+            "held": "message and attachments are held; no reply sent",
+        },
+    }
 
 
 def extract_text(path: str) -> str:
@@ -137,6 +173,8 @@ class SandboxService:
         self.events: list[dict] = []
         self.docs: dict[str, dict] = {}
         self.batches: list[dict] = []
+        self.reviews: dict[str, dict] = {}
+        self.mailbox = BossMailbox(self.state_dir / "boss_mailbox.sqlite", self.emit)
         self._mseq = 0
         self._bseq = 0
         self._sim_next = 0.0
@@ -166,6 +204,7 @@ class SandboxService:
             self._worker.join(timeout=10)
             self._worker = None
         self._save()
+        self.mailbox.close()
         self.pipeline.deactivate()
 
     def _run_worker(self) -> None:
@@ -207,6 +246,7 @@ class SandboxService:
                 "events": self.events,
                 "docs": self.docs,
                 "batches": self.batches,
+                "reviews": self.reviews,
                 "mseq": self._mseq,
                 "bseq": self._bseq,
                 "sim_next": self._sim_next,
@@ -232,6 +272,7 @@ class SandboxService:
             self.events = blob.get("events", [])
             self.docs = blob.get("docs", {})
             self.batches = blob.get("batches", [])
+            self.reviews = blob.get("reviews", {})
             self._mseq, self._bseq = blob.get("mseq", 0), blob.get("bseq", 0)
             self._sim_next = blob.get("sim_next", 0.0)
             self.autonomy = blob.get("autonomy", self.autonomy)
@@ -256,6 +297,8 @@ class SandboxService:
         with self._work_lock, self._lock:
             self._drain_queue()
             self.messages, self.events, self.docs, self.batches = {}, [], {}, []
+            self.reviews = {}
+            self.mailbox.clear()
             self._mseq = self._bseq = 0
             self._sim_next = 0.0
             self.meter.reset()
@@ -633,27 +676,10 @@ class SandboxService:
                 self.emit("boss.action", mid, a)
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
-            for d in res.drafts:
-                with self._lock:
-                    item = self.outbox.add_draft(
-                        message_id=mid,
-                        thread_id=msg["thread_id"],
-                        draft={
-                            "to": d.to,
-                            "subject": d.subject,
-                            "body": d.body,
-                            "intent": d.intent,
-                            "evidence": d.evidence,
-                        },
-                    )
-                    msg["outbox_ids"].append(item["id"])
-                    if self.autonomy == "sandbox":
-                        self.outbox.approve(
-                            item["id"], by="boss-desk(autonomy=sandbox)"
-                        )
-                        for a in msg["bossdesk"]:
-                            if a["action"] == "approve_outbound":
-                                a["state"] = "done"
+            self._queue_drafts(msg, res.drafts)
+            fwd = hostile_forward(wire, res)
+            if fwd is not None:
+                self._forward_to_boss(msg, fwd)
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:
             if "correspondent" not in msg["flows_done"]:
@@ -689,6 +715,268 @@ class SandboxService:
                     )
                     self._run_pipeline_for(msg, entry, a["path"])
             msg["flows_done"].append("pipeline")
+
+    def _queue_drafts(self, msg: dict, drafts: list) -> None:
+        """Add drafts to the virtual outbox and post approval requests to the mailbox.
+
+        Sandbox autonomy immediately approves them through the outbox policy gates
+        and records the response on the mailbox. Outbox and mailbox errors propagate.
+        """
+        for d in drafts:
+            with self._lock:
+                item = self.outbox.add_draft(
+                    message_id=msg["id"],
+                    thread_id=msg["thread_id"],
+                    draft={
+                        "to": d.to,
+                        "subject": d.subject,
+                        "body": d.body,
+                        "intent": d.intent,
+                        "evidence": d.evidence,
+                    },
+                )
+                msg["outbox_ids"].append(item["id"])
+                self.mailbox.post(
+                    sender=CORRESPONDENT,
+                    recipient=BOSS,
+                    kind="draft_for_approval",
+                    thread_id=msg["thread_id"],
+                    message_id=msg["id"],
+                    payload={
+                        "outbox_id": item["id"],
+                        "to": d.to,
+                        "subject": d.subject,
+                        "intent": d.intent,
+                    },
+                )
+                if self.autonomy == "sandbox":
+                    self.outbox.approve(item["id"], by="boss-desk(autonomy=sandbox)")
+                    self._mailbox_answer_draft(item, True, "boss-desk(autonomy=sandbox)")
+                    for a in msg["bossdesk"]:
+                        if a["action"] == "approve_outbound":
+                            a["state"] = "done"
+
+    # ------------------------------------------------------------------ boss_mailbox
+    def _mailbox_answer_draft(self, item: dict, approved: bool, by: str) -> None:
+        """Boss -> Correspondent: approval or rejection of a draft, on the mailbox."""
+        mid = item["message_id"]
+        req = next(
+            (
+                e
+                for e in self.mailbox.list(message_id=mid, kind="draft_for_approval")
+                if e["payload"].get("outbox_id") == item["id"]
+            ),
+            None,
+        )
+        if req is None:
+            return
+        self.mailbox.set_status(req["id"], "read", BOSS)
+        ans = self.mailbox.post(
+            sender=BOSS,
+            recipient=CORRESPONDENT,
+            kind="approval" if approved else "rejection",
+            thread_id=req["thread_id"],
+            message_id=mid,
+            payload={"outbox_id": item["id"], "by": by},
+            in_reply_to=req["id"],
+        )
+        self.mailbox.set_status(req["id"], "acted", BOSS)
+        self.mailbox.set_status(ans["id"], "read", CORRESPONDENT)
+        self.mailbox.set_status(
+            ans["id"], "acted", CORRESPONDENT, "draft state updated"
+        )
+
+    def _forward_to_boss(self, msg: dict, fwd: dict) -> None:
+        """The Correspondent's own forward goes on the mailbox; the Boss Desk reads it in
+        the same processing step. The message and attachments stay held and nothing goes
+        to the sender or the pipeline until the Boss decides."""
+        entry = self.mailbox.post(
+            sender=CORRESPONDENT,
+            recipient=BOSS,
+            kind=fwd["kind"],
+            thread_id=msg["thread_id"],
+            message_id=msg["id"],
+            payload=fwd["payload"],
+        )
+        entry = self.mailbox.set_status(entry["id"], "read", BOSS)
+        case = self.desk.read_forward(entry)
+        if case is None:
+            return
+        with self._lock:
+            self.reviews[msg["id"]] = case
+        self.emit(
+            "boss.review.pending",
+            msg["id"],
+            {
+                "via": "boss_mailbox",
+                "entry": entry["id"],
+                "attack_classes": case["attack_classes"],
+                "priority": case["priority"],
+                "held_attachments": case["attachments"],
+            },
+        )
+        auto = self.desk.unattended_decision(case, self.autonomy)
+        if auto is not None:
+            self.boss_decide(
+                msg["id"], auto[0], auto[1], by="boss-desk(autonomy=sandbox)"
+            )
+
+    def pending_reviews(self) -> list[dict]:
+        """Return independent copies of pending review cases."""
+        with self._lock:
+            return [
+                copy.deepcopy(c)
+                for c in self.reviews.values()
+                if c["state"] == "pending"
+            ]
+
+    def list_reviews(self) -> list[dict]:
+        """Return independent copies of all review cases."""
+        with self._lock:
+            return [copy.deepcopy(c) for c in self.reviews.values()]
+
+    def boss_decide(
+        self,
+        mid: str,
+        decision: str,
+        reason: str = "",
+        *,
+        category: str | None = None,
+        by: str = "boss",
+    ) -> dict:
+        """Decide a pending review as ``legitimate`` or ``quarantine`` and return a copy.
+
+        Write the decision to the mailbox and apply it in the same step. Release
+        runs resolved attachments when the message selected the pipeline and queues
+        a reply draft; quarantine keeps attachments held. ``category`` defaults to
+        the case category and must be ``phishing``, ``malware``, or ``other``.
+
+        Raise ``KeyError`` for a missing message/review, or ``ValueError`` for an
+        invalid decision/category or a non-pending review. Attachment pipeline
+        failures are recorded per attachment; mailbox, drafting, and persistence
+        errors propagate and may leave partial effects.
+        """
+        if decision not in {"legitimate", "quarantine"}:
+            raise ValueError("decision must be 'legitimate' or 'quarantine'")
+        if category is not None and category not in CATEGORIES:
+            raise ValueError(f"category must be one of {list(CATEGORIES)}")
+        with self._work_lock:
+            msg = self._get(mid)
+            with self._lock:
+                case = self.reviews.get(mid)
+                if case is None:
+                    raise KeyError(mid)
+                if case["state"] != "pending":
+                    raise ValueError(f"review is already {case['state']}")
+                case["state"] = "deciding"
+                final_cat = category or case["category"]
+            ent = self.mailbox.post(
+                sender=BOSS,
+                recipient=CORRESPONDENT,
+                kind="decision",
+                thread_id=case["thread_id"],
+                message_id=mid,
+                payload={
+                    "decision": decision,
+                    "reason": reason,
+                    "category": final_cat,
+                    "by": by,
+                },
+                in_reply_to=case["forward_entry_id"],
+            )
+            self.mailbox.set_status(case["forward_entry_id"], "acted", BOSS, decision)
+            with self._lock:
+                case.update(
+                    decision=decision,
+                    reason=reason or case["reason"],
+                    decided_by=by,
+                    category=final_cat,
+                    decision_entry_id=ent["id"],
+                    state="released" if decision == "legitimate" else "quarantined",
+                )
+            self._correspondent_acts(msg, ent)
+            self._save()
+        return copy.deepcopy(case)
+
+    def _correspondent_acts(self, msg: dict, ent: dict) -> None:
+        """The Correspondent reads the Boss's decision entry and acts on it."""
+        mid = msg["id"]
+        self.mailbox.set_status(ent["id"], "read", CORRESPONDENT)
+        pl = ent["payload"]
+        by = pl.get("by", "boss")
+        if pl["decision"] == "quarantine":
+            self.emit(
+                "boss.review.quarantined",
+                mid,
+                {"by": by, "reason": pl["reason"], "category": pl["category"]},
+            )
+            for entry in msg["handoffs"]:
+                if entry["status"] == "held":
+                    entry["status"] = "quarantined"
+                    self.emit(
+                        "attachment.quarantined",
+                        mid,
+                        {
+                            "name": entry["name"],
+                            "reason": pl["reason"],
+                            "opened": False,
+                        },
+                    )
+        else:
+            self.emit("boss.review.released", mid, {"by": by, "reason": pl["reason"]})
+            self._release_after_review(msg, by)
+        self.mailbox.set_status(ent["id"], "acted", CORRESPONDENT, pl["decision"])
+
+    def _release_after_review(self, msg: dict, by: str) -> None:
+        """Release held/quarantined handoffs and queue a reply after a legitimate decision.
+
+        Run resolved bytes only when the message selected the pipeline. Pipeline
+        exceptions become ``pipeline_error`` attachment status; reply-drafting and
+        outbox/mailbox errors propagate.
+        """
+        mid = msg["id"]
+        atts = {a["name"]: a for a in msg["wire"]["attachments"]}
+        for entry in msg["handoffs"]:
+            if entry["status"] not in {"quarantined", "held"}:
+                continue
+            a = atts.get(entry["name"])
+            self.emit(
+                "attachment.released",
+                mid,
+                {"name": entry["name"], "by": by, "via": "boss_review"},
+            )
+            entry["status"] = "released"
+            if a and a.get("resolved") and "pipeline" in msg["flows"]:
+                self.emit(
+                    "attachment.handoff",
+                    mid,
+                    {
+                        "name": entry["name"],
+                        "doc_id": entry["doc_id"],
+                        "via": "boss_review",
+                    },
+                )
+                try:
+                    self._run_pipeline_for(msg, entry, a["path"])
+                except Exception as exc:  # noqa: BLE001 - a bad file must not break the decision
+                    entry["status"] = "pipeline_error"
+                    self.emit("run.error", mid, {"error": str(exc)})
+        with self._lock:
+            msg["bossdesk"].append(
+                {
+                    "action": "release_attachments",
+                    "params": None,
+                    "state": "done",
+                    "autonomy": "boss",
+                    "source": "boss_mailbox decision",
+                    "why": "Boss judged the message legitimate",
+                }
+            )
+        paths = {n: a.get("path", "") for n, a in atts.items()}
+        drafts = self.agent.reply_after_release(
+            self._wire(msg), _Tools(self, paths, set())
+        )
+        self._queue_drafts(msg, drafts)
 
     def _apply_lane(self, msg: dict, entry: dict, att: dict | None) -> None:
         """Apply a handoff lane by recording quarantine, copying a hold, or deferring work."""
@@ -759,6 +1047,7 @@ class SandboxService:
         """Apply outbox approval under the state lock, update Boss actions, and persist."""
         with self._lock:
             item = self.outbox.approve(oid, by)
+            self._mailbox_answer_draft(item, True, by)
             msg = self.messages.get(item["message_id"])
             if msg:
                 for a in msg["bossdesk"]:
@@ -771,6 +1060,7 @@ class SandboxService:
         """Reject an outbox item under the state lock and persist the result."""
         with self._lock:
             item = self.outbox.reject(oid, by)
+            self._mailbox_answer_draft(item, False, by)
         self._save()
         return item
 
@@ -873,6 +1163,8 @@ class SandboxService:
             },
             "correspondent": msg["correspondent"],
             "bossdesk": msg["bossdesk"],
+            "boss_review": copy.deepcopy(self.reviews.get(mid)),
+            "mailbox": self.mailbox.list(message_id=mid),
             "pipeline": [h for h in msg["handoffs"]],
             "egress": {
                 "outbox": out,

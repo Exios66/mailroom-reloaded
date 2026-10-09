@@ -44,3 +44,13 @@ pre { background: var(--code); padding: 6px 8px; border-radius: 5px; white-space
 .flow.a { border-color: var(--accent); } .flow.b { border-color: var(--ok); } .flow.e { border-color: var(--warn); }
 ul { margin: 4px 0; padding-left: 18px; }
 .err { color: var(--bad); }
+
+.dock { position: fixed; right: 12px; bottom: 0; width: min(520px, 96vw); background: var(--panel); border: 1px solid var(--line); border-radius: 8px 8px 0 0; z-index: 5; }
+.dock #mbx-toggle { width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line); border-radius: 8px 8px 0 0; }
+.dock #mbx-body { max-height: 38vh; overflow: auto; padding: 6px 10px; display: none; }
+.dock.open #mbx-body { display: block; }
+.mbx-thread h4 { margin: 8px 0 4px; font-size: 13px; }
+.mbx-entry { border-left: 3px solid var(--line); padding-left: 8px; margin: 4px 0; font-size: 12.5px; }
+.mbx-entry.to-boss { border-color: var(--warn); } .mbx-entry.to-corr { border-color: var(--accent); margin-left: 14px; }
+.mbx-sum { color: var(--fg); word-break: break-word; }
+body { padding-bottom: 44px; }

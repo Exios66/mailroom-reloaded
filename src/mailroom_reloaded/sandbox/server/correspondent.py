@@ -280,6 +280,11 @@ _T_ACK = _ENV.from_string(
     "Hello,\n\nWe received your message and have flagged it for priority handling. "
     "We will confirm once we have an update.\n\nBest regards,\nMailroom Correspondent\n"
 )
+_T_QUESTION = _ENV.from_string(
+    "Hello,\n\nThank you for your question. We have noted it and a team member will confirm the "
+    "details with you. We do not share document contents or extracted details by email "
+    "until they have been checked.\n\nBest regards,\nMailroom Correspondent\n"
+)
 
 
 class StandInCorrespondent:
@@ -741,6 +746,27 @@ class StandInCorrespondent:
         )
 
     # ---------------------------------------------------------------- pieces
+    def reply_after_release(
+        self, msg: WireMessage, tools: CorrespondentTools
+    ) -> list[Draft]:
+        """Draft the reply for a message the Boss judged legitimate (drafts only)."""
+        subject = (
+            msg.subject
+            if msg.subject.lower().startswith("re:")
+            else f"Re: {msg.subject}"
+        )
+        base = {"to": msg.from_addr, "subject": subject, "in_reply_to": msg.message_id}
+        if msg.attachments:
+            names = ", ".join(a.name for a in msg.attachments)
+            ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
+            body = _T_SUBMISSION.render(names=names, doc_ids=ids, relations=[])
+            return [Draft(**base, body=body + _FOOTER, intent="document_submission")]
+        return [
+            Draft(
+                **base, body=_T_QUESTION.render() + _FOOTER, intent="general_question"
+            )
+        ]
+
     def _callback(
         self, client_view: dict | None, registry: dict, reason: str
     ) -> dict | None:

@@ -33,6 +33,7 @@
   <section id="col-mid" class="panel">
     <nav class="tabs" id="tabs">
       <button data-tab="messages" class="active">Ingress queue</button>
+      <button data-tab="boss">Pending boss review</button>
       <button data-tab="outbox">Outbox / egress sink</button>
       <button data-tab="events">Events</button>
       <button data-tab="conformance">Expected vs actual</button>
@@ -46,6 +47,11 @@
     <div id="trace"><p class="muted">Inject a scenario, then select a message.</p></div>
   </section>
 </main>
+<aside id="mbx-dock" class="dock">
+  <button id="mbx-toggle" class="small">Boss mailbox <span id="mbx-badge" class="chip">0</span></button>
+  <div id="mbx-body"></div>
+</aside>
+<script src="/ui/mailbox.js"></script>
 <script src="/ui/app.js"></script>
 </body>
 </html>
