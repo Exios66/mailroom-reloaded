@@ -31,14 +31,18 @@ from .tooling import (
     mark_no_tools,
     run_tool_loop,
 )
-from .usage import Usage
+from .usage import Usage, usage_from_crew
 
 __all__ = [
     "LLMResult",
     "LengthFinishReasonError",
     "ResolvedModel",
     "call_structured",
+    "cost_for",
     "make_llm",
+    "price_role",
+    "record_crew_usage",
+    "record_usage",
     "resolve",
 ]
 
@@ -207,10 +211,38 @@ def _token_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float
     return prompt_tokens / 1_000_000 * per_input + completion_tokens / 1_000_000 * per_output
 
 
-def _record_usage_metrics(role: str, r: ResolvedModel, usage: Usage) -> None:
-    """Emit the per-call OTel metrics (llm_calls, tokens, duration, cost)."""
+#: Usage keys that price at another role's model (the eval grader runs on the judge).
+_PRICE_AS: dict[str, str] = {"grader": "judge"}
+
+
+def price_role(role: str) -> str:
+    """The taxonomy agent whose model prices ``role`` (the eval ``grader`` runs on the judge)."""
+    return _PRICE_AS.get(role, role)
+
+
+def cost_for(role: str, usage: Usage) -> float:
+    """USD cost of ``usage`` at ``role``'s model price (0.0 for an unknown or unpriced role).
+
+    The eval grader uses the judge's model. Configuration and pricing errors
+    are caught and also return 0.0.
+    """
+    try:
+        model = load_taxonomy().agent(price_role(role)).model
+        return _token_cost(model, usage.prompt_tokens, usage.completion_tokens)
+    except Exception:  # noqa: BLE001 - costing must never raise
+        return 0.0
+
+
+def _record_usage_metrics(
+    role: str, r: ResolvedModel, usage: Usage, *, measured_calls: bool = False
+) -> None:
+    """Emit the per-call OTel metrics (llm_calls, tokens, duration, cost).
+
+    ``measured_calls`` is for usage reported by an agent framework: the call count
+    is taken as reported and the duration histogram is skipped (no latency known).
+    """
     labels = {"role": role, "provider": r.provider, "model": r.model}
-    M.llm_calls.add(max(usage.calls, 1), labels)
+    M.llm_calls.add(usage.calls if measured_calls else max(usage.calls, 1), labels)
     token_attrs = {
         "gen_ai.request.model": r.model,
         "gen_ai.provider.name": r.provider,
@@ -219,11 +251,45 @@ def _record_usage_metrics(role: str, r: ResolvedModel, usage: Usage) -> None:
     M.token_usage.record(
         usage.completion_tokens, {**token_attrs, "gen_ai.token.type": "output"}
     )
-    M.operation_duration.record(
-        usage.latency_s, {**token_attrs, "gen_ai.operation.name": "chat"}
-    )
+    if not measured_calls:
+        M.operation_duration.record(
+            usage.latency_s, {**token_attrs, "gen_ai.operation.name": "chat"}
+        )
     cost = _token_cost(r.model, usage.prompt_tokens, usage.completion_tokens)
     M.cost_usd.add(cost, labels)
+
+
+def record_usage(role: str, usage: Usage) -> None:
+    """Emit the LLM metrics for usage that did not go through :func:`call_structured`.
+
+    Used by the CrewAI-routed roles (judge, arbiter, boss, eval grader). The
+    grader is labeled with the judge's model. Empty usage is ignored; call counts
+    are used as reported and no duration is recorded. Model resolution and metric
+    emission errors are caught.
+    """
+    if usage == Usage():
+        return
+    try:
+        r = resolve(price_role(role))
+        _record_usage_metrics(role, r, usage, measured_calls=True)
+    except Exception:
+        logger.debug("record_usage_failed", role=role, exc_info=True)
+
+
+def record_crew_usage(
+    role: str, result: Any, sink: list[tuple[str, Usage]] | None = None
+) -> Usage:
+    """Return usage from a CrewAI result, append it to ``sink`` and emit LLM metrics.
+
+    A supplied sink receives ``(role, usage)`` even when missing ``token_usage``
+    yields zero usage. Usage conversion errors propagate; metric emission
+    errors are caught by :func:`record_usage`.
+    """
+    usage = usage_from_crew(getattr(result, "token_usage", None))
+    if sink is not None:
+        sink.append((role, usage))
+    record_usage(role, usage)
+    return usage
 
 
 def call_structured(

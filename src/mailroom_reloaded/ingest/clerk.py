@@ -12,6 +12,7 @@ from typing import Literal
 
 import structlog
 
+from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.scoring.intake import apply_intake as _apply_intake
 from mailroom_reloaded.settings import load_taxonomy
 
@@ -46,6 +47,8 @@ class IngestResult:
     stats: dict = field(default_factory=dict)
     clerk: dict = field(default_factory=dict)
     error: str | None = None
+    #: Vision transcription spend (role ``pdf_transcriber``); empty for text files.
+    usage: Usage = field(default_factory=Usage)
 
 
 def apply_intake(text: str, filename: str | None = None) -> tuple[str, dict]:
@@ -136,15 +139,29 @@ def validate_intake(result: dict, text: str) -> dict:
     }
 
 
-def _fail(method: str, error: str, stats: dict | None = None, pages: int = 0) -> IngestResult:
+def _fail(
+    method: str,
+    error: str,
+    stats: dict | None = None,
+    pages: int = 0,
+    usage: Usage | None = None,
+) -> IngestResult:
+    """Return an empty-text failure result, preserving supplied metadata and usage."""
     logger.warning("ingest_failed", error=error)
-    return IngestResult("", method, pages, stats or {}, {}, error)  # type: ignore[arg-type]
+    return IngestResult("", method, pages, stats or {}, {}, error, usage or Usage())  # type: ignore[arg-type]
 
 
 def ingest(path: Path) -> IngestResult:
-    """Read ``path`` to clerk-normalised text. Never raises; failures set ``error``."""
+    """Read a text file or PDF and return clerk-normalized text and ingest metadata.
+
+    PDFs without extractable text use vision transcription. Read, PDF extraction
+    and transcription failures, unsupported suffixes and empty normalized text
+    produce a result with ``error`` set. Reported vision usage is retained even
+    if a later page fails. Path conversion and clerk normalization errors propagate.
+    """
     path = Path(path)
     suffix = path.suffix.lower()
+    page_usage: list[Usage] = []
     try:
         if suffix in _TEXT_SUFFIXES:
             raw = path.read_text(encoding="utf-8", errors="replace")
@@ -158,17 +175,23 @@ def ingest(path: Path) -> IngestResult:
                 method, stats = "pdf_text", {}
             else:
                 try:
-                    raw = transcribe_pages(path)
+                    raw = transcribe_pages(path, page_usage)
                 except Exception as exc:  # noqa: BLE001 - ingest never raises
-                    return _fail("vision", f"scanned PDF, vision transcription failed: {exc}", pages=pages)
+                    return _fail(
+                        "vision",
+                        f"scanned PDF, vision transcription failed: {exc}",
+                        pages=pages,
+                        usage=sum(page_usage, Usage()),
+                    )
                 method, stats = "vision", {"text_layer": False}
         else:
             return _fail("text", f"unsupported file type: {suffix or path.name}")
     except Exception as exc:  # noqa: BLE001 - ingest never raises
-        return _fail("text", f"{type(exc).__name__}: {exc}")
+        return _fail("text", f"{type(exc).__name__}: {exc}", usage=sum(page_usage, Usage()))
 
+    usage = sum(page_usage, Usage())
     cleaned, clerk_stats = apply_intake(raw, path.name)
     stats = {**stats, "raw_chars": len(raw), "chars": len(cleaned)}
     if not cleaned.strip():
-        return IngestResult("", method, pages, stats, clerk_stats, "no extractable text")  # type: ignore[arg-type]
-    return IngestResult(cleaned, method, pages, stats, clerk_stats)  # type: ignore[arg-type]
+        return IngestResult("", method, pages, stats, clerk_stats, "no extractable text", usage)  # type: ignore[arg-type]
+    return IngestResult(cleaned, method, pages, stats, clerk_stats, None, usage)  # type: ignore[arg-type]

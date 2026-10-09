@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from mailroom_reloaded.llm.client import price_role
+from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.pipeline.state import MailroomState
 from mailroom_reloaded.settings import load_taxonomy
 
@@ -51,16 +53,14 @@ def _extraction(state: MailroomState) -> dict[str, Any] | None:
     }
 
 
-def _cost_usd(state: MailroomState) -> float:
-    """Approximate per-token cost using the sorter's configured price (estimate)."""
-    usage = state.usage_total
-    if usage.total_tokens == 0:
-        return 0.0
-    try:
-        model = load_taxonomy().agent("sorter").model
-        prices = (load_taxonomy().raw.get("cost_models") or {}).get(model)
-    except Exception:  # noqa: BLE001 - report must never raise
-        return 0.0
+def _price(tax: Any, role: str, usage: Usage) -> float:
+    """USD cost of ``usage`` at ``role``'s configured model price (0.0 when unpriced).
+
+    Unknown roles raise ``KeyError``; invalid numeric prices propagate conversion
+    errors. The caller decides whether to replace these errors with a fallback.
+    """
+    model = tax.agent(price_role(role)).model
+    prices = (tax.raw.get("cost_models") or {}).get(model)
     if not isinstance(prices, dict):
         return 0.0
     return float(
@@ -69,6 +69,28 @@ def _cost_usd(state: MailroomState) -> float:
         / 1_000_000
         * float(prices.get("output_per_million", 0.0))
     )
+
+
+def _cost_usd(state: MailroomState) -> float:
+    """USD per-token cost estimate: each role's usage at that role's configured price.
+
+    Roles that report no price cost 0.0, and the eval ``grader`` is excluded (it is
+    not pipeline spend). Usage in ``usage_total`` that no role accounts for (a resumed
+    pre-capture manifest) is priced at the sorter's rates, as before.
+    Return 0.0 when total tokens are zero or any configuration or pricing error
+    occurs; an error discards the entire estimate, not just the affected role.
+    """
+    if state.usage_total.total_tokens == 0:
+        return 0.0
+    try:
+        tax = load_taxonomy()
+        roles = {r: u for r, u in state.usage_by_role.items() if r != "grader"}
+        # spend restored from a manifest saved before per-role capture has no role: price it
+        # at the sorter's rates, as before
+        residual = state.usage_total - sum(roles.values(), Usage())
+        return _price(tax, "sorter", residual) + sum(_price(tax, r, u) for r, u in roles.items())
+    except Exception:  # noqa: BLE001 - report must never raise
+        return 0.0
 
 
 def compile_report(state: MailroomState) -> dict[str, Any]:

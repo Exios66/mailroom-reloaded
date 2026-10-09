@@ -68,3 +68,8 @@ class MailroomState(BaseModel):
     eval_mode: bool = False
     grade: JudgeGrade | None = None
     usage_total: Usage = Field(default_factory=Usage)
+    #: Spend per agent role (taxonomy names; ``pdf_transcriber`` for vision, ``grader`` for eval
+    #: grading). ``usage_total`` is the pipeline sum and excludes ``grader``.
+    usage_by_role: dict[str, Usage] = Field(default_factory=dict)
+    #: LLM-calling nodes that raised mid-call, so part of their spend may be unrecorded.
+    usage_partial_nodes: list[str] = Field(default_factory=list)

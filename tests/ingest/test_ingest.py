@@ -31,7 +31,7 @@ def test_pdf_text_layer(text_pdf):
 
 def test_scanned_pdf_uses_vision(scanned_pdf, monkeypatch):
     seen = []
-    monkeypatch.setattr(clerk, "transcribe_pages", lambda p: seen.append(p) or "Transcribed scan text")
+    monkeypatch.setattr(clerk, "transcribe_pages", lambda p, usage_out=None: seen.append(p) or "Transcribed scan text")
     r = ingest(scanned_pdf)
     assert r.method == "vision"
     assert r.text == "Transcribed scan text"
@@ -40,7 +40,7 @@ def test_scanned_pdf_uses_vision(scanned_pdf, monkeypatch):
 
 
 def test_scanned_pdf_vision_failure_sets_error(scanned_pdf, monkeypatch):
-    def boom(_):
+    def boom(_, usage_out=None):
         raise RuntimeError("endpoint down")
 
     monkeypatch.setattr(clerk, "transcribe_pages", boom)
