@@ -542,3 +542,25 @@ def test_resume_skip_is_consumed_before_retry(flow):
     work.assert_not_called()
     assert flow._guard_node("extract", 0, 0, work, (), {}) == "extracted"
     work.assert_called_once_with(flow)
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_drive_preserves_original_exception_when_ledger_end_fails(flow, monkeypatch, error_type):
+    from mailroom_reloaded.pipeline import run_ledger
+
+    original = error_type("document failure")
+    ledger = Mock()
+    monkeypatch.setattr(run_ledger, "ledger_for", lambda _: ledger)
+    monkeypatch.setattr(run_ledger, "ensure_live_run", Mock())
+    record = Mock(side_effect=OSError("ledger failure"))
+    monkeypatch.setattr(run_ledger, "record_document", record)
+    monkeypatch.setattr(flow, "_drive_nodes", Mock(side_effect=original))
+
+    with pytest.raises(error_type) as caught:
+        flow._drive()
+
+    assert caught.value is original
+    assert original._ledger_recorded is True
+    record.assert_called_once()
+    assert record.call_args.kwargs["failure"] is original
+    assert record.call_args.kwargs["aborted"] is True

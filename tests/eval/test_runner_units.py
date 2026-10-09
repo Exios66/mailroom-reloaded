@@ -214,3 +214,57 @@ def test_write_doc_creates_nested_parent_dirs(tmp_path, monkeypatch):
     assert path.exists()
     assert path.parent.is_dir()
     assert path.read_text(encoding="utf-8") == "nested body"
+
+
+@pytest.mark.parametrize("already_recorded", [False, True])
+async def test_pipeline_error_ledger_hook_avoids_duplicate_document_records(
+    engine, document, monkeypatch, tmp_path, already_recorded
+):
+    failure = RuntimeError("synthetic failure")
+    if already_recorded:
+        failure._ledger_recorded = True
+    monkeypatch.setattr(runner, "_write_doc", lambda doc: tmp_path / doc.filename)
+    monkeypatch.setattr(
+        runner.flow_mod.MailroomFlow, "kickoff_async", AsyncMock(side_effect=failure)
+    )
+    ledger = Mock()
+    monkeypatch.setattr(runner.run_ledger, "ledger_for", Mock(return_value=ledger))
+    record = Mock()
+    monkeypatch.setattr(runner.run_ledger, "record_aborted", record)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 12.0)
+
+    await runner._run_pipeline(
+        runner.EvalConfig(), "run", document, {}, set(), asyncio.Semaphore(1), engine
+    )
+
+    if already_recorded:
+        record.assert_not_called()
+    else:
+        record.assert_called_once_with(
+            ledger, "run", document.content_sha256[:16], failure, started=12.0
+        )
+    assert len(rows(engine)) == 1
+    assert rows(engine)[0]["status"] == "error"
+    assert rows(engine)[0]["error_kind"] == "RuntimeError"
+
+
+@pytest.mark.parametrize("mode", ["pipeline", "specialist_cell"])
+def test_empty_eval_opens_and_seals_a_zero_document_run(engine, monkeypatch, mode):
+    monkeypatch.setattr(runner, "load_split", lambda *a, **k: ([], {}))
+    monkeypatch.setattr(runner, "_engine", lambda: engine)
+    ledger = Mock()
+    monkeypatch.setattr(runner.run_ledger, "ledger_for", lambda _: ledger)
+    opened, closed = Mock(), Mock()
+    monkeypatch.setattr(runner.run_ledger, "open_run", opened)
+    monkeypatch.setattr(runner.run_ledger, "close_run", closed)
+    cfg = runner.EvalConfig(mode=mode, prompt_set="sand37")
+
+    run_id = runner.run_eval(cfg)
+
+    opened.assert_called_once_with(
+        ledger, run_id, "eval", mode=mode, posture_label=cfg.posture_label,
+        model=runner.get_settings().provider, prompt_set="sand37",
+        environment="eval", source="eval",
+    )
+    closed.assert_called_once_with(ledger, run_id, "completed", expected=0)
+    assert rows(engine) == []

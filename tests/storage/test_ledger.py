@@ -625,3 +625,77 @@ def test_run_lifecycle_is_enforced_in_the_write_transaction(
         first.close()
         if separate_writer:
             second.close()
+
+
+def test_count_filters_kind_run_and_optional_document(ledger):
+    ledger.append("run_opened", "r1", payload={"kind": "eval"})
+    for run, number in [("r1", 1), ("r1", 1), ("r1", 2), ("r2", 1)]:
+        _doc(ledger, run, number)
+    assert ledger.flush()
+    assert ledger.count("doc_closed", "r1") == 3
+    assert ledger.count("doc_closed", "r1", "doc1") == 2
+    assert ledger.count("doc_closed", "r1", "doc2") == 1
+    assert ledger.count("doc_closed", "r2", "doc1") == 1
+    assert ledger.count("run_opened", "r1") == 1
+    assert ledger.count("run_closed", "r1") == 0
+    assert ledger.count("doc_closed", "missing") == 0
+    assert ledger.count("doc_closed", "r1", "missing") == 0
+    assert ledger.count("doc_closed", "r1", "") == 0
+
+
+def test_open_runs_filters_kind_and_preserves_opening_order(ledger):
+    assert ledger.open_runs() == []
+    for run, kind in [("z-live", "live"), ("eval", "eval"), ("closed", "live"), ("a-live", "live")]:
+        ledger.append("run_opened", run, payload={"kind": kind})
+    ledger.append("run_closed", "closed", payload={"closed_by": "completed"})
+    _doc(ledger, "orphan", 1)
+    assert ledger.flush()
+    assert ledger.open_runs() == ["z-live", "eval", "a-live"]
+    assert ledger.open_runs("live") == ["z-live", "a-live"]
+    assert ledger.open_runs("eval") == ["eval"]
+    assert ledger.open_runs("unknown") == []
+
+
+def test_standalone_metrics_after_closure_are_ignored_across_restart(engine):
+    first = Ledger(engine)
+    try:
+        _run(first, "sealed", docs=1)
+    finally:
+        first.close()
+    second = Ledger(engine)
+    try:
+        second.append_metrics("sealed", "doc0", [MetricRow("late", 99)])
+        second.append_metrics("active", "doc1", [MetricRow("current", 7)])
+        assert second.flush()
+        assert second.metric_rows("sealed") == []
+        assert [(r["name"], r["value"]) for r in second.metric_rows("active")] == [("current", 7)]
+        assert second.verify("sealed").ok
+    finally:
+        second.close()
+
+
+def test_default_ledger_rebind_flushes_old_database_and_isolates_new_writes(
+    engine, tmp_path, monkeypatch
+):
+    from mailroom_reloaded.storage import ledger as ledger_mod
+
+    other_engine = init_db(tmp_path / "other.db")
+    # Restore any pre-existing singleton without closing another test's resource.
+    monkeypatch.setattr(ledger_mod, "_default", None)
+    monkeypatch.setattr(ledger_mod, "get_engine", lambda: engine)
+    try:
+        first = ledger_mod.get_ledger()
+        assert ledger_mod.get_ledger() is first
+        _doc(first, "old-run", 1)  # rebinding must drain the pending queue
+        monkeypatch.setattr(ledger_mod, "get_engine", lambda: other_engine)
+        second = ledger_mod.get_ledger()
+        assert second is not first
+        assert second.engine is other_engine
+        assert ledger_mod.get_ledger() is second
+        _doc(second, "new-run", 2)
+        assert second.flush()
+        assert [(e.run_id, e.doc_id) for e in first.entries()] == [("old-run", "doc1")]
+        assert [(e.run_id, e.doc_id) for e in second.entries()] == [("new-run", "doc2")]
+    finally:
+        ledger_mod.reset_ledger()
+        other_engine.dispose()
