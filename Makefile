@@ -2,7 +2,7 @@
 # `make` with no target prints the list.
 .DEFAULT_GOAL := help
 
-.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test lint test smoke eval gmail
+.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test sandbox sandbox-down sandbox-status lint test smoke eval gmail
 
 help:
 	@echo "mailroom-reloaded targets:"
@@ -13,6 +13,8 @@ help:
 	@echo "  make dev-status  health-check the dev stack endpoints"
 	@echo "  make dev-reset   stop the dev stack and delete ./data + volumes"
 	@echo "  make dev-test    run the dev test suite (scripts/dev_test.sh)"
+	@echo "  make sandbox     run the offline ingress sandbox on the host (scripts/sandbox.sh run)"
+	@echo "  make sandbox-down / sandbox-status   container helpers (scripts/sandbox.sh)"
 	@echo "  make lint        ruff check the tree"
 	@echo "  make test        run the unit tests (live deselected)"
 	@echo "  make smoke       end-to-end smoke against a running stack"
@@ -39,6 +41,15 @@ dev-reset:
 
 dev-test:
 	scripts/dev_test.sh
+
+sandbox:
+	scripts/sandbox.sh run
+
+sandbox-down:
+	scripts/sandbox.sh down
+
+sandbox-status:
+	scripts/sandbox.sh status
 
 lint:
 	uv run ruff check .
