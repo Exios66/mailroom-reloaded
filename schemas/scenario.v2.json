@@ -130,8 +130,7 @@
          "answers",
          "contradicts",
          "withdraws",
-         "completes",
-         "unknown"
+         "completes"
         ]
        },
        "min_conf": {
