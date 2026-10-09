@@ -80,7 +80,7 @@ with `smoke` the verbatim v0.5.0 copies in `sandbox/fixtures/policy/` are used
 | --- | --- |
 | Pipeline (`pipeline/flow.py`: ingest, sort, extract, gates, report, archive, audit chain, catalog) | **Real code**, run in-process in an isolated data dir |
 | LLM behind the pipeline | **Offline mock provider**: an in-process OpenAI-compatible endpoint on an ephemeral loopback port, mirroring `deploy/mock_openai.py` (a parity test keeps them in step). It answers every document as `correspondence/email`, so classification results are plumbing proof, not accuracy. BERT is not installed or used. |
-| Correspondent | **STAND-IN** (`rule-based-standin/v1`): deterministic keyword/registry rules, no LLM. Same observable contract as protocol section 1.1 (pre-filter, safety screen, trust level, intent, signals, attachment lanes, relation proposals, drafts), none of the reasoning. It sits behind `CorrespondentAgent` (`sandbox/server/correspondent.py`); register the real agent in `AGENTS` to replace it. It never sees scenario names, persona ids or expectations, and never opens quarantined attachments. |
+| Correspondent | **STAND-IN** (`rule-based-standin/v2`): deterministic scored triage and registry rules, no LLM (an optional loopback LLM triage step is off by default). Same observable contract as protocol section 1.1 (pre-filter, safety screen, trust level, intent, signals, attachment lanes, relation proposals, drafts), none of the reasoning. It sits behind `CorrespondentAgent` (`sandbox/server/correspondent.py`); register the real agent in `AGENTS` to replace it. It never sees scenario names, persona ids or expectations, and never opens quarantined attachments. |
 | Boss Desk | **STAND-IN** (`rule-based-standin-bossdesk/v1`): actions come from `protocol/delegation_matrix.csv`, adjusted to what the Correspondent produced. `recommend_callback` carries the registry number only; nothing dials. |
 | Ingress metering | Implemented from `email/ingress_policy.yaml`: per-edge token buckets on **simulated time**, bounded queue, per-sender 12/h, 120 admissions/h, 30 open threads, shed to `comms/pending` with an `ingress.shed` event. A human can release a shed message. |
 | Outbound mail | **Captured, never sent.** There is no SMTP/HTTP client in the package; `smtplib` and all non-loopback socket connects are blocked by `sandbox/server/guard.py` while the server runs (`/status` shows `blocked_attempts`). |
@@ -192,7 +192,9 @@ not share it with people who should only look.
 between, so ingress admission control cannot hide results; the ingress policy itself is
 untouched), prints a per-scenario table, the per-fold report and the failed-check counts.
 No scenario was shed when run alone. Committed baselines: `tests/sandbox/conformance_baseline.json`
-and `tests/sandbox/lofo_baseline.json` (v0.5.0 pack).
+and `tests/sandbox/lofo_baseline.json`. They were regenerated on this branch from the committed
+smoke fixture (6 scenarios), because the v0.5.0 bundle that `content.lock` pins is not published
+and could not be pulled. They are **not** the 88-scenario pack figures quoted below.
 
 ### Correspondent stand-in v2 (`rule-based-standin/v2`)
 
@@ -231,15 +233,26 @@ suspicious expectations, the least-trusted email, else the first email. `comms_o
 checks `agent.pipeline_tool_calls == 0` instead of `llm_calls == 0`, so an LLM-backed agent
 can be evaluated. No check was loosened; `overblocking` and every invariant are as before.
 
-### Results (v0.5.0 pack, 88 scenarios, each run alone)
+### Results
+
+Reproduced on this branch (smoke fixture, 6 scenarios, each run alone; `conformance_baseline.json`):
+6 pass / 0 fail / 0 not run; tuned 4/4, held-out 2/2. Leave-one-family-out over the six scenarios
+(`lofo_baseline.json`): folds A, B, D, E, F each 1.00. These six scenarios were the tuning set, so
+this is not evidence of generalisation.
+
+The tables and figures below were reported by PR #23 for the v0.5.0 pack (88 scenarios). That
+bundle is not published, so they were **not reproduced** on this branch; they are kept as that
+PR's record, labelled as such.
+
+PR #23, v0.5.0 pack, each scenario run alone (not reproduced here):
 
 | | pass | fail | not run |
 | --- | --- | --- | --- |
 | start of this work | 15 | 72 | 1 |
 | PR #23 before the v2 triage | 45 | 42 | 1 |
-| now | 53 | 34 | 1 |
+| PR #23 now | 53 | 34 | 1 |
 
-Leave-one-family-out (family = series letter; `lofo_baseline.json`). **Honest caveat:** the
+Leave-one-family-out, PR #23 v0.5.0 pack (family = series letter; not reproduced here). **Honest caveat:** the
 earlier tuned/held-out third was seen during development, and while diagnosing for this
 table I read the failing scenarios of every family, so no family is untouched any more. The
 LOFO numbers below are therefore mechanically correct per family but optimistic as a measure
@@ -263,7 +276,7 @@ Macro mean held-out rate 0.606 (before this work: 0.157); micro 0.602 (before: 0
 checks now: signal 22, outbox 16, boss_actions 9, intent 9, relation 7, quarantine 1, trust 1.
 The old tuned/held-out thirds are still reported by the CLI (41/59 and 12/29 now).
 
-### Root cause of every remaining failure
+### Root cause of every remaining failure (PR #23 analysis of the v0.5.0 pack; not reproduced here)
 
 Bucket 1 = evaluator or scenario limitation no Correspondent rule can fix (or the pack
 contradicts itself); 2 = real Correspondent gap; 3 = calibration/overfit. Nothing here was
