@@ -50,6 +50,14 @@ class ReviewBody(BaseModel):
     by: str = "reviewer"
 
 
+class BossDecisionBody(BaseModel):
+    message_id: str
+    decision: Literal["legitimate", "quarantine"]
+    reason: str = ""
+    category: Literal["phishing", "malware", "other"] | None = None
+    by: str = "boss"
+
+
 class ProfileBody(BaseModel):
     egress_profile: Literal["closed", "egress"] | None = None
     autonomy: Literal["human", "sandbox"] | None = None
@@ -289,6 +297,28 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
             "pass": sum(r["verdict"] == "pass" for r in rows),
             "fail": sum(r["verdict"] == "fail" for r in rows),
         }
+
+    @api.get("/boss/pending")
+    def boss_pending() -> dict:
+        rows = service.pending_reviews()
+        return {"pending": rows, "count": len(rows)}
+
+    @api.get("/boss/decisions")
+    def boss_decisions() -> dict:
+        rows = [c for c in service.list_reviews() if c["state"] != "pending"]
+        return {"decisions": rows, "count": len(rows)}
+
+    @api.post("/boss/decisions")
+    def boss_decide(body: BossDecisionBody) -> dict:
+        return _wrap(
+            lambda: service.boss_decide(
+                body.message_id,
+                body.decision,
+                body.reason,
+                category=body.category,
+                by=body.by,
+            )
+        )
 
     @api.post("/reset")
     def reset() -> dict:

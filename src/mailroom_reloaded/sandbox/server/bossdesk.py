@@ -25,6 +25,15 @@ _ATTACK_ISSUES = {
 }
 
 
+_CATEGORY = {
+    "credential_phish": "phishing",
+    "payment_fraud": "phishing",
+    "impersonation": "phishing",
+    "malicious_attachment": "malware",
+}
+CATEGORIES = ("phishing", "malware", "other")
+
+
 class StandInBossDesk:
     name = "rule-based-standin-bossdesk/v1"
     stand_in = True
@@ -112,3 +121,48 @@ class StandInBossDesk:
                 why="draft waits for the approval gate",
             )
         return actions
+
+    # ------------------------------------------------------------- signal inbox
+    def consume_signals(
+        self, message_id: str, signals: list[dict], attachments: list[str]
+    ) -> dict | None:
+        """Open a review case from ``possible_attack`` signals on the signal channel.
+
+        The Desk looks at the signals only (kind, attack_class, priority), never at the
+        message text or the Correspondent's other output. Returns ``None`` when the
+        message carried no pending attack signal.
+        """
+        attacks = [
+            s
+            for s in signals
+            if s.get("kind") == "possible_attack" and s.get("state") != "dismissed"
+        ]
+        if not attacks:
+            return None
+        classes = sorted({s.get("attack_class", "other") for s in attacks})
+        order = ["low", "normal", "high", "critical"]
+        top = max((s["priority"] for s in attacks), key=order.index)
+        return {
+            "message_id": message_id,
+            "state": "pending",
+            "attack_classes": classes,
+            "priority": top,
+            "signals": [dict(s) for s in attacks],
+            "attachments": list(attachments),
+            "category": _CATEGORY.get(classes[0], "other")
+            if len(classes) == 1
+            else ("malware" if "malicious_attachment" in classes else "other"),
+            "decision": None,
+            "reason": None,
+            "decided_by": None,
+        }
+
+    def unattended_decision(self, case: dict, autonomy: str) -> tuple[str, str] | None:
+        """Default for runs with nobody at the desk: ``human`` leaves it pending,
+        ``sandbox`` keeps the hostile message quarantined."""
+        if autonomy == "sandbox":
+            return (
+                "quarantine",
+                f"unattended default: hostile ({', '.join(case['attack_classes'])}) stays quarantined",
+            )
+        return None

@@ -981,6 +981,27 @@ class StandInCorrespondent:
             summary=f"{intent} from {trust} sender; {len(drafts)} draft(s), {len(lane_list)} attachment(s).",
         )
 
+    def reply_after_release(
+        self, msg: WireMessage, tools: CorrespondentTools
+    ) -> list[Draft]:
+        """Draft the reply for a message the Boss judged legitimate (drafts only)."""
+        subject = (
+            msg.subject
+            if msg.subject.lower().startswith("re:")
+            else f"Re: {msg.subject}"
+        )
+        base = {"to": msg.from_addr, "subject": subject, "in_reply_to": msg.message_id}
+        if msg.attachments:
+            names = ", ".join(a.name for a in msg.attachments)
+            ids = ", ".join(a.doc_id for a in msg.attachments if a.doc_id)
+            body = _T_SUBMISSION.render(names=names, doc_ids=ids, relations=[])
+            return [Draft(**base, body=body + _FOOTER, intent="document_submission")]
+        return [
+            Draft(
+                **base, body=_T_QUESTION.render() + _FOOTER, intent="general_question"
+            )
+        ]
+
     # ---------------------------------------------------------------- pieces
     def _callback(
         self, client_view: dict | None, registry: dict, reason: str

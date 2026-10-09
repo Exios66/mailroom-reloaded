@@ -88,6 +88,7 @@ async function renderTab() {
   const body = $("tab-body");
   try {
     if (state.tab === "messages") body.replaceChildren(await messagesView());
+    else if (state.tab === "boss") body.replaceChildren(await bossView());
     else if (state.tab === "outbox") body.replaceChildren(await outboxView());
     else if (state.tab === "events") body.replaceChildren(await eventsView());
     else if (state.tab === "conformance") body.replaceChildren(await conformanceView());
@@ -107,6 +108,30 @@ async function messagesView() {
       el("td", {}, m.flows_done.join(", "))));
   }
   return el("div", {}, head, d.messages.length ? t : el("p", { class: "muted" }, "No messages yet. Inject a scenario."));
+}
+function reviewCard(c, withButtons) {
+  const reason = el("input", { placeholder: "reason (recorded)", size: 30 });
+  const decide = (decision) => guarded(async () => {
+    await post("/boss/decisions", { message_id: c.message_id, decision, reason: reason.value });
+    await refreshAll();
+  });
+  return el("div", { class: "flow e" },
+    el("div", {}, chip(c.state, c.state === "pending" ? "warn" : c.state === "released" ? "ok" : "bad"), " ", c.message_id, " ",
+      c.attack_classes.map((a) => chip(a + "/" + c.priority, "bad")), " ", chip(c.category)),
+    el("div", { class: "muted" }, "held attachments: " + (c.attachments.join(", ") || "none") + " | signal channel: possible_attack"),
+    c.decision ? el("div", {}, `decision: ${c.decision} by ${c.decided_by}: ${c.reason || ""}`) : null,
+    withButtons ? el("div", {}, reason, " ", el("button", { class: "small primary", onclick: () => decide("legitimate") }, "Release (legitimate)"), " ",
+      el("button", { class: "small danger", onclick: () => decide("quarantine") }, "Quarantine")) : null);
+}
+async function bossView() {
+  const p = await api("/boss/pending");
+  const d = await api("/boss/decisions");
+  const wrap = el("div", {}, el("p", { class: "muted" }, "Hostile mail arrives here from the Correspondent's possible_attack signals. The message and attachments are held and the sender gets no reply until you decide."));
+  for (const c of p.pending) wrap.append(reviewCard(c, true));
+  if (!p.pending.length) wrap.append(el("p", { class: "muted" }, "Nothing is waiting for the Boss."));
+  if (d.decisions.length) wrap.append(el("h3", {}, "Decided"));
+  for (const c of d.decisions) wrap.append(reviewCard(c, false));
+  return wrap;
 }
 async function outboxView() {
   const d = await api("/outbox");
@@ -201,6 +226,7 @@ function traceSections(t) {
     out.push(el("h3", {}, "Boss Desk actions ", chip("STAND-IN", "warn")));
     out.push(el("div", {}, t.bossdesk.map((a) => el("div", {}, chip(a.state, stateKind(a.state)), " ", a.action + (a.params ? "(" + a.params + ")" : ""), " ", el("span", { class: "muted" }, a.source + (a.why ? " - " + a.why : ""))))));
   }
+  if (t.boss_review) { out.push(el("h3", {}, "Boss review")); out.push(reviewCard(t.boss_review, t.boss_review.state === "pending")); }
   out.push(el("h3", {}, "3. Flow B: real pipeline (isolated data dir, mock LLM)"));
   if (!t.pipeline.length) out.push(el("p", { class: "muted" }, "No attachment reached the pipeline."));
   for (const h of t.pipeline) {
