@@ -287,7 +287,7 @@ _ASK = re.compile(
     re.IGNORECASE,
 )
 _CONTEXT = re.compile(
-    r"(part \d+ of \d+|missing|\blate\b|left out|counterparty|read together|as requested|let me know if|heads up"
+    r"(part \d+ of \d+|missing|\blate\b|left out|counterparty|read together|heads up"
     r"|will follow|being sent|takes? effect|note it against)",
     re.IGNORECASE,
 )
