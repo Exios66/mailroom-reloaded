@@ -45,7 +45,10 @@ __all__ = [
 logger = structlog.get_logger(__name__)
 
 _MOCK_PLACEHOLDER_KEYS = {"mock-key"}
-_DEFAULT_URLS = {"vllm": "http://localhost:8000/v1", "llamafile": "http://localhost:8080/v1"}
+_DEFAULT_URLS = {
+    "vllm": "http://localhost:8000/v1",
+    "llamafile": "http://localhost:8080/v1",
+}
 _OPENAI_SAMPLING = {
     "temperature",
     "max_tokens",
@@ -102,15 +105,21 @@ def resolve(role: str) -> ResolvedModel:
     if provider == "openrouter":
         key = (settings.openrouter_api_key or "").strip()
         if not key or key in _MOCK_PLACEHOLDER_KEYS:
-            raise ValueError("OpenRouter API key not set (or is the mock placeholder): set OPENROUTER_API_KEY")
+            raise ValueError(
+                "OpenRouter API key not set (or is the mock placeholder): set OPENROUTER_API_KEY"
+            )
         base_url = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         return ResolvedModel(provider, model, base_url, key, True, False)
     if provider == "mock":
         base_url = os.environ.get("MOCK_BASE_URL", "").strip()
         if not base_url:
-            raise ValueError("provider 'mock' needs MOCK_BASE_URL (point it at the fake OpenAI server)")
+            raise ValueError(
+                "provider 'mock' needs MOCK_BASE_URL (point it at the fake OpenAI server)"
+            )
         return ResolvedModel(provider, model, base_url, "not-needed", None, True)
-    raise ValueError(f"Unknown provider: {provider!r}. Available: llamafile, openrouter, vllm, mock")
+    raise ValueError(
+        f"Unknown provider: {provider!r}. Available: llamafile, openrouter, vllm, mock"
+    )
 
 
 def make_llm(role: str, **overrides: Any) -> LLM:
@@ -121,7 +130,9 @@ def make_llm(role: str, **overrides: Any) -> LLM:
     if cfg.max_tokens is not None:
         kwargs["max_tokens"] = cfg.max_tokens
     kwargs.update(overrides)
-    return LLM(model=f"openai/{r.model}", base_url=r.base_url, api_key=r.api_key, **kwargs)
+    return LLM(
+        model=f"openai/{r.model}", base_url=r.base_url, api_key=r.api_key, **kwargs
+    )
 
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -172,7 +183,10 @@ def _label_logprob(logprobs: Any) -> float | None:
 
 
 def _build_request(
-    r: ResolvedModel, role: str, messages: list[dict[str, Any]], sampling: dict[str, Any]
+    r: ResolvedModel,
+    role: str,
+    messages: list[dict[str, Any]],
+    sampling: dict[str, Any],
 ) -> dict[str, Any]:
     cfg = load_taxonomy().agent(role)
     params: dict[str, Any] = {"temperature": cfg.temperature}
@@ -204,7 +218,10 @@ def _token_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float
     spec = specs.get(model) or {}
     per_input = float(spec.get("input_per_million", 0.0) or 0.0)
     per_output = float(spec.get("output_per_million", 0.0) or 0.0)
-    return prompt_tokens / 1_000_000 * per_input + completion_tokens / 1_000_000 * per_output
+    return (
+        prompt_tokens / 1_000_000 * per_input
+        + completion_tokens / 1_000_000 * per_output
+    )
 
 
 def _record_usage_metrics(role: str, r: ResolvedModel, usage: Usage) -> None:
@@ -215,7 +232,9 @@ def _record_usage_metrics(role: str, r: ResolvedModel, usage: Usage) -> None:
         "gen_ai.request.model": r.model,
         "gen_ai.provider.name": r.provider,
     }
-    M.token_usage.record(usage.prompt_tokens, {**token_attrs, "gen_ai.token.type": "input"})
+    M.token_usage.record(
+        usage.prompt_tokens, {**token_attrs, "gen_ai.token.type": "input"}
+    )
     M.token_usage.record(
         usage.completion_tokens, {**token_attrs, "gen_ai.token.type": "output"}
     )
@@ -249,7 +268,9 @@ def call_structured(
 
         response_format = _rf(schema_doc_type)
     r = resolve(role)
-    client = openai.OpenAI(base_url=r.base_url, api_key=r.api_key, max_retries=0, timeout=timeout)
+    client = openai.OpenAI(
+        base_url=r.base_url, api_key=r.api_key, max_retries=0, timeout=timeout
+    )
     req = _build_request(r, role, messages, sampling)
     usage = Usage()
     tool_rounds = 0
@@ -265,12 +286,18 @@ def call_structured(
                 1, {"role": role, "provider": r.provider, "model": r.model}
             )
             raise
-        usage, tool_rounds, final_messages = usage + loop.usage, loop.rounds, loop.messages
+        usage, tool_rounds, final_messages = (
+            usage + loop.usage,
+            loop.rounds,
+            loop.messages,
+        )
         tools_in_play = not loop.inline
     final: dict[str, Any] = {**req, "messages": final_messages}
     if response_format is not None:
         final["response_format"] = response_format
-    if tools_in_play and r.provider == "vllm":  # others reject tool_choice without tools
+    if (
+        tools_in_play and r.provider == "vllm"
+    ):  # others reject tool_choice without tools
         final["tool_choice"] = "none"
     if logprobs and r.supports_logprobs:
         final["logprobs"] = True
@@ -278,7 +305,9 @@ def call_structured(
     usage = usage + u
     _record_usage_metrics(role, r, usage)
     if loop is not None and loop.reject_key is not None:
-        mark_no_tools(loop.reject_key)  # inline retry worked, so the rejection was about tools
+        mark_no_tools(
+            loop.reject_key
+        )  # inline retry worked, so the rejection was about tools
     choice = resp.choices[0]
     finish = choice.finish_reason or "stop"
     M.length_capped.add(
@@ -293,6 +322,8 @@ def call_structured(
         parsed=_parse_json(content),
         usage=usage,
         finish_reason=finish,
-        label_logprob=_label_logprob(getattr(choice, "logprobs", None)) if final.get("logprobs") else None,
+        label_logprob=_label_logprob(getattr(choice, "logprobs", None))
+        if final.get("logprobs")
+        else None,
         tool_rounds=tool_rounds,
     )

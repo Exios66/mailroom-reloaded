@@ -72,7 +72,10 @@ def parse_prometheus(text: str) -> dict[str, float]:
         except ValueError:
             continue
         out[name] = out.get(name, 0.0) + value
-        if name == "vllm:request_success_total" and 'finished_reason="length"' in labels:
+        if (
+            name == "vllm:request_success_total"
+            and 'finished_reason="length"' in labels
+        ):
             length += value
     out["length_finishes"] = length
     return out
@@ -111,7 +114,9 @@ def _is_number(value: Any) -> bool:
         return False
 
 
-def _delta(after: Mapping[str, float], before: Mapping[str, float], key: str) -> float | None:
+def _delta(
+    after: Mapping[str, float], before: Mapping[str, float], key: str
+) -> float | None:
     if key not in after:
         return None
     return after[key] - (before.get(key) or 0.0)
@@ -127,7 +132,9 @@ def telemetry_delta(before: Any, after: Any) -> ReplicaTelemetry:
     a = _as_counters(after)
     d_hits = _delta(a, b, "vllm:prefix_cache_hits_total")
     d_queries = _delta(a, b, "vllm:prefix_cache_queries_total")
-    hit_rate = round(d_hits / d_queries, 6) if d_hits is not None and d_queries else None
+    hit_rate = (
+        round(d_hits / d_queries, 6) if d_hits is not None and d_queries else None
+    )
 
     d_ttft_sum = _delta(a, b, "vllm:time_to_first_token_seconds_sum")
     d_ttft_count = _delta(a, b, "vllm:time_to_first_token_seconds_count")

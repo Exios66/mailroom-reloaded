@@ -8,7 +8,14 @@ from pathlib import Path
 
 import yaml
 
-FIELDS = ("repo", "tag", "commit", "bundle_sha256", "schema_version", "dataset_revision")
+FIELDS = (
+    "repo",
+    "tag",
+    "commit",
+    "bundle_sha256",
+    "schema_version",
+    "dataset_revision",
+)
 DEFAULT_LOCK = Path("sandbox/content.lock")
 
 
@@ -48,7 +55,10 @@ class ContentLock:
 
     def write(self, path: Path | str = DEFAULT_LOCK) -> None:
         self.validate()
-        lines = [f"{k}: {v!r}" if k == "schema_version" else f"{k}: {v}" for k, v in asdict(self).items()]
+        lines = [
+            f"{k}: {v!r}" if k == "schema_version" else f"{k}: {v}"
+            for k, v in asdict(self).items()
+        ]
         Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -64,5 +74,7 @@ def verify_bundle(bundle: Path | str, lock: ContentLock) -> str:
     """Return the bundle's sha256, raising LockError if it differs from the lock."""
     actual = sha256_file(bundle)
     if actual != lock.bundle_sha256:
-        raise LockError(f"bundle sha256 {actual} does not match lock {lock.bundle_sha256}")
+        raise LockError(
+            f"bundle sha256 {actual} does not match lock {lock.bundle_sha256}"
+        )
     return actual

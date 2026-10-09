@@ -147,7 +147,9 @@ def token_split(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         if not prompt or not calls or not chars:
             continue
         try:
-            points.append((float(prompt), float(calls), float(chars), float(completion)))
+            points.append(
+                (float(prompt), float(calls), float(chars), float(completion))
+            )
         except (TypeError, ValueError):
             continue
     if not points:
@@ -162,9 +164,7 @@ def token_split(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     n = len(points)
     xs = [x for _, _, x, _ in points]
     mean_x = sum(xs) / n
-    spread = (
-        (sum((x - mean_x) ** 2 for x in xs) / n) ** 0.5 / mean_x if mean_x else 0.0
-    )
+    spread = (sum((x - mean_x) ** 2 for x in xs) / n) ** 0.5 / mean_x if mean_x else 0.0
     inst: float | None = None
     ratio: float | None = None
     method = "fallback"

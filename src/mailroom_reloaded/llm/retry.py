@@ -52,7 +52,9 @@ def _retry_after_seconds(exc: Exception) -> float | None:
 
 
 def _is_json_mode_400(exc: Exception) -> bool:
-    return isinstance(exc, BadRequestError) and any(m in str(exc) for m in _JSON_MODE_400_MARKERS)
+    return isinstance(exc, BadRequestError) and any(
+        m in str(exc) for m in _JSON_MODE_400_MARKERS
+    )
 
 
 def is_transient_error(exc: Exception) -> bool:
@@ -63,7 +65,9 @@ def is_transient_error(exc: Exception) -> bool:
     return False
 
 
-def retry_sleep_seconds(exc: Exception, attempt: int, cold_start_s: float = 90.0) -> float:
+def retry_sleep_seconds(
+    exc: Exception, attempt: int, cold_start_s: float = 90.0
+) -> float:
     """Backoff before retry number ``attempt`` (one-based): exponential, capped, jittered."""
     cfg = load_taxonomy().raw.get("llm_retry") or {}
     base = float(cfg.get("base_delay", 1.0))
@@ -84,7 +88,9 @@ def retry_sleep_seconds(exc: Exception, attempt: int, cold_start_s: float = 90.0
     return max(0.0, delay * (1 + random.uniform(-jitter, jitter)))
 
 
-def with_retry(fn: Callable[[], T], *, cold_start_s: float = 90, max_attempts: int = 4) -> T:
+def with_retry(
+    fn: Callable[[], T], *, cold_start_s: float = 90, max_attempts: int = 4
+) -> T:
     """Call ``fn()``; retry transient failures with exponential backoff, re-raise the last error."""
     attempt = 0
     while True:

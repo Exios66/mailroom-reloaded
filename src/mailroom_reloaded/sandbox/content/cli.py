@@ -22,11 +22,15 @@ from mailroom_reloaded.sandbox.content.lock import (
     verify_bundle,
 )
 
-content_app = typer.Typer(name="content", help="Pinned sandbox content pack.", no_args_is_help=True)
+content_app = typer.Typer(
+    name="content", help="Pinned sandbox content pack.", no_args_is_help=True
+)
 sandbox_app = typer.Typer(name="sandbox", help="Testing sandbox.", no_args_is_help=True)
 sandbox_app.add_typer(content_app, name="content")
 
-LockOpt = typer.Option(Path("sandbox/content.lock"), "--lock", help="Path to content.lock.")
+LockOpt = typer.Option(
+    Path("sandbox/content.lock"), "--lock", help="Path to content.lock."
+)
 
 
 def _fail(msg: str) -> typer.Exit:
@@ -42,18 +46,26 @@ def status(lock: Path = LockOpt) -> None:
         smoke = load_content(SMOKE_DIR)
     except (LockError, CompatError, FileNotFoundError) as exc:
         raise _fail(str(exc)) from exc
-    typer.echo(json.dumps({
-        "lock": pin.__dict__,
-        "smoke_content_version": smoke.meta.get("content_version"),
-        "smoke_matches_lock": f"v{smoke.meta.get('content_version')}" == pin.tag,
-        "smoke_valid": smoke.report.ok,
-        "smoke_scenarios": len(smoke.scenarios),
-    }, indent=2))
+    typer.echo(
+        json.dumps(
+            {
+                "lock": pin.__dict__,
+                "smoke_content_version": smoke.meta.get("content_version"),
+                "smoke_matches_lock": f"v{smoke.meta.get('content_version')}"
+                == pin.tag,
+                "smoke_valid": smoke.report.ok,
+                "smoke_scenarios": len(smoke.scenarios),
+            },
+            indent=2,
+        )
+    )
 
 
 @content_app.command()
 def validate(
-    path: Path = typer.Argument(SMOKE_DIR, help="Content dir or smoke export (default: committed smoke)."),
+    path: Path = typer.Argument(
+        SMOKE_DIR, help="Content dir or smoke export (default: committed smoke)."
+    ),
 ) -> None:
     """Validate a materialized content dir against schemas/ and content.json compat."""
     try:
@@ -69,10 +81,18 @@ def validate(
 
 @content_app.command()
 def pull(
-    from_bundle: Path | None = typer.Option(None, "--from-bundle", help="Local .tar.zst bundle."),
-    from_dir: Path | None = typer.Option(None, "--from-dir", help="Already materialized content dir."),
-    url: str | None = typer.Option(None, "--url", help="https bundle URL (needs --allow-network)."),
-    allow_network: bool = typer.Option(False, "--allow-network", help="Permit the URL fetch (off by default)."),
+    from_bundle: Path | None = typer.Option(
+        None, "--from-bundle", help="Local .tar.zst bundle."
+    ),
+    from_dir: Path | None = typer.Option(
+        None, "--from-dir", help="Already materialized content dir."
+    ),
+    url: str | None = typer.Option(
+        None, "--url", help="https bundle URL (needs --allow-network)."
+    ),
+    allow_network: bool = typer.Option(
+        False, "--allow-network", help="Permit the URL fetch (off by default)."
+    ),
     dest: Path = typer.Option(Path(".sandbox-content"), "--dest"),
     lock: Path = LockOpt,
 ) -> None:
@@ -85,7 +105,9 @@ def pull(
             meta = json.loads((from_dir / "content.json").read_text(encoding="utf-8"))
             check_compat(meta)
             if f"v{meta.get('version')}" != pin.tag:
-                raise LockError(f"dir is content {meta.get('version')}, lock pins {pin.tag}")
+                raise LockError(
+                    f"dir is content {meta.get('version')}, lock pins {pin.tag}"
+                )
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.copytree(from_dir, dest)
@@ -93,10 +115,14 @@ def pull(
             if url is not None:
                 if not allow_network:
                     raise LockError("--url requires --allow-network")
-                from_bundle = bundle_mod.fetch_url(url, Path(tempfile.mkdtemp()) / "bundle.tar.zst")
+                from_bundle = bundle_mod.fetch_url(
+                    url, Path(tempfile.mkdtemp()) / "bundle.tar.zst"
+                )
             assert from_bundle is not None
             bundle_mod.extract_bundle(from_bundle, dest, pin)
-            check_compat(json.loads((dest / "content.json").read_text(encoding="utf-8")))
+            check_compat(
+                json.loads((dest / "content.json").read_text(encoding="utf-8"))
+            )
     except (LockError, CompatError, OSError, ValueError, RuntimeError) as exc:
         raise _fail(str(exc)) from exc
     typer.echo(f"pulled {pin.tag} -> {dest}")
@@ -105,7 +131,9 @@ def pull(
 @content_app.command()
 def build(
     from_dir: Path = typer.Option(Path(".sandbox-content"), "--from-dir"),
-    out: Path = typer.Option(SMOKE_DIR, "--out", help="Smoke fixtures dir to (re)write."),
+    out: Path = typer.Option(
+        SMOKE_DIR, "--out", help="Smoke fixtures dir to (re)write."
+    ),
 ) -> None:
     """Validate a content dir, then regenerate the smoke fixtures with its tools/export_smoke.py."""
     try:
@@ -122,14 +150,26 @@ def build(
     with tempfile.TemporaryDirectory() as tmp:
         staged = Path(tmp) / "smoke"
         r = subprocess.run(
-            [sys.executable, "-I", str(tool), "--root", str(from_dir), "--out", str(staged)],
-            capture_output=True, text=True, check=False,
+            [
+                sys.executable,
+                "-I",
+                str(tool),
+                "--root",
+                str(from_dir),
+                "--out",
+                str(staged),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if r.returncode:
             raise _fail(f"export_smoke failed: {r.stderr.strip() or r.stdout.strip()}")
         check = load_content(staged)
         if not check.report.ok:
-            raise _fail("exported smoke set invalid:\n" + "\n".join(check.report.errors))
+            raise _fail(
+                "exported smoke set invalid:\n" + "\n".join(check.report.errors)
+            )
         if out.exists():
             shutil.rmtree(out)
         shutil.copytree(staged, out)
@@ -148,9 +188,14 @@ def bump(
         meta = bundle_mod.read_content_json(bundle)
         check_compat(meta)
         new = ContentLock(
-            repo=ContentLock.read(lock).repo if lock.exists() else "Exios66/mailroom-sandbox-content",
-            tag=tag, commit=commit, bundle_sha256=sha256_file(bundle),
-            schema_version=str(meta["schema_version"]), dataset_revision=str(meta["dataset_revision"]),
+            repo=ContentLock.read(lock).repo
+            if lock.exists()
+            else "Exios66/mailroom-sandbox-content",
+            tag=tag,
+            commit=commit,
+            bundle_sha256=sha256_file(bundle),
+            schema_version=str(meta["schema_version"]),
+            dataset_revision=str(meta["dataset_revision"]),
         )
         new.write(lock)
         verify_bundle(bundle, new)

@@ -73,7 +73,9 @@ def _as_temperature(value: Any) -> float | None:
         return None
 
 
-def _temperature_for(data: Any, provider: str, model: str, doc_type: str) -> float | None:
+def _temperature_for(
+    data: Any, provider: str, model: str, doc_type: str
+) -> float | None:
     """Read the temperature-scaling factor for (provider, model, doc_type).
 
     Accepts a nested ``{provider: {model: {doc_type: T}}}`` file (the canonical

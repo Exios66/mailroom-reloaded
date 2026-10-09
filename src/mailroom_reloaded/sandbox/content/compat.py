@@ -43,10 +43,16 @@ def check_compat(
     if sv is None:
         raise CompatError("content metadata has no schema_version")
     if schema_major(sv) != supported_major:
-        raise CompatError(f"schema major {schema_major(sv)} != supported {supported_major}")
+        raise CompatError(
+            f"schema major {schema_major(sv)} != supported {supported_major}"
+        )
     cur = parse_version(code or code_version())
     lo, hi = meta.get("min_code_version"), meta.get("max_code_version")
     if lo and cur < parse_version(lo):
-        raise CompatError(f"code {'.'.join(map(str, cur))} older than min_code_version {lo}")
+        raise CompatError(
+            f"code {'.'.join(map(str, cur))} older than min_code_version {lo}"
+        )
     if hi and cur > parse_version(hi):
-        raise CompatError(f"code {'.'.join(map(str, cur))} newer than max_code_version {hi}")
+        raise CompatError(
+            f"code {'.'.join(map(str, cur))} newer than max_code_version {hi}"
+        )

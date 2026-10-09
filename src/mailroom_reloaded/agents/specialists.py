@@ -309,10 +309,16 @@ def extract(
             error_kind = ekind
 
     if results:
-        data = merge_merger_windows(results) if doc_type == "merger_agreement" else results[0]
+        data = (
+            merge_merger_windows(results)
+            if doc_type == "merger_agreement"
+            else results[0]
+        )
         confidence = extraction_confidence(True, _coverage(doc_type, data), 1.0)
         return ExtractResult(doc_type, data, True, None, confidence, None, calls, usage)
-    return ExtractResult(doc_type, None, False, parse_error, 0.0, error_kind, calls, usage)
+    return ExtractResult(
+        doc_type, None, False, parse_error, 0.0, error_kind, calls, usage
+    )
 
 
 # --------------------------------------------------------------------------- merge

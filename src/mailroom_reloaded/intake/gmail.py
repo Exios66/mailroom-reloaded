@@ -233,7 +233,9 @@ def decode_pubsub_push(payload: dict[str, Any]) -> GmailNotification:
 def _parse_extensions(raw: str | None) -> tuple[str, ...] | None:
     if not raw:
         return None
-    exts = tuple(part.strip() for part in raw.replace(";", ",").split(",") if part.strip())
+    exts = tuple(
+        part.strip() for part in raw.replace(";", ",").split(",") if part.strip()
+    )
     return exts or None
 
 
@@ -269,12 +271,18 @@ class GmailIntake:
         state = os.environ.get("MAILROOM_GMAIL_STATE")
         max_bytes = os.environ.get("MAILROOM_GMAIL_MAX_ATTACHMENT_BYTES")
         cfg = GmailConfig(
-            credentials_path=Path(credentials) if credentials else base / "gmail_credentials.json",
+            credentials_path=Path(credentials)
+            if credentials
+            else base / "gmail_credentials.json",
             token_path=Path(token) if token else base / "gmail_token.json",
             query=os.environ.get("MAILROOM_GMAIL_QUERY") or DEFAULT_QUERY,
-            allowed_extensions=_parse_extensions(os.environ.get("MAILROOM_GMAIL_EXTENSIONS"))
+            allowed_extensions=_parse_extensions(
+                os.environ.get("MAILROOM_GMAIL_EXTENSIONS")
+            )
             or DEFAULT_ALLOWED_EXTENSIONS,
-            max_attachment_bytes=int(max_bytes) if max_bytes else DEFAULT_MAX_ATTACHMENT_BYTES,
+            max_attachment_bytes=int(max_bytes)
+            if max_bytes
+            else DEFAULT_MAX_ATTACHMENT_BYTES,
             state_path=Path(state) if state else base / "gmail_state.json",
         )
         return cls(cfg, service=service)
@@ -382,7 +390,10 @@ class GmailIntake:
                 continue
             body = part.get("body") or {}
             declared = body.get("size")
-            if isinstance(declared, int) and declared > self.config.max_attachment_bytes:
+            if (
+                isinstance(declared, int)
+                and declared > self.config.max_attachment_bytes
+            ):
                 logger.info(
                     "gmail_attachment_skipped",
                     reason="size",
@@ -513,8 +524,12 @@ class GmailIntake:
         path = self.state_path
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent,
-            prefix=f"{path.name}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f"{path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as fh:
             tmp = Path(fh.name)
             try:

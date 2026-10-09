@@ -71,6 +71,8 @@ class StandInBossDesk:
                 continue
             name, params = m.group(1), m.group(2)
             if name == "link_documents" and not res.relations:
+                # the matrix names it for this issue class: considered, nothing to link
+                add(name, params, state="no_candidate", why="no related document found")
                 continue
             if name == "task_correspondent" and not res.drafts:
                 continue

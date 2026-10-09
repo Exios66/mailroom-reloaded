@@ -20,7 +20,13 @@ from .vision import transcribe_pages
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["INTAKE_SECTION_ROLES", "IngestResult", "apply_intake", "ingest", "validate_intake"]
+__all__ = [
+    "INTAKE_SECTION_ROLES",
+    "IngestResult",
+    "apply_intake",
+    "ingest",
+    "validate_intake",
+]
 
 #: Section roles in material-priority order.
 INTAKE_SECTION_ROLES: tuple[str, ...] = (
@@ -66,7 +72,11 @@ def validate_triage(raw: dict) -> dict:
     if subclass is not None:
         subclass = str(subclass).strip()[:80] or None
     kw = raw.get("keywords")
-    keywords = [str(k).strip()[:80] for k in (kw if isinstance(kw, list) else [])[:6] if str(k).strip()]
+    keywords = [
+        str(k).strip()[:80]
+        for k in (kw if isinstance(kw, list) else [])[:6]
+        if str(k).strip()
+    ]
     return {
         "primary_doc_class": doc_class,
         "doc_subclass": subclass,
@@ -136,7 +146,9 @@ def validate_intake(result: dict, text: str) -> dict:
     }
 
 
-def _fail(method: str, error: str, stats: dict | None = None, pages: int = 0) -> IngestResult:
+def _fail(
+    method: str, error: str, stats: dict | None = None, pages: int = 0
+) -> IngestResult:
     logger.warning("ingest_failed", error=error)
     return IngestResult("", method, pages, stats or {}, {}, error)  # type: ignore[arg-type]
 
@@ -160,7 +172,11 @@ def ingest(path: Path) -> IngestResult:
                 try:
                     raw = transcribe_pages(path)
                 except Exception as exc:  # noqa: BLE001 - ingest never raises
-                    return _fail("vision", f"scanned PDF, vision transcription failed: {exc}", pages=pages)
+                    return _fail(
+                        "vision",
+                        f"scanned PDF, vision transcription failed: {exc}",
+                        pages=pages,
+                    )
                 method, stats = "vision", {"text_layer": False}
         else:
             return _fail("text", f"unsupported file type: {suffix or path.name}")
@@ -170,5 +186,7 @@ def ingest(path: Path) -> IngestResult:
     cleaned, clerk_stats = apply_intake(raw, path.name)
     stats = {**stats, "raw_chars": len(raw), "chars": len(cleaned)}
     if not cleaned.strip():
-        return IngestResult("", method, pages, stats, clerk_stats, "no extractable text")  # type: ignore[arg-type]
+        return IngestResult(
+            "", method, pages, stats, clerk_stats, "no extractable text"
+        )  # type: ignore[arg-type]
     return IngestResult(cleaned, method, pages, stats, clerk_stats)  # type: ignore[arg-type]

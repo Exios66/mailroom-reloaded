@@ -46,7 +46,11 @@ def extract_text(path: Path) -> tuple[str, int]:
     """
     errors: list[str] = []
     opened: tuple[str, int] | None = None
-    for name, fn in (("pypdf", _pypdf), ("pdfplumber", _pdfplumber), ("pymupdf", _pymupdf)):
+    for name, fn in (
+        ("pypdf", _pypdf),
+        ("pdfplumber", _pdfplumber),
+        ("pymupdf", _pymupdf),
+    ):
         try:
             text, pages = fn(path)
         except Exception as exc:  # noqa: BLE001 - try the next backend

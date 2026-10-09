@@ -161,7 +161,9 @@ def _prf(tp: int, fp: int, fn: int) -> dict[str, float]:
 
 def _row_f1(counts: Mapping[str, Any]) -> float:
     return _prf(
-        int(counts.get("tp") or 0), int(counts.get("fp") or 0), int(counts.get("fn") or 0)
+        int(counts.get("tp") or 0),
+        int(counts.get("fp") or 0),
+        int(counts.get("fn") or 0),
     )["f1"]
 
 
@@ -236,7 +238,11 @@ def _sorter_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     def rate(count: int) -> float:
         return round(count / n, 4) if n else 0.0
 
-    granted = sum(1 for row in rows if _sorter_row(row)[1] == _sorter_row(row)[0] and _sorter_row(row)[0])
+    granted = sum(
+        1
+        for row in rows
+        if _sorter_row(row)[1] == _sorter_row(row)[0] and _sorter_row(row)[0]
+    )
     granted_sub = sum(
         1
         for row in rows
@@ -260,7 +266,9 @@ def _sorter_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _ece(confidences: Sequence[float], correct: Sequence[int], bins: int = 10) -> float | None:
+def _ece(
+    confidences: Sequence[float], correct: Sequence[int], bins: int = 10
+) -> float | None:
     if not confidences:
         return None
     counts = [0] * bins
@@ -275,8 +283,13 @@ def _ece(confidences: Sequence[float], correct: Sequence[int], bins: int = 10) -
     error = 0.0
     for bucket in range(bins):
         if counts[bucket]:
-            error += counts[bucket] / total * abs(
-                correct_sum[bucket] / counts[bucket] - conf_sum[bucket] / counts[bucket]
+            error += (
+                counts[bucket]
+                / total
+                * abs(
+                    correct_sum[bucket] / counts[bucket]
+                    - conf_sum[bucket] / counts[bucket]
+                )
             )
     return round(error, 4)
 
@@ -352,7 +365,9 @@ def _clause_block(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     docs_labeled = sum(
         1
         for r in rows
-        if r.get("cuad_tp") is not None or r.get("cuad_fp") is not None or r.get("cuad_fn") is not None
+        if r.get("cuad_tp") is not None
+        or r.get("cuad_fp") is not None
+        or r.get("cuad_fn") is not None
     )
     return {
         "kind": "cuad",
@@ -492,11 +507,20 @@ def gate_kpis(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "classify": {},
         "extract": {},
     }
-    agree = {"retry": 0, "retry_n": 0, "review": 0, "review_n": 0, "stage": 0, "stage_n": 0}
+    agree = {
+        "retry": 0,
+        "retry_n": 0,
+        "review": 0,
+        "review_n": 0,
+        "stage": 0,
+        "stage_n": 0,
+    }
     for row in rows:
         decisions = _as_mapping(_get(row, "gate_decisions"))
         features = _as_mapping(_get(row, "gate_features"))
-        classify = decisions.get("classify") or features.get("classify", {}).get("action")
+        classify = decisions.get("classify") or features.get("classify", {}).get(
+            "action"
+        )
         extract = decisions.get("extract") or features.get("extract", {}).get("action")
         if classify:
             mix["classify"][str(classify)] = mix["classify"].get(str(classify), 0) + 1
@@ -506,7 +530,9 @@ def gate_kpis(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         retry_expected = _expectation(row, "retry_expected")
         if retry_expected is not None and classify is not None:
             agree["retry_n"] += 1
-            agree["retry"] += int(retry_expected == (str(classify) in {"retry", "re_sort"}))
+            agree["retry"] += int(
+                retry_expected == (str(classify) in {"retry", "re_sort"})
+            )
         review_expected = _expectation(row, "review_expected")
         if review_expected is not None and extract is not None:
             agree["review_n"] += 1

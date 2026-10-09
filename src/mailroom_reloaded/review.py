@@ -80,8 +80,15 @@ def resolve_review(
 
     try:
         return _resolve_claimed(
-            bins, manifest, claimed, action, payload, doc_type, doc_subclass,
-            reviewer, worker_id,
+            bins,
+            manifest,
+            claimed,
+            action,
+            payload,
+            doc_type,
+            doc_subclass,
+            reviewer,
+            worker_id,
         )
     except BaseException:
         # Keep the doc parked: put the file back and restore the parked manifest.

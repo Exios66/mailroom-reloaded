@@ -60,7 +60,9 @@ def _is_content_key(key: str) -> bool:
         return True
     if key.startswith("llm.prompts"):
         return True
-    return key.startswith(("llm.input_messages.", "llm.output_messages.")) and key.endswith(".content")
+    return key.startswith(
+        ("llm.input_messages.", "llm.output_messages.")
+    ) and key.endswith(".content")
 
 
 class MaskingSpanProcessor(SpanProcessor):
@@ -91,7 +93,8 @@ class MaskingSpanProcessor(SpanProcessor):
         if not attrs:
             return
         masked = {
-            key: (MASKED if _is_content_key(key) else value) for key, value in dict(attrs).items()
+            key: (MASKED if _is_content_key(key) else value)
+            for key, value in dict(attrs).items()
         }
         span._attributes = BoundedAttributes(
             maxlen=getattr(attrs, "maxlen", None), attributes=masked
@@ -111,15 +114,16 @@ def _container_id() -> str | None:
 
 def _instance_id() -> str:
     """A stable per-process instance id (env override, else host:pid)."""
-    return os.environ.get("MAILROOM_INSTANCE_ID") or f"{socket.gethostname()}:{os.getpid()}"
+    return (
+        os.environ.get("MAILROOM_INSTANCE_ID")
+        or f"{socket.gethostname()}:{os.getpid()}"
+    )
 
 
 def _gpu_replica() -> str:
     """The GPU replica index (env override, else ``0``)."""
     return (
-        os.environ.get("MAILROOM_GPU_REPLICA")
-        or os.environ.get("GPU_REPLICA")
-        or "0"
+        os.environ.get("MAILROOM_GPU_REPLICA") or os.environ.get("GPU_REPLICA") or "0"
     )
 
 

@@ -94,7 +94,9 @@ class BandGate:
                 "proceed", f"confidence >= judge_band_high {t.judge_band_high}", "band"
             )
         if f.confidence >= t.low:
-            return GateDecision("verify", f"{t.low} <= confidence < {t.judge_band_high}", "band")
+            return GateDecision(
+                "verify", f"{t.low} <= confidence < {t.judge_band_high}", "band"
+            )
         if f.attempts < t.retry_max:
             return GateDecision("retry", f"confidence < low {t.low}", "band")
         return GateDecision("boss", "extract retries spent below low", "band")

@@ -115,14 +115,18 @@ def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
         confidence=data["confidence"],
         bert=BertCfg(**data.get("bert", {})),
         agents={k: AgentCfg(**v) for k, v in data["agents"].items()},
-        conditions={k: RunConditions(**v) for k, v in data["specialist_conditions"].items()},
+        conditions={
+            k: RunConditions(**v) for k, v in data["specialist_conditions"].items()
+        },
         raw=data,
     )
 
 
 @lru_cache(maxsize=1)
 def load_taxonomy() -> Taxonomy:
-    text = (resources.files("mailroom_reloaded") / "config" / "taxonomy.yaml").read_text("utf-8")
+    text = (
+        resources.files("mailroom_reloaded") / "config" / "taxonomy.yaml"
+    ).read_text("utf-8")
     return _build_taxonomy(yaml.safe_load(text))
 
 
@@ -133,18 +137,24 @@ class Settings(BaseSettings):
 
     base_dir: Path = Path("./data")
     provider: str = Field(
-        default="mock", validation_alias=AliasChoices("DEFAULT_PROVIDER", "MAILROOM_PROVIDER")
+        default="mock",
+        validation_alias=AliasChoices("DEFAULT_PROVIDER", "MAILROOM_PROVIDER"),
     )
     vllm_base_url: str | None = Field(
-        default=None, validation_alias=AliasChoices("VLLM_BASE_URL", "MAILROOM_VLLM_BASE_URL")
+        default=None,
+        validation_alias=AliasChoices("VLLM_BASE_URL", "MAILROOM_VLLM_BASE_URL"),
     )
     openrouter_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("OPENROUTER_API_KEY", "MAILROOM_OPENROUTER_API_KEY"),
+        validation_alias=AliasChoices(
+            "OPENROUTER_API_KEY", "MAILROOM_OPENROUTER_API_KEY"
+        ),
     )
     llamafile_base_url: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("LLAMAFILE_BASE_URL", "MAILROOM_LLAMAFILE_BASE_URL"),
+        validation_alias=AliasChoices(
+            "LLAMAFILE_BASE_URL", "MAILROOM_LLAMAFILE_BASE_URL"
+        ),
     )
     # Jev (issue #8) knobs: resolved from the environment / ``.env`` here so a
     # ``MAILROOM_JEV_PROVIDER=openrouter`` line in ``.env`` is honoured. Each
@@ -153,16 +163,19 @@ class Settings(BaseSettings):
     # taxonomy ``jev:`` block and then the code default, preserving the
     # documented env -> taxonomy -> default resolution order.
     jev_provider: _JevStr = Field(
-        default=None, validation_alias=AliasChoices("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER")
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER"),
     )
     jev_model: _JevStr = Field(
         default=None, validation_alias=AliasChoices("MAILROOM_JEV_MODEL", "JEV_MODEL")
     )
     jev_base_url: _JevStr = Field(
-        default=None, validation_alias=AliasChoices("MAILROOM_JEV_BASE_URL", "JEV_BASE_URL")
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_BASE_URL", "JEV_BASE_URL"),
     )
     jev_api_key: _JevStr = Field(
-        default=None, validation_alias=AliasChoices("MAILROOM_JEV_API_KEY", "JEV_API_KEY")
+        default=None,
+        validation_alias=AliasChoices("MAILROOM_JEV_API_KEY", "JEV_API_KEY"),
     )
     jev_temperature: _JevFloat = Field(
         default=None,
@@ -326,8 +339,8 @@ def jev_config() -> JevConfig:
     """
     taxonomy = dict(load_taxonomy().raw.get("jev") or {})
     provider = (
-        _jev_env("PROVIDER") or str(taxonomy.get("provider") or "off")
-    ).strip().lower()
+        (_jev_env("PROVIDER") or str(taxonomy.get("provider") or "off")).strip().lower()
+    )
     if provider not in _JEV_PROVIDERS:
         provider = "off"
     defaults = _JEV_PROVIDER_DEFAULTS[provider]
@@ -336,10 +349,14 @@ def jev_config() -> JevConfig:
         model=_jev_field("MODEL", taxonomy) or defaults["model"],
         base_url=_jev_field("BASE_URL", taxonomy) or defaults["base_url"],
         api_key=_jev_api_key(get_settings(), provider),
-        temperature=_jev_scalar("TEMPERATURE", taxonomy, _JEV_DEFAULTS["temperature"], float),
+        temperature=_jev_scalar(
+            "TEMPERATURE", taxonomy, _JEV_DEFAULTS["temperature"], float
+        ),
         accept_threshold=_jev_scalar(
             "ACCEPT_THRESHOLD", taxonomy, _JEV_DEFAULTS["accept_threshold"], float
         ),
         timeout_s=_jev_scalar("TIMEOUT_S", taxonomy, _JEV_DEFAULTS["timeout_s"], float),
-        max_retries=_jev_scalar("MAX_RETRIES", taxonomy, _JEV_DEFAULTS["max_retries"], int),
+        max_retries=_jev_scalar(
+            "MAX_RETRIES", taxonomy, _JEV_DEFAULTS["max_retries"], int
+        ),
     )

@@ -50,8 +50,12 @@ def listen_port() -> int:
 
 @app.command()
 def serve(
-    host: str = typer.Option(None, "--host", help="Bind host (default MAILROOM_API_HOST)."),
-    port: int = typer.Option(None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."),
+    host: str = typer.Option(
+        None, "--host", help="Bind host (default MAILROOM_API_HOST)."
+    ),
+    port: int = typer.Option(
+        None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."
+    ),
     watch: bool = typer.Option(
         True, "--watch/--no-watch", help="Run the embedded inbox watcher with the API."
     ),
@@ -116,7 +120,9 @@ def eval(
     prompt_set: str = typer.Option("frozen_v1", "--prompt-set"),
     merger_mode: str = typer.Option("frozen", "--merger-mode"),
     mode: str = typer.Option("pipeline", "--mode", help="pipeline | specialist_cell"),
-    judge_sample_rate: float = typer.Option(1.0, "--judge-sample-rate", min=0.0, max=1.0),
+    judge_sample_rate: float = typer.Option(
+        1.0, "--judge-sample-rate", min=0.0, max=1.0
+    ),
     split: str = typer.Option("test", "--split"),
     local_dir: Path = typer.Option(None, "--local-dir", exists=True, file_okay=False),
     gpu_usd_per_hour: float = typer.Option(0.80, "--gpu-usd-per-hour"),
@@ -147,8 +153,14 @@ def eval(
 
 @app.command("train-gate")
 def train_gate_command(
-    rows: Path = typer.Option(..., "--rows", exists=True, dir_okay=False, readable=True,
-                             help="JSONL feature rows (eval_docs echoes)."),
+    rows: Path = typer.Option(
+        ...,
+        "--rows",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="JSONL feature rows (eval_docs echoes).",
+    ),
     out: Path = typer.Option(Path("models/route_gate.json"), "--out"),
     calibration: bool = typer.Option(
         False, "--calibration", help="Fit temperature calibration instead of the gate."
@@ -213,7 +225,9 @@ def card(
 @app.command(name="conformance")
 def conformance(
     provider: str = typer.Option(
-        "", "--provider", help="Provider to conformance-test (default: configured provider)."
+        "",
+        "--provider",
+        help="Provider to conformance-test (default: configured provider).",
     ),
     per_class: int = typer.Option(2, "--per-class", min=1),
     revision: str = typer.Option("ed7576b6", "--revision"),
@@ -237,9 +251,7 @@ def conformance(
             {
                 "provider": card.provider,
                 "model": card.model,
-                "roles": {
-                    role: stats.to_dict() for role, stats in card.roles.items()
-                },
+                "roles": {role: stats.to_dict() for role, stats in card.roles.items()},
                 "out": str(out),
             }
         )
@@ -268,7 +280,9 @@ def _jev_off() -> None:
 def decide(
     state: str = typer.Option(..., "--state", help="State text/prompt passed to Jev."),
     question_type: str = typer.Option(..., "--type", help="choice | noul | score."),
-    instructions: str = typer.Option(..., "--instructions", help="Question instructions."),
+    instructions: str = typer.Option(
+        ..., "--instructions", help="Question instructions."
+    ),
     criteria: list[str] = typer.Option(
         None, "--criteria", help="Repeatable KEY=DESCRIPTION (choice/noul)."
     ),

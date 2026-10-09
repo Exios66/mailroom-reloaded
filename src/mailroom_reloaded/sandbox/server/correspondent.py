@@ -28,6 +28,14 @@ from typing import Any, Protocol
 
 from jinja2.sandbox import SandboxedEnvironment
 
+from mailroom_reloaded.sandbox.server.triage import (
+    INTENT_ISSUE,
+    INTENT_SIGNAL,
+    extract_features,
+    lexicon_score,
+    score_intents,
+)
+
 __all__ = [
     "AGENTS",
     "AttachmentView",
@@ -276,6 +284,22 @@ _EN_STOP = frozenset(
 )
 
 
+def _matrix_row(tools: Any, intent: str) -> dict:
+    """The delegation-matrix row for an intent (empty when the tool surface has none)."""
+    get = getattr(tools, "delegation", None)
+    rows = get() if callable(get) else {}
+    return rows.get(INTENT_ISSUE.get(intent, ""), {}) or {}
+
+
+def _matrix_drafts(row: dict) -> bool:
+    """Does the matrix put a drafted reply on this issue class?"""
+    action = row.get("boss_action", "")
+    notes = row.get("notes", "").lower()
+    return "task_correspondent" in action or (
+        "acknowledgment draft" in notes and "if a human approves" not in notes
+    )
+
+
 def _non_english(text: str) -> bool:
     toks = re.findall(r"[a-zA-Z\u00c0-\u024f']+", text.lower())
     if len(toks) < 8:
@@ -283,6 +307,46 @@ def _non_english(text: str) -> bool:
     return sum(t in _EN_STOP for t in toks) / len(toks) < 0.12
 
 
+_REL_KINDS = [  # relation kind from message wording (protocol section 8.2 vocabulary)
+    (
+        "withdraws",
+        re.compile(
+            r"(ignore the earlier|withdraw|wrong file|disregard (the )?(earlier|previous))",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "duplicates",
+        re.compile(
+            r"(resend|resending|re-?sent|duplicate|nothing has changed)", re.IGNORECASE
+        ),
+    ),
+    (
+        "completes",
+        re.compile(
+            r"(part \d+ of \d+|left out|completes|remaining (pages|exhibits)|missing (page|exhibit|part)|late exhibit|\(late\))",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "supersedes",
+        re.compile(
+            r"(supersede|replaces?|replaced|this time|updated version|newer version|instead of)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "amends",
+        re.compile(r"(amend|redline|corrected|corrects|correction)", re.IGNORECASE),
+    ),
+    (
+        "answers",
+        re.compile(
+            r"(you asked for|the document you|as you requested|requested document)",
+            re.IGNORECASE,
+        ),
+    ),
+]
 _ASK = re.compile(
     r"(\?|\b(can|could|would) you\b|\bplease (send|provide|give|tell|confirm what)\b|\bwhere (is|are)\b"
     r"|\bwho can\b|\bwhat (is|are|does|was)\b)",
@@ -389,6 +453,10 @@ _T_QUESTION = _ENV.from_string(
     "details with you. We do not share document contents or extracted details by email "
     "until they have been checked.\n\nBest regards,\nMailroom Correspondent\n"
 )
+_T_MISSING = _ENV.from_string(
+    "Hello,\n\nThank you for asking. We are checking what is outstanding on our side and a team "
+    "member will confirm exactly which documents we still need.\n\nBest regards,\nMailroom Correspondent\n"
+)
 _T_CLARIFY = _ENV.from_string(
     "Hello,\n\nThank you for sending {{ names }}. It differs from what we normally receive from "
     "you, so could you confirm which matter it belongs to?\n\nBest regards,\nMailroom Correspondent\n"
@@ -402,7 +470,7 @@ _T_ACK = _ENV.from_string(
 class StandInCorrespondent:
     """Deterministic rule-based Correspondent. STAND-IN, not the real agent."""
 
-    name = "rule-based-standin/v1"
+    name = "rule-based-standin/v2"
     stand_in = True
 
     # ---------------------------------------------------------------- client / trust
@@ -707,7 +775,9 @@ class StandInCorrespondent:
                 attachment_lanes=lanes("quarantine", "impersonation indicators"),
                 summary="Sender claims a senior identity from a failed-auth origin; no reply, escalated.",
             )
-        payment = bool(_PAYMENT.search(text)) and not _NO_CHANGE.search(text)
+        payment = lexicon_score(
+            text, "payment_or_identity_change"
+        ) >= 2.6 and not _NO_CHANGE.search(text)
         suppress = bool(_CALL_SUPPRESS.search(text))
         if payment:
             reasons.append(
@@ -805,119 +875,41 @@ class StandInCorrespondent:
                 summary="Attachment type is on the hard-hold list; quarantined unopened.",
             )
 
-        # 3. triage (rule-based; the real agent makes one LLM call here)
+        # 3. triage: scored features (the real agent makes one LLM call here)
         atts = msg.attachments
         has_att = bool(atts)
-        if _LEGAL.search(text):
-            intent, issue, sig, pri = (
-                "legal_notice",
-                "legal_notice",
-                "legal_notice",
-                "critical",
+        feats = extract_features(
+            msg,
+            trust,
+            match,
+            {
+                d["doc_id"]
+                for d in tools.lookup_catalog()
+                if d["status"] in {"archived", "parked"}
+            },
+        )
+        tri = score_intents(text, feats, msg.subject)
+        intent = tri.intent
+        issue = INTENT_ISSUE[intent]
+        sig, pri = INTENT_SIGNAL[intent]
+        if intent == "urgent_deadline" and _COURT_URGENT.search(text):
+            pri = "critical"
+        if intent == "general_question":
+            if _ADVISORY.search(text):
+                sig, pri = "fyi", "low"  # a client asking whether a message is genuine
+            elif trust != "verified":
+                sig = "fyi"
+        if intent == "spam_or_phishing" and trust in {"suspicious", "hostile"}:
+            sig, pri = "possible_attack", "high"
+        review_flag = tri.needs_review
+        reasons.append(
+            f"triage: intent={intent} confidence={tri.confidence}"
+            + (
+                " (abstained: low score, general_question + review)"
+                if tri.abstained
+                else ""
             )
-        elif _PRIVACY.search(text):
-            intent, issue, sig, pri = (
-                "privacy_request",
-                "privacy_request",
-                "privacy_request",
-                "high",
-            )
-        elif _BULK.search(text):
-            intent, issue, sig, pri = (
-                "disclosure_request",
-                "disclosure_request_bulk",
-                "possible_attack",
-                "high",
-            )
-        elif _WITHDRAW.search(text):
-            intent, issue, sig, pri = (
-                "retraction_or_withdrawal",
-                "retraction_or_withdrawal",
-                "correction",
-                "normal",
-            )
-        elif _COMPLAINT.search(text):
-            intent, issue, sig, pri = "complaint", "complaint", "complaint", "high"
-        elif _URGENT.search(text):
-            intent, issue, sig, pri = (
-                "urgent_deadline",
-                "urgent_deadline",
-                "urgent",
-                "critical" if _COURT_URGENT.search(text) else "high",
-            )
-        elif _UNRELATED.search(text) and not has_att:
-            intent, issue, sig, pri = "unrelated", "spam_or_phishing", "fyi", "low"
-        elif _STATUS.search(text) and not _SUBMIT.search(text):
-            intent, issue, sig, pri = (
-                "status_request",
-                "status_request",
-                "status_request",
-                "normal",
-            )
-        elif _ANNOUNCE.search(text) and not has_att:
-            intent, issue, sig, pri = (
-                "document_submission",
-                "document_submission",
-                "doc_relation",
-                "normal",
-            )
-        elif _NOTE_AMEND.search(text) and not has_att:
-            intent, issue, sig, pri = (
-                "correction_or_amendment",
-                "document_submission",
-                "correction",
-                "normal",
-            )
-        elif (
-            has_att
-            and _QUESTION.search(text)
-            and not _SUBMIT.search(text)
-            or _LOCKOUT.search(text)
-        ):
-            intent, issue, sig, pri = (
-                "general_question",
-                "general_question",
-                "fyi",
-                "normal",
-            )
-        elif has_att and (_AMEND.search(text)):
-            intent, issue, sig, pri = (
-                "correction_or_amendment",
-                "document_submission",
-                "doc_relation",
-                "normal",
-            )
-        elif has_att and (_SUPERSEDE.search(text) or _SUBMIT.search(text)):
-            intent, issue, sig, pri = (
-                "document_submission",
-                "document_submission",
-                "new_info",
-                "normal",
-            )
-        elif _STATUS.search(text) and not has_att:
-            intent, issue, sig, pri = (
-                "status_request",
-                "status_request",
-                "status_request",
-                "normal",
-            )
-        elif _VENDOR.search(text) and match is None and not has_att:
-            intent, issue, sig, pri = "unrelated", "spam_or_phishing", "fyi", "low"
-        elif has_att:
-            intent, issue, sig, pri = (
-                "document_submission",
-                "document_submission",
-                "new_info",
-                "normal",
-            )
-        else:
-            intent, issue, sig, pri = (
-                "general_question",
-                "general_question",
-                "fyi",
-                "normal",
-            )
-        reasons.append(f"triage: intent={intent} (keyword rules)")
+        )
         if intent == "legal_notice" and trust == "suspicious":
             trust = "hostile"  # a legal demand that fails sender authentication
 
@@ -992,13 +984,17 @@ class StandInCorrespondent:
                 r"(third|nobody|no one|sitting for|again)", text, re.IGNORECASE
             ):
                 extra("urgent", "high")  # an aged, repeated request is escalated
+            if relations:
+                extra(
+                    "doc_relation", "normal"
+                )  # the attachment relates to a known document
             if _PRIVACY_Q.search(text):
                 extra("privacy_request", "high")
             if (has_att or _FORWARDED.search(msg.body)) and sig != "new_info":
                 extra("new_info", "normal")
             if _MISSING.search(text):
                 extra("missing_doc", "normal")
-        if intent == "general_question" and _non_english(msg.body):
+        if review_flag or feats.non_english and intent == "general_question":
             flags.append("needs_review")
         if _ANOMALY.search(text) and has_att:
             flags.append("annotate")
@@ -1060,15 +1056,14 @@ class StandInCorrespondent:
         }
 
     def _relations(self, msg, text, lane_list, tools, trust, reasons) -> list[dict]:
-        kind = (
-            "supersedes"
-            if _SUPERSEDE.search(text)
-            else "amends"
-            if _AMEND.search(text)
-            else "withdraws"
-            if _WITHDRAW.search(text)
-            else None
-        )
+        kind = next(
+            (
+                k
+                for k, rx in _REL_KINDS
+                if rx.search(text) and not (k == "withdraws" and msg.attachments)
+            ),
+            None,
+        )  # a message that brings a new document replaces, it does not withdraw
         catalog = tools.lookup_catalog()
         out: list[dict] = []
         lane_by = {ln["name"]: ln for ln in lane_list}
@@ -1154,6 +1149,7 @@ class StandInCorrespondent:
         }
         asked = bool(_ASK.search(msg.body))
         text = f"{msg.subject}\n{msg.body}"
+        row = _matrix_row(tools, intent)
         quarantined = any(ln["lane"] == "quarantine" for ln in lane_list)
         if intent == "status_request":
             if not asked:
@@ -1196,22 +1192,29 @@ class StandInCorrespondent:
             return [
                 Draft(**base, body=_T_HOLD.render() + _FOOTER, intent="status_update")
             ]
-        if (
-            intent == "general_question"
-            and trust == "verified"
-            and asked
-            and not (
-                _ADVISORY.search(msg.body)
+        fallback = {
+            "status_request",
+            "complaint",
+            "general_question",
+            "privacy_request",
+            "missing_document_followup",
+        }
+        allowed = _matrix_drafts(row) if row else intent in fallback
+        if trust == "verified" and allowed:
+            if intent == "general_question" and (
+                not asked
+                or _ADVISORY.search(msg.body)
                 or _FORWARDED.search(msg.body)
                 or _MISSING.search(msg.body)
                 or _non_english(msg.body)
-            )
-        ):
-            return [Draft(**base, body=_T_QUESTION.render() + _FOOTER, intent=intent)]
-        if intent == "privacy_request" and trust == "verified":
-            return [Draft(**base, body=_T_PRIVACY.render() + _FOOTER, intent=intent)]
-        if intent == "complaint" and trust == "verified":
-            return [Draft(**base, body=_T_HOLDING.render() + _FOOTER, intent=intent)]
+            ):
+                return []
+            tpl = {
+                "privacy_request": _T_PRIVACY,
+                "complaint": _T_HOLDING,
+                "missing_document_followup": _T_MISSING,
+            }.get(intent, _T_QUESTION)
+            return [Draft(**base, body=tpl.render() + _FOOTER, intent=intent)]
         return []
 
 

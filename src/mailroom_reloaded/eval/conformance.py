@@ -75,7 +75,9 @@ DEFAULT_OUT_DIR = Path("runs/conformance")
 #: The five conformance roles, in spec section 11 table order.
 _ROLES: tuple[str, ...] = ("sorter", "specialists", "judge", "arbiter", "boss")
 
-_ARBITER_ACTIONS = frozenset({"accept", "accept_with_caveats", "re_extract", "escalate"})
+_ARBITER_ACTIONS = frozenset(
+    {"accept", "accept_with_caveats", "re_extract", "escalate"}
+)
 _BOSS_ACTIONS = frozenset({"reassign_class", "accept", "human_review"})
 
 _MISSING = object()
@@ -363,7 +365,9 @@ def _sorter_runs(doc: BlindDoc, gt: GroundTruth | None) -> list[RoleRun]:
     runs: list[RoleRun] = []
     full_calls: list[ToolCall] = []
     with _record_tool_calls("sorter", full_calls):
-        result = sort(doc.doc_text, Handoff(SortMode.FULL, None, "", "conformance_full"))
+        result = sort(
+            doc.doc_text, Handoff(SortMode.FULL, None, "", "conformance_full")
+        )
     runs.append(
         RoleRun(
             role="sorter",
@@ -498,7 +502,9 @@ def _arbiter_runs(
     calls: list[ToolCall] = []
     ctx = ToolContext(doc_text=doc.doc_text, doc_id=doc_id_for_sha(doc.content_sha256))
     with _record_tool_calls("arbiter", calls):
-        decision: ArbiterDecision = arbitrate(doc.doc_text, doc_type, data, verdict, ctx)
+        decision: ArbiterDecision = arbitrate(
+            doc.doc_text, doc_type, data, verdict, ctx
+        )
     return [
         RoleRun(
             role="arbiter",

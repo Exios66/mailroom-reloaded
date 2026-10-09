@@ -250,10 +250,16 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
     return GroundTruth(
         filename=filename,
         expected=_row_get(row, ("expected", "expected_doc_type", "label", "doc_type")),
-        expected_subclass=_row_get(row, ("expected_subclass", "doc_subclass", "subclass")),
+        expected_subclass=_row_get(
+            row, ("expected_subclass", "doc_subclass", "subclass")
+        ),
         fields=fields,
-        cuad_clause_labels=clause("cuad_clause_labels", ("cuad_clause_labels", "cuad_clauses")),
-        maud_clause_labels=clause("maud_clause_labels", ("maud_clause_labels", "maud_clauses")),
+        cuad_clause_labels=clause(
+            "cuad_clause_labels", ("cuad_clause_labels", "cuad_clauses")
+        ),
+        maud_clause_labels=clause(
+            "maud_clause_labels", ("maud_clause_labels", "maud_clauses")
+        ),
         retry_expected=_row_get(row, ("retry_expected",)),
         review_expected=_row_get(row, ("review_expected",)),
         expected_stage=_row_get(row, ("expected_stage",)),
@@ -348,7 +354,9 @@ def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> li
         dataset = datasets.load_dataset(REPO, config, revision=revision)
         splits = dataset.values() if isinstance(dataset, Mapping) else [dataset]
         rows = [
-            row for subset in splits for row in subset
+            row
+            for subset in splits
+            for row in subset
             if _row_get(row, ("split",)) == split
         ]
         if not rows:

@@ -51,7 +51,9 @@ class ToolLoopResult:
     rounds: int
     usage: Usage
     inline: bool = False
-    reject_key: tuple[str, str] | None = None  # set when round 1 was rejected for tool support
+    reject_key: tuple[str, str] | None = (
+        None  # set when round 1 was rejected for tool support
+    )
     tool_log: list[tuple[str, dict[str, Any], str]] = field(default_factory=list)
 
 
@@ -65,7 +67,12 @@ def reset_tool_support_cache() -> None:
 
 _TOOL_REJECTION_MARKERS = ("tool", "function")
 # A 400 about request size or our own tool schema is a real error, not missing support.
-_NOT_TOOL_SUPPORT_MARKERS = ("context length", "context window", "too many tokens", "invalid schema")
+_NOT_TOOL_SUPPORT_MARKERS = (
+    "context length",
+    "context window",
+    "too many tokens",
+    "invalid schema",
+)
 
 
 def is_tool_rejection(exc: Exception) -> bool:
@@ -91,13 +98,21 @@ def tool_spec(tool: ToolLike) -> dict[str, Any]:
     }
 
 
-def execute_tool(tools: dict[str, ToolLike], name: str, raw_args: str | dict[str, Any] | None) -> str:
+def execute_tool(
+    tools: dict[str, ToolLike], name: str, raw_args: str | dict[str, Any] | None
+) -> str:
     """Run one tool call. Failures come back as an error string for the model."""
     tool = tools.get(name)
     if tool is None:
-        return f"Error: unknown tool '{name}'. Available tools: {', '.join(sorted(tools))}"
+        return (
+            f"Error: unknown tool '{name}'. Available tools: {', '.join(sorted(tools))}"
+        )
     try:
-        args = json.loads(raw_args) if isinstance(raw_args, str) and raw_args.strip() else (raw_args or {})
+        args = (
+            json.loads(raw_args)
+            if isinstance(raw_args, str) and raw_args.strip()
+            else (raw_args or {})
+        )
         if not isinstance(args, dict):
             raise TypeError("arguments must be a JSON object")
         parsed = tool.params_model(**args)
@@ -172,13 +187,22 @@ def inline_messages(
         for args in arg_sets:
             if (tool.name, json.dumps(args, sort_keys=True)) not in seen:
                 log.append((tool.name, args, execute_tool(by_name, tool.name, args)))
-    lines = ["", "", "## Reference tool results", "(Tools cannot be called on this endpoint; their results are supplied here.)"]
+    lines = [
+        "",
+        "",
+        "## Reference tool results",
+        "(Tools cannot be called on this endpoint; their results are supplied here.)",
+    ]
     for name, args, result in log:
         lines.append(f"### {name}({json.dumps(args, sort_keys=True)})")
         lines.append(result)
     if unavailable:
-        lines.append("### Not available (need arguments only a live tool call could supply)")
-        lines.extend(f"- {t.name}: {t.description} (not available)" for t in unavailable)
+        lines.append(
+            "### Not available (need arguments only a live tool call could supply)"
+        )
+        lines.extend(
+            f"- {t.name}: {t.description} (not available)" for t in unavailable
+        )
     block = "\n".join(lines)
     out = [dict(m) for m in messages]
     if out and out[0].get("role") == "system":
@@ -207,22 +231,34 @@ def run_tool_loop(
     messages = list(base_messages)
     if key not in _NO_TOOLS:
         specs = [tool_spec(t) for t in tools]
-        phase = {k: v for k, v in req.items() if k not in ("response_format", "logprobs")}
+        phase = {
+            k: v for k, v in req.items() if k not in ("response_format", "logprobs")
+        }
         for _ in range(max_rounds):
             try:
                 resp, u = chat_create(
-                    client, {**phase, "messages": messages, "tools": specs, "tool_choice": "auto"}
+                    client,
+                    {
+                        **phase,
+                        "messages": messages,
+                        "tools": specs,
+                        "tool_choice": "auto",
+                    },
                 )
             except openai.BadRequestError as exc:
                 if not is_tool_rejection(exc):
                     raise
-                logger.warning("llm_tools_rejected", model=req.get("model"), detail=str(exc)[:200])
+                logger.warning(
+                    "llm_tools_rejected", model=req.get("model"), detail=str(exc)[:200]
+                )
                 reject_key = key if rounds == 0 else None
                 break
             usage = usage + u
             choice = resp.choices[0]
             calls = choice.message.tool_calls or []
-            if not calls:  # draft reply is discarded, so a length cap on it is irrelevant
+            if (
+                not calls
+            ):  # draft reply is discarded, so a length cap on it is irrelevant
                 return ToolLoopResult(messages, rounds, usage, False, None, log)
             if choice.finish_reason == "length":
                 raise LengthFinishReasonError(
@@ -236,7 +272,10 @@ def run_tool_loop(
                         {
                             "id": c.id,
                             "type": "function",
-                            "function": {"name": c.function.name, "arguments": c.function.arguments},
+                            "function": {
+                                "name": c.function.name,
+                                "arguments": c.function.arguments,
+                            },
                         }
                         for c in calls
                     ],
@@ -248,8 +287,16 @@ def run_tool_loop(
                     shown = json.loads(c.function.arguments or "{}")
                 except ValueError:
                     shown = {"_raw": c.function.arguments}
-                log.append((c.function.name, shown if isinstance(shown, dict) else {"_raw": shown}, result))
-                messages.append({"role": "tool", "tool_call_id": c.id, "content": result})
+                log.append(
+                    (
+                        c.function.name,
+                        shown if isinstance(shown, dict) else {"_raw": shown},
+                        result,
+                    )
+                )
+                messages.append(
+                    {"role": "tool", "tool_call_id": c.id, "content": result}
+                )
             rounds += 1
         else:
             return ToolLoopResult(messages, rounds, usage, False, None, log)

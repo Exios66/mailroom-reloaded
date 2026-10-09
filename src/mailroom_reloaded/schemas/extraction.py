@@ -16,7 +16,10 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-_MONEY_RE = re.compile(r"^\(?\s*[-+]?\s*(?:USD|US\$|\$)?\s*[-+]?\s*([\d,]*\.?\d+)\s*(?:USD)?\s*\)?$", re.IGNORECASE)
+_MONEY_RE = re.compile(
+    r"^\(?\s*[-+]?\s*(?:USD|US\$|\$)?\s*[-+]?\s*([\d,]*\.?\d+)\s*(?:USD)?\s*\)?$",
+    re.IGNORECASE,
+)
 
 
 def _coerce_money(v: Any) -> Any:
@@ -79,7 +82,9 @@ def _coerce_reasoning(v: Any) -> Any:
 
 
 class ContractExtraction(BaseModel):
-    reasoning: Reasoning | None = None  # first: prompt says produce it before the values
+    reasoning: Reasoning | None = (
+        None  # first: prompt says produce it before the values
+    )
     document_name: str | None = None
     parties: list[str] = Field(default_factory=list)
     effective_date: str | None = None
@@ -97,7 +102,9 @@ class ContractExtraction(BaseModel):
 
 
 class MergerAgreementExtraction(BaseModel):
-    reasoning: Reasoning | None = None  # first: prompt says produce it before the values
+    reasoning: Reasoning | None = (
+        None  # first: prompt says produce it before the values
+    )
     document_name: str | None = None
     parties: list[str] = Field(default_factory=list)
     effective_date: str | None = None
@@ -183,10 +190,13 @@ def get_extraction_schema(doc_type: str) -> type[BaseModel]:
     try:
         return EXTRACTION_SCHEMAS[doc_type]
     except KeyError:
-        raise KeyError(f"unknown doc_type {doc_type!r}; expected one of {sorted(EXTRACTION_SCHEMAS)}") from None
+        raise KeyError(
+            f"unknown doc_type {doc_type!r}; expected one of {sorted(EXTRACTION_SCHEMAS)}"
+        ) from None
 
 
 # --------------------------------------------------------------------------- strict schema
+
 
 def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
     if "anyOf" in prop:
@@ -202,9 +212,11 @@ def _make_nullable(prop: dict[str, Any]) -> dict[str, Any]:
         return {**rest, "anyOf": [core, {"type": "null"}]}
     if isinstance(t, list):
         return prop if "null" in t else {**prop, "type": [*t, "null"]}
-    return {**prop, "type": [t, "null"]} if t in ("string", "number", "integer", "boolean") else {
-        "anyOf": [prop, {"type": "null"}]
-    }
+    return (
+        {**prop, "type": [t, "null"]}
+        if t in ("string", "number", "integer", "boolean")
+        else {"anyOf": [prop, {"type": "null"}]}
+    )
 
 
 def _strictify(node: Any) -> None:
@@ -229,11 +241,16 @@ def response_format(doc_type: str) -> dict[str, Any]:
     _strictify(schema)
     return {
         "type": "json_schema",
-        "json_schema": {"name": f"{doc_type}_extraction", "strict": True, "schema": schema},
+        "json_schema": {
+            "name": f"{doc_type}_extraction",
+            "strict": True,
+            "schema": schema,
+        },
     }
 
 
 # --------------------------------------------------------------------------- compliance
+
 
 @dataclass
 class SchemaAssessment:
@@ -260,8 +277,11 @@ def _parse_object_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
     except (SyntaxError, ValueError):
         pass
     match = _JSON_OBJECT_RE.search(text)
-    if match and (text[: match.start()].strip() or text[match.end():].strip()):
-        for loader, how in ((json.loads, "wrapped_json"), (ast.literal_eval, "wrapped_python_repr")):
+    if match and (text[: match.start()].strip() or text[match.end() :].strip()):
+        for loader, how in (
+            (json.loads, "wrapped_json"),
+            (ast.literal_eval, "wrapped_python_repr"),
+        ):
             try:
                 obj = loader(match.group(0))
             except (SyntaxError, ValueError):  # JSONDecodeError is a ValueError
@@ -271,7 +291,9 @@ def _parse_object_text(text: str) -> tuple[dict[str, Any] | None, str | None]:
     return None, None
 
 
-def coerce_predicted_payload(predicted: Any) -> tuple[dict[str, Any] | None, str | None]:
+def coerce_predicted_payload(
+    predicted: Any,
+) -> tuple[dict[str, Any] | None, str | None]:
     """Turn a prediction into a dict, or return (None, reason)."""
     if predicted is None:
         return None, "null_payload"
@@ -307,13 +329,16 @@ def _pydantic_valid(doc_type: str, payload: dict[str, Any]) -> tuple[bool, list[
         validated = model.model_validate(payload)
     except ValidationError:
         return False, []
+
     def _changed(k: str, v: Any) -> bool:
         got = getattr(validated, k)
         if isinstance(got, BaseModel):
             return got.model_dump(exclude_unset=True) != v
         return got != v
 
-    coerced = [k for k, v in payload.items() if k in model.model_fields and _changed(k, v)]
+    coerced = [
+        k for k, v in payload.items() if k in model.model_fields and _changed(k, v)
+    ]
     return True, sorted(coerced)
 
 
@@ -321,6 +346,10 @@ def assess_payload(doc_type: str, raw: str | dict) -> SchemaAssessment:
     get_extraction_schema(doc_type)  # KeyError on unknown class
     payload, reason = coerce_predicted_payload(raw)
     if payload is None or reason is not None:
-        return SchemaAssessment(parsed=payload, schema_valid=False, parse_error=reason or "unparseable")
+        return SchemaAssessment(
+            parsed=payload, schema_valid=False, parse_error=reason or "unparseable"
+        )
     valid, coerced = _pydantic_valid(doc_type, payload)
-    return SchemaAssessment(parsed=payload, schema_valid=valid, parse_error=None, coerced_fields=coerced)
+    return SchemaAssessment(
+        parsed=payload, schema_valid=valid, parse_error=None, coerced_fields=coerced
+    )

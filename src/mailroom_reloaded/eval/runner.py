@@ -128,9 +128,7 @@ class EvalConfig:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
-def select_graded(
-    docs: list[BlindDoc], rate: float, seed: int
-) -> set[str]:
+def select_graded(docs: list[BlindDoc], rate: float, seed: int) -> set[str]:
     """Filenames to grade with the judge, deterministically seeded.
 
     ``rate <= 0`` grades nothing and ``rate >= 1`` grades everything; otherwise
@@ -226,12 +224,20 @@ def _grade_parts(grade: Any) -> tuple[float | None, str | None, str | None]:
     classification = getattr(grade, "classification", None)
     return (
         float(overall) if overall is not None else None,
-        _json([f.model_dump() if hasattr(f, "model_dump") else f for f in (fields or [])]),
-        _json(classification.model_dump() if hasattr(classification, "model_dump") else classification),
+        _json(
+            [f.model_dump() if hasattr(f, "model_dump") else f for f in (fields or [])]
+        ),
+        _json(
+            classification.model_dump()
+            if hasattr(classification, "model_dump")
+            else classification
+        ),
     )
 
 
-def _gate_features(state: Any, doc_type: str | None, extract: ExtractResult | None) -> dict[str, Any]:
+def _gate_features(
+    state: Any, doc_type: str | None, extract: ExtractResult | None
+) -> dict[str, Any]:
     """Collect classification and extraction signals for gate training."""
     sort = getattr(state, "sort", None)
     return {
@@ -245,7 +251,9 @@ def _gate_features(state: Any, doc_type: str | None, extract: ExtractResult | No
         "extract": {
             "confidence": extract.confidence if extract is not None else None,
             "attempts": int(getattr(state, "extract_attempts", 0) or 0),
-            "schema_valid": bool(extract.schema_valid) if extract is not None else False,
+            "schema_valid": bool(extract.schema_valid)
+            if extract is not None
+            else False,
             "length_capped": bool(
                 extract is not None and extract.error_kind == "LengthFinishReasonError"
             ),
@@ -305,25 +313,33 @@ def _pipeline_row(
     extract = getattr(state, "extract", None)
     usage = _usage(state)
     doc_type = _state_doc_type(state)
-    row = _base_row(run_id, doc, gt, mode="pipeline", latency_s=latency_s, graded=graded)
+    row = _base_row(
+        run_id, doc, gt, mode="pipeline", latency_s=latency_s, graded=graded
+    )
     row.update(
         status=str(getattr(state, "status", "") or "unknown"),
         doc_type=doc_type,
         doc_subclass=_state_subclass(state, gt),
         sort_confidence=getattr(sort, "confidence", None),
-        sort_mode=getattr(getattr(sort, "mode", None), "value", getattr(sort, "mode", None)),
+        sort_mode=getattr(
+            getattr(sort, "mode", None), "value", getattr(sort, "mode", None)
+        ),
         extract_confidence=extract.confidence if extract is not None else None,
         schema_valid=1 if (extract is not None and extract.schema_valid) else 0,
         parse_error=extract.parse_error if extract is not None else None,
         error_kind=extract.error_kind if extract is not None else None,
-        length_capped=1 if (extract is not None and extract.error_kind == "LengthFinishReasonError") else 0,
+        length_capped=1
+        if (extract is not None and extract.error_kind == "LengthFinishReasonError")
+        else 0,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
         calls=usage.calls,
         gate_features=_json(_gate_features(state, doc_type, extract)),
         route_trail=_json(list(getattr(state, "route_trail", []) or [])),
     )
-    overall, fields_json, classification_json = _grade_parts(getattr(state, "grade", None))
+    overall, fields_json, classification_json = _grade_parts(
+        getattr(state, "grade", None)
+    )
     row.update(
         judge_overall=overall,
         judge_fields=fields_json,
@@ -341,7 +357,9 @@ def _cell_row(
     latency_s: float,
 ) -> dict[str, Any]:
     """Build an ungraded specialist result row, retaining failure diagnostics."""
-    row = _base_row(run_id, doc, gt, mode="specialist_cell", latency_s=latency_s, graded=False)
+    row = _base_row(
+        run_id, doc, gt, mode="specialist_cell", latency_s=latency_s, graded=False
+    )
     if result is None:
         return row
     row.update(
@@ -407,7 +425,12 @@ async def _run_pipeline(
             )
         except Exception as exc:  # noqa: BLE001 - one bad doc must not kill the run
             row = _base_row(
-                run_id, doc, gt, mode="pipeline", latency_s=time.monotonic() - start, graded=grade_this
+                run_id,
+                doc,
+                gt,
+                mode="pipeline",
+                latency_s=time.monotonic() - start,
+                graded=grade_this,
             )
             row["error_kind"] = type(exc).__name__
             row["parse_error"] = str(exc)[:500]
@@ -451,7 +474,12 @@ async def _run_cell(
             )
         except Exception as exc:  # noqa: BLE001 - record and continue
             row = _base_row(
-                run_id, doc, gt, mode="specialist_cell", latency_s=time.monotonic() - start, graded=False
+                run_id,
+                doc,
+                gt,
+                mode="specialist_cell",
+                latency_s=time.monotonic() - start,
+                graded=False,
             )
             row["error_kind"] = type(exc).__name__
             row["parse_error"] = str(exc)[:500]

@@ -96,7 +96,11 @@ def choice(
     name: str, instructions: str, criteria: Mapping[str, str]
 ) -> tuple[str, dict[str, Any]]:
     """Build a ``choice`` question: criteria maps each option to a description."""
-    return name, {"type": "choice", "instructions": instructions, "criteria": dict(criteria)}
+    return name, {
+        "type": "choice",
+        "instructions": instructions,
+        "criteria": dict(criteria),
+    }
 
 
 def noul(
@@ -118,7 +122,11 @@ def score(
     name: str, instructions: str, criteria: Sequence[str]
 ) -> tuple[str, dict[str, Any]]:
     """Build a ``score`` question: criteria is the ordered list of score labels."""
-    return name, {"type": "score", "instructions": instructions, "criteria": list(criteria)}
+    return name, {
+        "type": "score",
+        "instructions": instructions,
+        "criteria": list(criteria),
+    }
 
 
 class Transport(Protocol):
@@ -223,7 +231,11 @@ class JevClient:
         self, state: str | list | dict, questions: Mapping[str, dict]
     ) -> dict[str, JevAnswer]:
         """Ask Jev one or more questions; return answers keyed by question name."""
-        payload = {"model": self.cfg.model, "state": state, "questions": dict(questions)}
+        payload = {
+            "model": self.cfg.model,
+            "state": state,
+            "questions": dict(questions),
+        }
         headers = {"Content-Type": "application/json"}
         if self.cfg.api_key:
             headers["Authorization"] = f"Bearer {self.cfg.api_key}"
@@ -236,17 +248,24 @@ class JevClient:
             raise JevError("Jev returned an unexpected response body")
         return _parse_answers(body)
 
-    def _post_with_retry(self, payload: dict, headers: dict[str, str]) -> httpx.Response:
+    def _post_with_retry(
+        self, payload: dict, headers: dict[str, str]
+    ) -> httpx.Response:
         """POST once, retrying 429/5xx with backoff; raise ``JevError`` otherwise."""
         attempt = 0
         while True:
             response = self.transport.post(
-                self.cfg.base_url, json=payload, headers=headers, timeout=self.cfg.timeout_s
+                self.cfg.base_url,
+                json=payload,
+                headers=headers,
+                timeout=self.cfg.timeout_s,
             )
             status = response.status_code
             if 200 <= status < 300:
                 return response
-            if (status == 429 or 500 <= status < 600) and attempt < self.cfg.max_retries:
+            if (
+                status == 429 or 500 <= status < 600
+            ) and attempt < self.cfg.max_retries:
                 delay = 0.5 * (2**attempt)
                 retry_after = _retry_after(response)
                 if retry_after is not None:
@@ -372,12 +391,18 @@ class JevGate:
                 f"jev confidence {confidence} < verify {verify}",
                 "jev",
             )
-        if escalate is not None and escalate.noul is not None and escalate.noul >= _NOUL_ESCALATE:
+        if (
+            escalate is not None
+            and escalate.noul is not None
+            and escalate.noul >= _NOUL_ESCALATE
+        ):
             return GateDecision(
                 "human_review", f"jev noul {escalate.noul:.3f} escalate", "jev"
             )
         if route.choice not in ("proceed", "retry", "verify", "boss", "human_review"):
-            return GateDecision("human_review", f"jev unknown action {route.choice!r}", "jev")
+            return GateDecision(
+                "human_review", f"jev unknown action {route.choice!r}", "jev"
+            )
         if confidence < accepted:
             if route.choice in ("proceed", "verify"):
                 return GateDecision(
@@ -391,7 +416,9 @@ class JevGate:
                 "jev",
             )
         action: Action = route.choice  # type: ignore[assignment]
-        return GateDecision(action, f"jev choice {route.choice} p={confidence:.3f}", "jev")
+        return GateDecision(
+            action, f"jev choice {route.choice} p={confidence:.3f}", "jev"
+        )
 
 
 def load_jev_gate(taxonomy: Taxonomy | None = None) -> RouteGate | None:

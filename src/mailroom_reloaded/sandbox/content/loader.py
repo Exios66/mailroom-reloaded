@@ -94,18 +94,26 @@ def load_content(root: Path | str = SMOKE_DIR, *, strict: bool = False) -> Conte
     root = Path(root)
     rep = ValidationReport()
     if (root / "content.json").is_file():
-        kind, meta = "content", json.loads((root / "content.json").read_text(encoding="utf-8"))
+        kind, meta = (
+            "content",
+            json.loads((root / "content.json").read_text(encoding="utf-8")),
+        )
         check_compat(meta)
         reg_path = root / "dist" / "registry.yaml"
         gen_dir = root / "gen" / "specs"
         pers_dir = root / "personas" / "behavior"
         scen_dir = root / "scenarios"
     elif (root / "manifest.json").is_file():
-        kind, meta = "smoke", json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        kind, meta = (
+            "smoke",
+            json.loads((root / "manifest.json").read_text(encoding="utf-8")),
+        )
         if meta.get("schema") != "mailroom.smoke_export/v1":
             raise CompatError(f"unknown smoke manifest schema {meta.get('schema')!r}")
         if schema_major(meta["schema_version"]) != SUPPORTED_SCHEMA_MAJOR:
-            raise CompatError(f"smoke schema major {meta['schema_version']} unsupported")
+            raise CompatError(
+                f"smoke schema major {meta['schema_version']} unsupported"
+            )
         _verify_manifest(root, meta, rep)
         reg_path = root / "registry.yaml"
         gen_dir = root / "gen"
@@ -117,9 +125,18 @@ def load_content(root: Path | str = SMOKE_DIR, *, strict: bool = False) -> Conte
     scenarios = _yaml_dir(scen_dir, _validator("scenario.v2.json"), rep, root)
     personas = _yaml_dir(pers_dir, _validator("persona_behavior.v1.json"), rep, root)
     gen_specs = _yaml_dir(gen_dir, _validator("gen_spec.v1.json"), rep, root)
-    registry = yaml.safe_load(reg_path.read_text(encoding="utf-8")) if reg_path.is_file() else {}
+    registry = (
+        yaml.safe_load(reg_path.read_text(encoding="utf-8"))
+        if reg_path.is_file()
+        else {}
+    )
     if registry:
-        _check(_validator("registry.v1.json"), registry, str(reg_path.relative_to(root)), rep)
+        _check(
+            _validator("registry.v1.json"),
+            registry,
+            str(reg_path.relative_to(root)),
+            rep,
+        )
     else:
         rep.errors.append(f"missing registry: {reg_path.relative_to(root)}")
     cs = ContentSet(root, kind, meta, scenarios, registry, personas, gen_specs, rep)

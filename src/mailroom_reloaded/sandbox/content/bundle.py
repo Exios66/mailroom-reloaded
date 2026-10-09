@@ -15,7 +15,9 @@ def _open(path: Path):
     try:
         import zstandard
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError("zstandard is required: install the 'sandbox' extra") from exc
+        raise RuntimeError(
+            "zstandard is required: install the 'sandbox' extra"
+        ) from exc
     raw = zstandard.ZstdDecompressor().stream_reader(open(path, "rb"))  # noqa: SIM115 - closed with the tar stream
     return tarfile.open(fileobj=raw, mode="r|")
 
@@ -30,7 +32,9 @@ def read_content_json(bundle: Path | str) -> dict:
     raise ValueError("bundle has no content.json")
 
 
-def extract_bundle(bundle: Path | str, dest: Path | str, lock: ContentLock | None = None) -> Path:
+def extract_bundle(
+    bundle: Path | str, dest: Path | str, lock: ContentLock | None = None
+) -> Path:
     """Verify (when a lock is given) then safely extract into ``dest``."""
     if lock is not None:
         verify_bundle(bundle, lock)

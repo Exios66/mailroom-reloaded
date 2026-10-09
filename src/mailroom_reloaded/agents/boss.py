@@ -32,10 +32,7 @@ def _json(value: Any) -> str:
 def escalate(text: str, state_summary: dict | None, ctx: ToolContext) -> BossDecision:
     """Adjudicate an escalation from the manifest state summary."""
     tools = tools_for(ROLE, ctx)
-    description = (
-        f"Escalation summary:\n{_json(state_summary)}\n\n"
-        f"Source text:\n{text}"
-    )
+    description = f"Escalation summary:\n{_json(state_summary)}\n\nSource text:\n{text}"
     agent = Agent(
         role=ROLE,
         goal="Adjudicate the escalation and return one decision.",

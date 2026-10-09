@@ -60,9 +60,7 @@ class JevCalibration:
 def _validate_calibration(cal: JevCalibration) -> None:
     """Raise ``ValueError`` when a calibration violates the gate invariants."""
     if not math.isfinite(cal.temperature) or cal.temperature <= 0:
-        raise ValueError(
-            f"temperature must be finite and > 0, got {cal.temperature!r}"
-        )
+        raise ValueError(f"temperature must be finite and > 0, got {cal.temperature!r}")
     if not (
         math.isfinite(cal.verify_threshold)
         and math.isfinite(cal.accept_threshold)
@@ -131,9 +129,7 @@ def _search_thresholds(q: np.ndarray, y: np.ndarray) -> tuple[float, float]:
 def _check_confidence(value: float) -> float:
     """Return ``value`` if finite and within ``[0, 1]``, else raise ``ValueError``."""
     if not math.isfinite(value) or not (0.0 <= value <= 1.0):
-        raise ValueError(
-            f"confidence must be finite and within [0, 1], got {value!r}"
-        )
+        raise ValueError(f"confidence must be finite and within [0, 1], got {value!r}")
     return value
 
 
@@ -176,7 +172,9 @@ def fit_jev_calibration(rows, out: Path) -> dict:
     y = np.asarray([int(bool(row["correct"])) for row in rows], dtype=int)
     logits = np.asarray([_logit(v) for v in conf], dtype=float)
     temperature = _fit_temperature(logits, y)
-    calibrated = np.asarray([_sigmoid(_logit(v) / temperature) for v in conf], dtype=float)
+    calibrated = np.asarray(
+        [_sigmoid(_logit(v) / temperature) for v in conf], dtype=float
+    )
     accept, verify = _search_thresholds(calibrated, y)
 
     payload = {

@@ -34,7 +34,9 @@ def _vision_cfg() -> tuple[int, int]:
     return int(cfg.get("max_pages", 10)), int(cfg.get("dpi", 150))
 
 
-def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None) -> list[str]:
+def render_pdf_pages(
+    path: Path, cap: int | None = None, dpi: int | None = None
+) -> list[str]:
     """Render PDF pages to PNG data URIs. ``cap`` of 0/None renders every page."""
     import fitz
 
@@ -45,8 +47,13 @@ def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None)
     with fitz.open(str(path)) as doc:
         limit = doc.page_count if not cap or cap <= 0 else min(cap, doc.page_count)
         for idx in range(limit):
-            pix = doc.load_page(idx).get_pixmap(matrix=fitz.Matrix(zoom, zoom), colorspace=fitz.csRGB)
-            uris.append("data:image/png;base64," + base64.b64encode(pix.tobytes("png")).decode("ascii"))
+            pix = doc.load_page(idx).get_pixmap(
+                matrix=fitz.Matrix(zoom, zoom), colorspace=fitz.csRGB
+            )
+            uris.append(
+                "data:image/png;base64,"
+                + base64.b64encode(pix.tobytes("png")).decode("ascii")
+            )
     return uris
 
 
@@ -68,7 +75,10 @@ def transcribe_pages(pdf_path: Path) -> str:
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"File: {pdf_path.name}, page {n} of {len(pages)}. Transcribe this page."},
+                    {
+                        "type": "text",
+                        "text": f"File: {pdf_path.name}, page {n} of {len(pages)}. Transcribe this page.",
+                    },
                     {"type": "image_url", "image_url": {"url": uri}},
                 ],
             },
@@ -79,5 +89,7 @@ def transcribe_pages(pdf_path: Path) -> str:
     text = "\n\n".join(out)
     if not text.strip():
         raise RuntimeError(f"vision transcription of {pdf_path.name} returned no text")
-    logger.info("pdf_vision_transcribed", file=pdf_path.name, pages=len(pages), chars=len(text))
+    logger.info(
+        "pdf_vision_transcribed", file=pdf_path.name, pages=len(pages), chars=len(text)
+    )
     return text

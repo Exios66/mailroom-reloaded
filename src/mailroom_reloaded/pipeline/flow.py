@@ -202,8 +202,10 @@ class MailroomFlow(Flow[MailroomState]):
             kwargs["prompt_set"] = prompt_set
         merger_mode = self._overrides.get("merger_mode")
         if merger_mode:
-            cond = load_taxonomy().specialist_conditions(doc_type).model_copy(
-                update={"merger_mode": merger_mode}
+            cond = (
+                load_taxonomy()
+                .specialist_conditions(doc_type)
+                .model_copy(update={"merger_mode": merger_mode})
             )
             kwargs["cond"] = cond
         result = _extract(state.text, doc_type, doc_subclass, **kwargs)
@@ -277,9 +279,7 @@ class MailroomFlow(Flow[MailroomState]):
             ground_truth=self._ground_truth_fn(),
         )
         try:
-            state.grade = judge_grade(
-                state.text, self._effective_doc_type(), data, ctx
-            )
+            state.grade = judge_grade(state.text, self._effective_doc_type(), data, ctx)
         except Exception:  # noqa: BLE001 - grading must not fail the document
             state.grade = None
 
@@ -439,7 +439,9 @@ class MailroomFlow(Flow[MailroomState]):
         features = GateFeatures(
             stage="extract",
             doc_type=self._effective_doc_type(),
-            confidence=(e.confidence if e is not None and e.confidence is not None else 0.0),
+            confidence=(
+                e.confidence if e is not None and e.confidence is not None else 0.0
+            ),
             attempts=state.extract_attempts,
             schema_valid=e.schema_valid if e is not None else False,
             field_coverage=1.0 if (e is not None and e.schema_valid) else 0.0,
@@ -467,7 +469,9 @@ class MailroomFlow(Flow[MailroomState]):
             "action": str(decision.action),
             "reason": str(getattr(decision, "reason", ""))[:200],
             "source": str(getattr(decision, "source", "")),
-            "confidence": round(float(conf), 4) if isinstance(conf, (int, float)) else None,
+            "confidence": round(float(conf), 4)
+            if isinstance(conf, (int, float))
+            else None,
         }
         audit_log.append(self.state.doc_id, f"gate_{stage}", "gate_decision", payload)
 
@@ -698,7 +702,12 @@ class MailroomFlow(Flow[MailroomState]):
         return state
 
     # --------------------------------------------------------------- kickoff
-    def kickoff(self, inputs: dict[str, Any] | None = None, input_files: Any = None, **kwargs: Any):
+    def kickoff(
+        self,
+        inputs: dict[str, Any] | None = None,
+        input_files: Any = None,
+        **kwargs: Any,
+    ):
         """Run one document from ``inputs`` (path/worker_id/resume_from/overrides/eval_ctx)."""
         inputs = inputs or {}
         self._configure(
@@ -710,7 +719,12 @@ class MailroomFlow(Flow[MailroomState]):
         )
         return self._drive()
 
-    async def kickoff_async(self, inputs: dict[str, Any] | None = None, input_files: Any = None, **kwargs: Any):
+    async def kickoff_async(
+        self,
+        inputs: dict[str, Any] | None = None,
+        input_files: Any = None,
+        **kwargs: Any,
+    ):
         """Async wrapper around :meth:`kickoff` (the driver is synchronous)."""
         return self.kickoff(inputs, input_files, **kwargs)
 
@@ -746,9 +760,7 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     upsert the catalog (a failed upsert is left pending). Returns whether the
     manifest was reconciled.
     """
-    archived = [
-        e for e in audit_log.entries(manifest.doc_id) if e.event == "archived"
-    ]
+    archived = [e for e in audit_log.entries(manifest.doc_id) if e.event == "archived"]
     if not archived:
         return False
     payload = archived[-1].payload

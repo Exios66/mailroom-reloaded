@@ -108,9 +108,7 @@ def _error_kind(value: Any) -> str:
     return text.split(":", 1)[0].strip() or "unknown"
 
 
-def _normalise_telemetry(
-    telemetry: Any, gpus: int
-) -> dict[str, Any]:
+def _normalise_telemetry(telemetry: Any, gpus: int) -> dict[str, Any]:
     if telemetry is None:
         return {"captured": False, "expected_replicas": gpus, "replicas": []}
     entries = telemetry if isinstance(telemetry, (list, tuple)) else [telemetry]
@@ -172,7 +170,9 @@ def build_card(
     if conditions:
         cond.update(dict(conditions))
 
-    latencies = [v for v in (_num(row.get("latency_s")) for row in rows) if v is not None]
+    latencies = [
+        v for v in (_num(row.get("latency_s")) for row in rows) if v is not None
+    ]
     ok = sum(
         1
         for row in rows
@@ -187,7 +187,9 @@ def build_card(
     prompt_tokens = _sum(rows, "prompt_tokens")
     completion_tokens = _sum(rows, "completion_tokens")
     tokens_total = prompt_tokens + completion_tokens
-    completions = [v for v in (_num(row.get("completion_tokens")) for row in rows) if v is not None]
+    completions = [
+        v for v in (_num(row.get("completion_tokens")) for row in rows) if v is not None
+    ]
 
     cost = cell_cost(
         wall,
@@ -207,7 +209,9 @@ def build_card(
     error_kinds = Counter(
         _error_kind(row.get("error_kind")) for row in rows if row.get("error_kind")
     )
-    schema_values = [bool(row.get("schema_valid")) for row in rows if "schema_valid" in row]
+    schema_values = [
+        bool(row.get("schema_valid")) for row in rows if "schema_valid" in row
+    ]
 
     parallelism = (sum(latencies) / wall) if wall and latencies else None
 
@@ -277,10 +281,14 @@ def build_card(
                 else None
             ),
             "overall_mean": (
-                round(statistics.mean(overall), 4) if overall else spec_kpi["suite_mean"]
+                round(statistics.mean(overall), 4)
+                if overall
+                else spec_kpi["suite_mean"]
             ),
             "overall_sd": (
-                round(statistics.pstdev(overall), 4) if len(overall) > 1 else spec_kpi["sd"]
+                round(statistics.pstdev(overall), 4)
+                if len(overall) > 1
+                else spec_kpi["sd"]
             ),
             "overall_min": min(overall) if overall else spec_kpi["min"],
             "overall_max": max(overall) if overall else spec_kpi["max"],
@@ -493,7 +501,9 @@ def _pooled(cards: Sequence[Mapping[str, Any]], gpus: int) -> dict[str, Any]:
         "busy_gpu_usd": busy or None,
         "tokens": tokens,
         "usd_per_document": round(busy / docs, 8) if busy and docs else None,
-        "usd_per_million_tokens": round(busy / tokens * 1e6, 8) if busy and tokens else None,
+        "usd_per_million_tokens": round(busy / tokens * 1e6, 8)
+        if busy and tokens
+        else None,
         "tokens_per_second": round(tokens / wall, 4) if wall and tokens else None,
         "tokens_per_second_per_gpu": (
             round(tokens / wall / max(1, gpus), 4) if wall and tokens else None
@@ -534,10 +544,13 @@ def build_master(
         built: list[dict[str, Any]] = []
         for run_id in run_ids:
             rows = _load_rows(run_id, None)
-            doc_types = sorted({row.get("doc_type") for row in rows if row.get("doc_type")})
+            doc_types = sorted(
+                {row.get("doc_type") for row in rows if row.get("doc_type")}
+            )
             for doc_type in doc_types or [None]:
                 class_rows = (
-                    rows if doc_type is None
+                    rows
+                    if doc_type is None
                     else [row for row in rows if row.get("doc_type") == doc_type]
                 )
                 built.append(build_card(run_id, doc_type, rows=class_rows))
@@ -570,7 +583,9 @@ def build_master(
                 "ok": sum(int((c.get("quality") or {}).get("ok") or 0) for c in value),
                 "n": sum(int(c.get("n") or 0) for c in value),
                 "p50_latency_seconds": (value[-1].get("latency") or {}).get("p50"),
-                "usd_per_ok_document": (value[-1].get("cost") or {}).get("usd_per_ok_document"),
+                "usd_per_ok_document": (value[-1].get("cost") or {}).get(
+                    "usd_per_ok_document"
+                ),
             }
             for key, value in by_specialist.items()
         },

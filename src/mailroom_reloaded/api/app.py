@@ -65,9 +65,7 @@ logger = structlog.get_logger(__name__)
 __all__ = ["api", "app", "assert_bind_allowed", "create_app"]
 
 #: Upload guardrail: 50 MB max, matching the reference API (audit L-18).
-MAX_UPLOAD_BYTES = int(
-    os.environ.get("MAILROOM_MAX_UPLOAD_BYTES") or 50 * 1024 * 1024
-)
+MAX_UPLOAD_BYTES = int(os.environ.get("MAILROOM_MAX_UPLOAD_BYTES") or 50 * 1024 * 1024)
 
 #: Accepted upload extensions. Kept local so the API does not depend on the
 #: taxonomy's current ``file_extensions`` block.
