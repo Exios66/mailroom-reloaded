@@ -426,3 +426,27 @@ table.mr td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; min-wid
   table.mr { display: block; overflow-x: auto; max-width: 100%; }
   table.mr td:nth-child(2) { white-space: nowrap; }
 }
+
+/* ---- takeover: a running command's character-grid viewer (no animation) ---- */
+.takeover { margin: 4px 0; color: var(--term-fg); }
+.takeover-grid {
+  margin: 0;
+  font: inherit;
+  font-family: var(--term-font);
+  line-height: 1.25;
+  white-space: pre;
+  overflow-x: auto;
+  color: var(--term-fg);
+  unicode-bidi: isolate;
+}
+.takeover-grid span {
+  unicode-bidi: isolate;
+}
+.takeover.ended { opacity: .75; }
+.g-dim { color: var(--term-fg-dim); }
+.g-ok { color: var(--term-green); }
+.g-warn { color: var(--term-yellow); }
+.g-err { color: var(--term-red); }
+.g-info { color: var(--term-cyan); }
+.g-hot { color: var(--term-amber); }
+.g-sel { background: var(--term-fg); color: var(--term-bg); }

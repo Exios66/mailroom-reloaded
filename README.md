@@ -140,9 +140,24 @@ start (`api/app.py:87-117`). `/health`, `/` and `/ui` stay public.
 | `POST` | `/v1/review/{doc_id}/resolve` | Disposition a parked document: `approve` / `correct` / `reject` (`api/app.py:220-240`). |
 | `GET` | `/v1/runs` | Eval runs and document counts from SQLite `eval_docs` (`api/app.py:243-246`). |
 | `GET` | `/v1/runs/{run_id}/cards` | Card JSONs on disk; empty until cards are written (`api/app.py:249-260`). |
+| `GET` | `/v1/replay/sessions` | Replayable sessions, newest first; `?limit=` 1..500 (default 50). Runs whose spans retention removed carry `data_pruned: true`. |
+| `GET` | `/v1/replay/sessions/{id}/timeline` | `replay/v1` timeline; optional `?from_s=&to_s=` window (seconds, finite, >= 0). 400 bad id, 404 unknown, 410 `data pruned`. |
+| `GET` | `/v1/replay/sessions/{id}/export` | The full timeline as an attachment `<id>.replay.json` (same status codes). |
+| `GET` | `/v1/ledger` | Ledger entries + chain head; `?run_id=&kind=&since_seq=&limit=` (1..500, default 50), `&descending=` (default true). 400 bad run id or kind. Out-of-range query values and wrong body shapes (including a `run_id` over 120 characters) are 422. |
+| `GET` | `/v1/ledger/head` | `{head: {seq, entry_hash, ts, kind} \| null, count}`. |
+| `GET` | `/v1/ledger/verify` | Verify the whole chain, or one run with `?run_id=`; returns the `LedgerVerify` result. |
+| `GET` | `/v1/ledger/keep` | `{policy, source: ledger\|env, pinned, showcase}`: the effective keep policy and the pinned and built-in runs. |
+| `POST` | `/v1/ledger/pin` | Body `{run_id}`; pin a run so retention keeps its spans. Returns `{ok: true}` (pinning an already-pinned run writes nothing); 400 invalid id. |
+| `POST` | `/v1/ledger/unpin` | Body `{run_id}`; 400 invalid id or a showcase run; a run that is not pinned is a no-op. |
+| `POST` | `/v1/ledger/policy` | Body `{value}` (`pinned`, `all`, `recent:<N>`); overrides `MAILROOM_TRACE_KEEP`. 400 invalid policy. |
 | `POST` | `/v1/intake/gmail` | Gmail Pub/Sub push; ingests in the background, returns 204 (`api/app.py:297-321`). |
 | `POST` | `/v1/intake/gmail/poll` | On-demand Gmail fetch (`api/app.py:324-333`). |
 | `GET` | `/ui` | Vanilla-JS runs page, no build step (`api/app.py:398-404`). |
+
+The replay routes carry metadata only (no document text, prompts or completions; entities may carry a bounded filename).
+A timeline read is cut at 100,000 span rows; when it is, `session.window.complete`
+is `false`. A session id is `run:<id>`, `session:<id>`, `doc:<id>` or
+`window:<from_ns>-<to_ns>`; a bare id means a run.
 
 Uploads are capped at 50 MB (`MAILROOM_MAX_UPLOAD_BYTES`) and accept
 `.txt .md .pdf .docx .rtf .html .htm` (`api/app.py:60-66`).

@@ -557,3 +557,72 @@ test('inspect shows a gate line from audit, non-fatal on failure', async () => {
   assert.ok(m.out.find((o) => o.k === 'kv'));
   assert.ok(!lines(m.out).some((t) => t.startsWith('inspect:')));
 });
+
+test('runs pin and unpin post a validated run id', async () => {
+  for (const [sub, word] of [['pin', 'pinned'], ['unpin', 'unpinned']]) {
+    const m = makeCtx({ [`POST /v1/ledger/${sub}`]: { ok: true } });
+    await dispatch(setup(), m.ctx, `runs ${sub} run-1.a`);
+    assert.deepEqual(m.calls, [{ method: 'POST', path: `/v1/ledger/${sub}`, arg: { run_id: 'run-1.a' } }]);
+    assert.deepEqual(m.out, [{ k: 'line', t: `${word} run-1.a`, c: 'success' }]);
+  }
+});
+
+test('runs pin rejects bad ids and bad arity before any request', async () => {
+  for (const cmd of ['runs pin', 'runs pin ..', 'runs unpin a/b', 'runs pin a b', 'runs bogus', 'runs keep set', 'runs keep set recent:0', 'runs keep set recent:1001', 'runs keep set none', 'runs keep set all x', 'runs keep zap']) {
+    const m = makeCtx({});
+    await dispatch(setup(), m.ctx, cmd);
+    assert.equal(m.calls.length, 0, cmd);
+    assert.equal(lines(m.out)[0] !== undefined, true, cmd);
+  }
+});
+
+test('runs pin surfaces the server 400 detail, offline and 401 wording; abort is silent', async () => {
+  const cases = [
+    [new ApiError('Showcase runs cannot be unpinned', { status: 400, kind: 'http' }), 'runs: Showcase runs cannot be unpinned'],
+    [new ApiError('x', { kind: 'offline' }), 'runs: api unreachable — mailroom closed'],
+    [new ApiError('x', { status: 401, kind: 'unauthorized' }), "runs: 401 — type 'auth <token>'"],
+  ];
+  for (const [err, want] of cases) {
+    const m = makeCtx({ 'POST /v1/ledger/unpin': err });
+    await dispatch(setup(), m.ctx, 'runs unpin showcase1');
+    assert.deepEqual(m.out, [{ k: 'line', t: want, c: 'error' }]);
+  }
+  const m = makeCtx({ 'POST /v1/ledger/pin': new ApiError('aborted', { kind: 'aborted' }) });
+  await dispatch(setup(), m.ctx, 'runs pin r1');
+  assert.equal(m.out.length, 0);
+});
+
+test('runs keep shows policy, source, pinned and showcase as plain text', async () => {
+  const m = makeCtx({
+    'GET /v1/ledger/keep': { policy: 'recent:5', source: 'ledger', pinned: ['a1', '<img onerror=x>'], showcase: [] },
+  });
+  await dispatch(setup(), m.ctx, 'runs keep');
+  assert.deepEqual(m.out[0].pairs, [
+    ['policy', 'recent:5'],
+    ['source', 'ledger'],
+    ['pinned', 'a1, <img onerror=x>'],
+    ['showcase', '—'],
+  ]);
+  const e = makeCtx({ 'GET /v1/ledger/keep': new ApiError('x', { kind: 'offline' }) });
+  await dispatch(setup(), e.ctx, 'runs keep');
+  assert.equal(lines(e.out)[0], 'runs: api unreachable — mailroom closed');
+});
+
+test('runs keep set posts a validated policy and shows server errors', async () => {
+  for (const v of ['pinned', 'all', 'recent:1', 'recent:999', 'recent:1000']) {
+    const m = makeCtx({ 'POST /v1/ledger/policy': { ok: true } });
+    await dispatch(setup(), m.ctx, `runs keep set ${v}`);
+    assert.deepEqual(m.calls, [{ method: 'POST', path: '/v1/ledger/policy', arg: { value: v } }]);
+    assert.deepEqual(m.out, [{ k: 'line', t: `keep policy ${v}`, c: 'success' }]);
+  }
+  const m = makeCtx({ 'POST /v1/ledger/policy': new ApiError('Invalid policy', { status: 400, kind: 'http' }) });
+  await dispatch(setup(), m.ctx, 'runs keep set all');
+  assert.deepEqual(lines(m.out), ['runs: Invalid policy']);
+});
+
+test('bare runs does not touch the ledger endpoints', async () => {
+  const m = makeCtx({ 'GET /v1/runs': { runs: [{ run_id: 'r1', documents: 2 }] } });
+  await dispatch(setup(), m.ctx, 'runs');
+  assert.deepEqual(m.calls.map((c) => c.path), ['/v1/runs']);
+  assert.deepEqual(m.out[0].rows, [['r1', 2]]);
+});

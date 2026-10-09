@@ -2,7 +2,7 @@
   "uid": "mailroom-quality",
   "title": "Mailroom Quality",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "30s",
   "time": {
@@ -23,10 +23,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values({__name__=~\"mailroom_eval_.*\"}, run_id)",
+          "query": "label_values(mailroom_documents_total, run_id)",
           "refId": "v"
         },
-        "definition": "label_values({__name__=~\"mailroom_eval_.*\"}, run_id)",
+        "definition": "label_values(mailroom_documents_total, run_id)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -46,10 +46,10 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\"}, doc_type)",
+          "query": "label_values(mailroom_documents_total{run_id=~\"$run_id\"}, doc_type)",
           "refId": "v"
         },
-        "definition": "label_values({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\"}, doc_type)",
+        "definition": "label_values(mailroom_documents_total{run_id=~\"$run_id\"}, doc_type)",
         "refresh": 2,
         "includeAll": true,
         "allValue": ".*",
@@ -59,13 +59,51 @@
           "text": "All",
           "value": "$__all"
         }
+      },
+      {
+        "name": "public_url",
+        "label": "public_url",
+        "type": "constant",
+        "query": "http://localhost:8000",
+        "hide": 2,
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:8000",
+            "value": "http://localhost:8000"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "http://localhost:8000",
+          "value": "http://localhost:8000"
+        }
+      },
+      {
+        "name": "phoenix_url",
+        "label": "phoenix_url",
+        "type": "constant",
+        "query": "http://localhost:6006",
+        "hide": 2,
+        "options": [
+          {
+            "selected": true,
+            "text": "http://localhost:6006",
+            "value": "http://localhost:6006"
+          }
+        ],
+        "current": {
+          "selected": true,
+          "text": "http://localhost:6006",
+          "value": "http://localhost:6006"
+        }
       }
     ]
   },
   "panels": [
     {
       "id": 1,
-      "title": "Latest eval KPIs (all mailroom.eval.* gauges)",
+      "title": "Documents per run (7d)",
       "type": "table",
       "datasource": {
         "type": "prometheus",
@@ -79,7 +117,14 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "links": [
+            {
+              "title": "replay ↗",
+              "targetBlank": true,
+              "url": "${public_url}/tui#replay=run:${__data.fields.run_id}"
+            }
+          ]
         },
         "overrides": []
       },
@@ -90,8 +135,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "last_over_time({__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}[7d])",
-          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}",
+          "expr": "sum by (run_id, status) (increase(mailroom_documents_total{run_id=~\"$run_id\", doc_type=~\"$doc_type\"}[7d]))",
+          "legendFormat": "{{run_id}} {{status}}",
           "instant": true,
           "format": "table"
         }
@@ -99,7 +144,7 @@
     },
     {
       "id": 2,
-      "title": "Eval KPIs over time",
+      "title": "Documents by type (rate)",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
@@ -113,7 +158,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -124,8 +169,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "{__name__=~\"mailroom_eval_.*\", run_id=~\"$run_id\", doc_type=~\"$doc_type\"}",
-          "legendFormat": "{{__name__}} {{run_id}} {{doc_type}}"
+          "expr": "sum by (doc_type) (rate(mailroom_documents_total{run_id=~\"$run_id\", doc_type=~\"$doc_type\"}[15m]))",
+          "legendFormat": "{{doc_type}}"
         }
       ]
     },
@@ -196,5 +241,23 @@
   ],
   "annotations": {
     "list": []
-  }
+  },
+  "links": [
+    {
+      "title": "replay ↗",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true,
+      "tooltip": "Open this run in the mailroom replay viewer (needs the run_id variable set to one run)",
+      "url": "${public_url}/tui#replay=run:${run_id}"
+    },
+    {
+      "title": "phoenix ↗",
+      "type": "link",
+      "icon": "external link",
+      "targetBlank": true,
+      "tooltip": "Open Phoenix; filter spans on mailroom.run_id = the run_id variable",
+      "url": "${phoenix_url}"
+    }
+  ]
 }

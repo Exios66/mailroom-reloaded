@@ -30,7 +30,7 @@ from opentelemetry.sdk.trace.export import (
 
 from mailroom_reloaded.settings import get_settings
 
-__all__ = ["MaskingSpanProcessor", "build_resource", "setup_tracing"]
+__all__ = ["MaskingSpanProcessor", "RunScopeSpanProcessor", "build_resource", "setup_tracing"]
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,59 @@ _EXACT_CONTENT_KEYS = {
     "tool.parameters",
 }
 _CONTENT_SUFFIXES = (".message.content", ".prompt.text", ".embedding.text")
+
+
+class RunScopeSpanProcessor(SpanProcessor):
+    """Stamp every span with the run it belongs to when it starts.
+
+    ``on_start`` runs in the thread that starts the span, where the run scope's
+    ``ContextVar`` is visible (the batch exporter thread cannot see it). It covers
+    spans from the instrumentors (LLM, CrewAI) as well as the pipeline's own.
+    """
+
+    def on_start(self, span, parent_context=None) -> None:
+        """Set ``mailroom.run_id`` / ``mailroom.environment`` / ``session.id`` if a scope is active."""
+        from mailroom_reloaded.obs.run_context import current_run
+
+        scope = current_run()
+        if scope is None:
+            return
+        span.set_attribute("mailroom.run_id", scope.run_id)
+        span.set_attribute("mailroom.environment", scope.environment)
+        if scope.session_id:
+            span.set_attribute("session.id", scope.session_id)
+
+    def on_end(self, span: ReadableSpan) -> None:
+        """Nothing to do at the end of a span."""
+
+    def shutdown(self) -> None:
+        """Nothing to release."""
+
+    def force_flush(self, timeout_millis: int | None = None) -> bool:
+        """Nothing buffered."""
+        return True
+
+
+def span_store_enabled() -> bool:
+    """False under pytest unless ``MAILROOM_TRACE_STORE_PATH`` is set (tests use their own stores)."""
+    return not ("pytest" in sys.modules and get_settings().trace_store_path is None)
+
+
+def _span_store_exporter() -> SpanExporter | None:
+    """The local span store exporter, or ``None`` when it should not be attached.
+
+    Under pytest the store is skipped unless ``MAILROOM_TRACE_STORE_PATH`` is set, for
+    the same reason the default OTLP exporter is (tests install their own exporters).
+    """
+    if not span_store_enabled():
+        return None
+    try:
+        from mailroom_reloaded.storage.span_store import SqliteSpanExporter
+
+        return SqliteSpanExporter()
+    except Exception:  # pragma: no cover - tracing must never break runs
+        logger.warning("span_store_unavailable", exc_info=True)
+        return None
 
 
 def _is_content_key(key: str) -> bool:
@@ -219,9 +272,15 @@ def setup_tracing(
         return _PROVIDER
 
     provider = TracerProvider(resource=build_resource(service_name))
+    provider.add_span_processor(RunScopeSpanProcessor())
     if mask:
         provider.add_span_processor(MaskingSpanProcessor())
         _MASK_INSTALLED = True
+    store = _span_store_exporter()
+    if store is not None:
+        # batched (the synchronous path would block the pipeline); the store applies
+        # its own allow-list, so it is safe whatever the masking setting is
+        provider.add_span_processor(BatchSpanProcessor(store))
     if exporter is not None:
         provider.add_span_processor(SimpleSpanProcessor(exporter))
     else:

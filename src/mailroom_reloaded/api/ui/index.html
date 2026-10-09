@@ -70,7 +70,7 @@
 
     <section>
       <h2>Eval runs</h2>
-      <table id="runs"><thead><tr><th>run_id</th><th>documents</th></tr></thead><tbody></tbody></table>
+      <table id="runs"><thead><tr><th>run_id</th><th>documents</th><th>replay</th></tr></thead><tbody></tbody></table>
       <h2 style="margin-top:14px">Cards</h2>
       <pre id="cards" class="muted">run not selected</pre>
     </section>
@@ -167,10 +167,17 @@
       const tr = document.createElement("tr");
       tr.className = "clickable";
       addTextCells(tr, [r.run_id, r.documents ?? "—"]);
+      const replayCell = document.createElement("td");
+      const replay = document.createElement("a");
+      replay.href = "/tui#replay=run:" + encodeURIComponent(r.run_id);
+      replay.textContent = "replay ↗";
+      replay.onclick = (ev) => ev.stopPropagation();
+      replayCell.appendChild(replay);
+      tr.appendChild(replayCell);
       tr.onclick = () => loadCards(r.run_id);
       tb.appendChild(tr);
     }
-    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="2" class="muted">no eval runs yet</td></tr>';
+    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">no eval runs yet</td></tr>';
   }
 
   async function loadCards(runId) {

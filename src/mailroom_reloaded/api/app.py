@@ -50,7 +50,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from mailroom_reloaded import __version__
@@ -371,6 +371,265 @@ def run_cards_endpoint(run_id: str) -> dict:
     return {"run_id": run_id, "cards": cards}
 
 
+def _read_ledger():
+    """A throwaway read-only ledger: the process-wide one would install the external anchor hook."""
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.ledger import Ledger
+
+    return Ledger(get_engine())
+
+
+def _pruned_run_ids() -> set[str]:
+    """Run ids whose spans retention removed; empty when the ledger is unreadable."""
+    from mailroom_reloaded.storage.retention import pruned_runs
+
+    try:
+        return pruned_runs(_read_ledger())
+    except Exception:  # the picker still works without the marker
+        logger.warning("replay_pruned_lookup_failed", exc_info=True)
+        return set()
+
+
+def _replay_timeline(session_id: str, from_s: float | None, to_s: float | None):
+    """The timeline of ``session_id`` or an HTTP error (400 bad id, 404 none, 410 pruned)."""
+    from mailroom_reloaded.obs.replay.sessions import parse_session_id
+    from mailroom_reloaded.obs.replay.timeline import build_timeline
+    from mailroom_reloaded.storage.db import get_engine
+
+    try:
+        kind, key = parse_session_id(session_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid session ID") from None
+    pruned = kind == "run" and key in _pruned_run_ids()
+    try:
+        tl = build_timeline(session_id, from_s=from_s, to_s=to_s, engine=get_engine())
+    except Exception:
+        logger.warning("replay_timeline_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Timeline unavailable") from None
+    if tl is None:
+        if pruned:
+            raise HTTPException(status_code=410, detail="data pruned")
+        raise HTTPException(status_code=404, detail="No such session")
+    if pruned:
+        tl.session.data_pruned = True
+    return tl
+
+
+@api.get("/replay/sessions")
+def replay_sessions_endpoint(limit: int = Query(50, ge=1, le=500)) -> dict:
+    """Replayable sessions, newest first; runs retention pruned carry ``data_pruned``."""
+    from mailroom_reloaded.obs.replay.sessions import list_sessions
+    from mailroom_reloaded.storage.db import get_engine
+
+    try:
+        sessions = list_sessions(limit, engine=get_engine())
+    except Exception:
+        logger.warning("replay_sessions_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Sessions unavailable") from None
+    pruned = _pruned_run_ids()
+    for sm in sessions:
+        if sm.kind == "run" and sm.id.removeprefix("run:") in pruned:
+            sm.data_pruned = True
+    return {"sessions": [sm.model_dump(mode="json") for sm in sessions]}
+
+
+@api.get("/replay/sessions/{session_id}/timeline")
+def replay_timeline_endpoint(
+    session_id: str,
+    from_s: float | None = Query(None, ge=0, allow_inf_nan=False),
+    to_s: float | None = Query(None, ge=0, allow_inf_nan=False),
+) -> dict:
+    """The ``replay/v1`` timeline of a session, optionally windowed (seconds)."""
+    if from_s is not None and to_s is not None and from_s > to_s:
+        raise HTTPException(status_code=422, detail="from_s must not exceed to_s")
+    return _replay_timeline(session_id, from_s, to_s).model_dump(mode="json")
+
+
+@api.get("/replay/sessions/{session_id}/export")
+def replay_export_endpoint(session_id: str) -> Response:
+    """The full timeline as a downloadable ``<session>.replay.json``."""
+    tl = _replay_timeline(session_id, None, None)
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", session_id)
+    return Response(
+        content=tl.model_dump_json(),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{name}.replay.json"'},
+    )
+
+
+def _ledger_run_id(run_id: str | None) -> str | None:
+    """``run_id`` when it is a valid run id (or absent); otherwise a 400."""
+    from mailroom_reloaded.storage.retention import is_valid_run_id
+
+    if run_id is not None and not is_valid_run_id(run_id):
+        raise HTTPException(status_code=400, detail="Invalid run ID")
+    return run_id
+
+
+@api.get("/ledger")
+def ledger_entries_endpoint(
+    run_id: str | None = Query(None),
+    kind: str | None = Query(None),
+    since_seq: int = Query(0, ge=0, le=2**63 - 1),
+    limit: int = Query(50, ge=1, le=500),
+    descending: bool = True,
+) -> dict:
+    """Ledger entries (newest first by default) plus the chain head."""
+    from mailroom_reloaded.schemas.ledger import KINDS
+
+    run_id = _ledger_run_id(run_id)
+    if kind is not None and kind not in KINDS:
+        raise HTTPException(status_code=400, detail="Invalid kind")
+    try:
+        ledger = _read_ledger()
+        entries = ledger.entries(
+            run_id=run_id,
+            kind=kind,
+            since_seq=since_seq,
+            limit=limit,
+            descending=descending,
+        )
+        head = ledger.head()
+    except Exception:
+        logger.warning("ledger_entries_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "entries": [e.model_dump(mode="json") for e in entries],
+        "head": {"seq": head.seq, "entry_hash": head.entry_hash} if head else None,
+    }
+
+
+@api.get("/ledger/head")
+def ledger_head_endpoint() -> dict:
+    """The newest committed entry (or ``null``) and the chain length."""
+    try:
+        ledger = _read_ledger()
+        head = ledger.head()
+        count = ledger.total()
+    except Exception:
+        logger.warning("ledger_head_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "head": (
+            {
+                "seq": head.seq,
+                "entry_hash": head.entry_hash,
+                "ts": head.ts,
+                "kind": head.kind,
+            }
+            if head
+            else None
+        ),
+        "count": count,
+    }
+
+
+@api.get("/ledger/verify")
+def ledger_verify_endpoint(run_id: str | None = Query(None)) -> dict:
+    """Verify the whole chain, or one run's entries. Sync: runs on the threadpool."""
+    run_id = _ledger_run_id(run_id)
+    try:
+        return _read_ledger().verify(run_id).model_dump()
+    except Exception:
+        logger.warning("ledger_verify_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+
+
+@api.get("/ledger/keep")
+def ledger_keep_endpoint() -> dict:
+    """The effective keep policy, where it came from, and the pinned and showcase runs."""
+    from mailroom_reloaded.storage.retention import (
+        SHOWCASE_RUN_IDS,
+        effective_policy,
+        pinned_runs,
+        policy_source,
+    )
+
+    try:
+        ledger = _read_ledger()
+        policy = effective_policy(ledger)
+        source = policy_source(ledger)
+        pinned = sorted(pinned_runs(ledger))
+    except Exception:
+        logger.warning("ledger_keep_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    return {
+        "policy": f"recent:{policy.n}" if policy.mode == "recent" else policy.mode,
+        "source": source,
+        "pinned": pinned,
+        "showcase": list(SHOWCASE_RUN_IDS),
+    }
+
+
+class LedgerRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(max_length=120)
+
+
+class LedgerPolicyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(max_length=120)
+
+
+def _ledger_write(action, *args) -> dict:
+    """Run a retention write on the process-wide ledger and flush so a following read sees it."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    try:
+        ledger = get_ledger()
+        accepted = action(ledger, *args)
+        flushed = ledger.flush()
+    except ValueError:
+        raise
+    except Exception:
+        logger.warning("ledger_write_failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ledger unavailable") from None
+    if accepted is False or not flushed:  # None is a no-op (already in that state)
+        raise HTTPException(status_code=500, detail="Ledger unavailable")
+    return {"ok": True}
+
+
+@api.post("/ledger/pin")
+def ledger_pin_endpoint(body: LedgerRunBody) -> dict:
+    """Pin a run so retention keeps its spans."""
+    from mailroom_reloaded.storage.retention import pin
+
+    _ledger_run_id(body.run_id)
+    try:
+        return _ledger_write(pin, body.run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid run ID") from None
+
+
+@api.post("/ledger/unpin")
+def ledger_unpin_endpoint(body: LedgerRunBody) -> dict:
+    """Unpin a run; showcase runs are always kept."""
+    from mailroom_reloaded.storage.retention import SHOWCASE_RUN_IDS, unpin
+
+    _ledger_run_id(body.run_id)
+    if body.run_id in SHOWCASE_RUN_IDS:
+        raise HTTPException(status_code=400, detail="Showcase runs cannot be unpinned")
+    try:
+        return _ledger_write(unpin, body.run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="Showcase runs cannot be unpinned"
+        ) from None
+
+
+@api.post("/ledger/policy")
+def ledger_policy_endpoint(body: LedgerPolicyBody) -> dict:
+    """Record a keep policy (``pinned``, ``all`` or ``recent:<N>``) overriding the env default."""
+    from mailroom_reloaded.storage.retention import set_policy
+
+    try:
+        return _ledger_write(set_policy, body.value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid policy") from None
+
+
 def _eval_runs() -> list[dict]:
     """Distinct ``run_id``s with document counts from the ``eval_docs`` table."""
     from mailroom_reloaded.storage.db import get_engine
@@ -457,6 +716,34 @@ def _embed_watcher_enabled() -> bool:
     }
 
 
+_RETENTION_INTERVAL_S = 86400
+
+
+async def _start_retention() -> asyncio.Task | None:
+    """Prune soon after startup, then daily, in a background task; never fails startup.
+
+    Skipped under pytest (same predicate as the span store) unless a store path is set.
+    """
+    from mailroom_reloaded.obs.tracing import span_store_enabled
+
+    if not span_store_enabled():
+        return None
+    from mailroom_reloaded.storage import retention
+
+    async def run_once() -> None:
+        try:
+            await asyncio.to_thread(retention.maintain)
+        except Exception:
+            logger.warning("retention_maintain_failed", exc_info=True)
+
+    async def loop() -> None:
+        while True:
+            await run_once()
+            await asyncio.sleep(_RETENTION_INTERVAL_S)
+
+    return asyncio.get_running_loop().create_task(loop())
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Create the bins and, when asked, run the watcher in-process.
@@ -467,6 +754,7 @@ async def lifespan(application: FastAPI):
     """
     _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)
+    retention_task = await _start_retention()
     watcher = None
     watcher_thread = None
     if _embed_watcher_enabled():
@@ -510,6 +798,8 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
+        if retention_task is not None:
+            retention_task.cancel()
         if watcher is not None:
             watcher.stop()
         if watcher_thread is not None:

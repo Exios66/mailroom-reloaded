@@ -25,17 +25,31 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `jev` | `jev` | Shows the Jev gate: provider, model, gate in use, calibration thresholds. |
 | `review` | `review` | Lists parked documents. |
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
-| `runs` | `runs` | Lists eval runs. |
+| `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
+| `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
+| `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
 | `health` | `health` | Checks the API. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
 | `watch` | `watch [--interval 3]` | Follows status changes; stops on Ctrl+C or when the tab is hidden. |
 | `auth` | `auth <token> \| --clear` | Sets or clears the API token. |
 
-Sources: `src/mailroom_reloaded/api/tui/commands/shell.js` and
-`commands/pipeline.js` (each command carries its man page). Keys: Tab ghost
+Sources: `src/mailroom_reloaded/api/tui/commands/shell.js`,
+`commands/pipeline.js`, `commands/ledger.js` and `commands/replay.js` (with `replay/`) (each command carries its man page). Keys: Tab ghost
 completion, Up/Down history, Ctrl+L clear, Ctrl+C stop `watch`, any key skips
 the boot animation.
+
+### `replay` viewer
+
+`replay <run_id>` reads `GET /v1/replay/sessions/{id}/timeline` (the `replay/v1`
+payload) and takes over the output area with a character grid: a station track,
+a scrub bar with event ticks, run metrics, and an inspector or ledger panel. All
+text is rendered with `textContent`; bidi and control characters are replaced.
+Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
+jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
+demand, with a chain-verify line), `e` next event, `q`/Esc quit. Ctrl+C always
+releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
+The viewer needs a physical keyboard (the input stays read-only while it is open).
 
 ### `jev` and gate decisions
 
@@ -62,6 +76,15 @@ With Jev disabled, `jev` prints `jev off (band gate)`. `audit` lists `gate_decis
 entries (source `jev` is coloured by action), `inspect` adds a `gate` line with the
 last decision, and boot adds `[ ok ] jev · <provider> calibrated` or `[ -- ] jev · off`.
 API keys are never printed.
+
+## Deep links
+
+`/tui#replay=run:<id>` (or a bare run id) runs `replay run:<id>` once boot finishes. The `/ui`
+runs table links each eval run this way. Only ids that `replay` itself accepts become a command;
+anything else prints `replay: invalid deep link`. The fragment stays in the browser, and the API
+token is still taken from this tab's session storage, never from the URL: when a token is
+configured, type `auth <token>` first and re-run the replay command, since `/ui` does not
+pass its token on.
 
 ## Themes
 
@@ -106,6 +129,31 @@ fixture is named `<b>hostile<b>.txt` to check that filenames render as text.
 (`/` cannot appear in a filename, so a closing `</b>` is impossible.)
 Open http://127.0.0.1:8000/tui.
 
+The four showcase runs (`run:showcase-clean`, `-escalation`, `-judge-arbiter`,
+`-parked-failed`) are seeded on API startup (when span capture is enabled), so the replay viewer has data straight
+away: `replay run:showcase-judge-arbiter`, or open
+`http://127.0.0.1:8000/tui#replay=run:showcase-judge-arbiter`. They have spans but no
+ledger rows, so the ledger panel shows `no ledger entries` and `verify failed: unknown run`.
+A run-scoped verify cannot tell "never had ledger rows" from "rows deleted", so for any
+run that should have a chain, treat that line as a warning and run `ledger verify`.
+
+### Browser check: `scripts/tui_replay_check.mjs`
+
+With the harness up, drive the viewer in headless Chromium (play, pause, seek, jump,
+inspector, ledger panel, quit, keyboard handed back, no injected markup, no page errors):
+
+```bash
+node scripts/tui_replay_check.mjs                       # run:showcase-judge-arbiter
+node scripts/tui_replay_check.mjs run:showcase-parked-failed
+MAILROOM_API_TOKEN=secret node scripts/tui_replay_check.mjs   # authenticates first
+```
+
+It needs Playwright (`PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs` if it is not
+importable) and a Chromium (`CHROMIUM_PATH`). `TUI_URL` overrides `http://127.0.0.1:8000`;
+`SHOT=file.png` saves a screenshot. It exits non-zero on any failed check. It is a dev
+tool, not part of the pytest suite. The viewer needs a physical keyboard: the input is
+read-only while it is open.
+
 The server reads `api/ui/index.html` and the TUI shell once at startup, so
 restart (`down`, `up`) after editing them.
 
@@ -141,6 +189,7 @@ light scheme beyond a selectable theme.
 | `.../tui/commands/shell.js`, `pipeline.js` | Commands. |
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |
+| `scripts/tui_replay_check.mjs` | Headless-Chromium check of the replay viewer. |
 | `tests/api/test_tui_serving.py` | Serving tests. |
 
 ## Local dev with Jev

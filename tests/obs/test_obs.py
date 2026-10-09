@@ -142,6 +142,9 @@ def _write_inbox(base, text="A short business letter about the deal."):
     return bins, path
 
 
+_DECISION_METRICS = {"mailroom.retries", "mailroom.escalations", "mailroom.review.causes"}
+
+
 def _metric_names(reader: InMemoryMetricReader) -> set[str]:
     """Collect all instrument names emitted to the in-memory metric reader."""
     data = reader.get_metrics_data()
@@ -235,4 +238,5 @@ def test_metric_names_emitted(env, mock_provider, monkeypatch):
     assert list((bins.archive / "correspondence").glob("*.txt"))
 
     emitted = _metric_names(reader)
-    assert M.names() <= emitted
+    # decision counters only appear when a retry / escalation / review cause actually happens
+    assert M.names() - _DECISION_METRICS <= emitted
