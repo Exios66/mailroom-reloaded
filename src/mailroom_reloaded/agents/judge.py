@@ -175,9 +175,9 @@ def judge_grade(text: str, doc_type: str, data: dict | None, ctx: ToolContext) -
         tools,
         capture=False,
     )
+    grade_usage = _usage(getattr(result, "token_usage", None))
+    record_usage("grader", grade_usage)  # before _extract: a rejected grade still cost tokens
     parsed = _extract(result, _GradeOutput)
-    grade_usage = _usage(result.token_usage)
-    record_usage("grader", grade_usage)
     return JudgeGrade(
         doc_id=ctx.doc_id,
         doc_type=doc_type,
