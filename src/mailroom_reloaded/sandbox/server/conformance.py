@@ -45,7 +45,7 @@ def split_of(ids: list[str]) -> dict[str, str]:
 
 
 def heldout_ids(scenarios: dict[str, dict]) -> list[str]:
-    """Sorted ids of scenarios tagged ``heldout`` (the frozen held-out batch)."""
+    """Return sorted IDs tagged ``heldout`` without checking their frozen status."""
     return sorted(
         name
         for name, scenario in scenarios.items()

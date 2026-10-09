@@ -50,9 +50,9 @@ FLOWS = ("correspondent", "pipeline")
 def hostile_forward(wire: WireMessage, res: CorrespondentResult) -> dict | None:
     """Build the Correspondent -> Boss mailbox forward for a possible-attack result.
 
-    Derived from the message's typed ``possible_attack`` signals so the mailbox is the
-    only route between the two roles. Return ``None`` when the result reports no
-    attack, so benign mail is never forwarded.
+    Include all ``possible_attack`` signals, even dismissed ones, with the message
+    content and attachment lanes. Return ``None`` when no such signals exist.
+    This builds the payload without posting it or changing attachment status.
     """
     attacks = [s for s in res.signals if s.get("kind") == "possible_attack"]
     if not attacks:
@@ -758,7 +758,11 @@ class SandboxService:
 
     # ------------------------------------------------------------------ boss_mailbox
     def _mailbox_answer_draft(self, item: dict, approved: bool, by: str) -> None:
-        """Boss -> Correspondent: approval or rejection of a draft, on the mailbox."""
+        """Post a draft approval or rejection and mark request and reply as acted.
+
+        Do nothing if no matching approval request is found. This records the
+        answer without changing the outbox item; mailbox errors propagate.
+        """
         mid = item["message_id"]
         req = next(
             (
@@ -787,9 +791,12 @@ class SandboxService:
         )
 
     def _forward_to_boss(self, msg: dict, fwd: dict) -> None:
-        """The Correspondent's own forward goes on the mailbox; the Boss Desk reads it in
-        the same processing step. The message and attachments stay held and nothing goes
-        to the sender or the pipeline until the Boss decides."""
+        """Post and read a forward, opening a pending case for hostile mail.
+
+        Apply the unattended quarantine decision immediately in sandbox autonomy.
+        Attachment holds are the caller's responsibility; this method does not
+        establish them. Mailbox and decision errors propagate.
+        """
         entry = self.mailbox.post(
             sender=CORRESPONDENT,
             recipient=BOSS,
@@ -1044,7 +1051,13 @@ class SandboxService:
 
     # ------------------------------------------------------------------ outbox
     def approve_outbound(self, oid: str, by: str = "reviewer") -> dict:
-        """Apply outbox approval under the state lock, update Boss actions, and persist."""
+        """Apply outbox approval under the state lock, update Boss actions, and persist.
+
+        Return the outbox item, including policy-blocked results.
+        Record a mailbox approval when a matching request is found, even if the item
+        is blocked or already terminal. Unknown IDs raise ``KeyError``; mailbox and
+        persistence errors propagate and may leave partial effects.
+        """
         with self._lock:
             item = self.outbox.approve(oid, by)
             self._mailbox_answer_draft(item, True, by)
@@ -1057,7 +1070,13 @@ class SandboxService:
         return item
 
     def reject_outbound(self, oid: str, by: str = "reviewer") -> dict:
-        """Reject an outbox item under the state lock and persist the result."""
+        """Reject an outbox item under the state lock and persist the result.
+
+        Return the item; captured or rejected items retain their state. Record a
+        mailbox rejection when a matching request is found, including repeat calls.
+        Unknown IDs raise ``KeyError``; mailbox and persistence errors propagate
+        and may leave partial effects.
+        """
         with self._lock:
             item = self.outbox.reject(oid, by)
             self._mailbox_answer_draft(item, False, by)

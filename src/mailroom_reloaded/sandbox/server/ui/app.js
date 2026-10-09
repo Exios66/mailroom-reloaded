@@ -83,6 +83,7 @@ async function inject(ids) {
 }
 
 // ---------------------------------------------------------------- tabs
+/** Refresh the active tab and its content, displaying view-loading errors in the tab. */
 async function renderTab() {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
   const body = $("tab-body");
@@ -111,11 +112,17 @@ async function messagesView() {
 }
 // Shared across review cards and the mailbox, including views rebuilt by polling.
 const decidingMessages = new Set();
+/** Disable decision buttons across views while their message has a decision in flight. */
 function syncDecisionButtons() {
   document.querySelectorAll("button[data-decision-message]").forEach((b) => {
     b.disabled = decidingMessages.has(b.dataset.decisionMessage);
   });
 }
+/**
+ * Submit a Boss decision and refresh views, ignoring concurrent calls for the same message.
+ * Disable that message's decision buttons until completion, including on failure.
+ * Request and uncaught refresh errors reject the returned promise.
+ */
 async function decide(messageId, decision, reason) {
   if (decidingMessages.has(messageId)) return;
   decidingMessages.add(messageId);
@@ -245,6 +252,7 @@ async function renderTrace() {
     box.replaceChildren(...traceSections(t));
   } catch (e) { box.replaceChildren(el("p", { class: "err" }, e.message)); }
 }
+/** Return detached trace elements with action handlers and any Boss review or expected outcomes. */
 function traceSections(t) {
   const out = [];
   const w = t.ingress.wire, adm = t.ingress.admission;

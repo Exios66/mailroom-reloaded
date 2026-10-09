@@ -148,6 +148,9 @@ class StandInBossDesk:
 
         The Desk reads the mailbox entry only (its payload), never the Correspondent's
         result object or the message store. Returns ``None`` for other entry kinds.
+        The case uses the highest signal priority, defaulting to ``high`` when
+        there are no signals. Missing required fields raise ``KeyError``; priorities
+        outside ``low``, ``normal``, ``high``, and ``critical`` raise ``ValueError``.
         """
         if entry.get("kind") != "hostile_forward":
             return None
@@ -179,8 +182,11 @@ class StandInBossDesk:
         }
 
     def unattended_decision(self, case: dict, autonomy: str) -> tuple[str, str] | None:
-        """Default for runs with nobody at the desk: ``human`` leaves it pending,
-        ``sandbox`` keeps the hostile message quarantined."""
+        """Return a quarantine decision and reason for ``sandbox`` autonomy.
+
+        Other autonomy values return ``None``. The caller applies the decision;
+        this method does not change the case or its attachments.
+        """
         if autonomy == "sandbox":
             return (
                 "quarantine",

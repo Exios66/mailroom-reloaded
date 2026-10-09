@@ -129,8 +129,10 @@ def conformance(
     The data directory is disposable: runs reset sandbox and pipeline state.
     ``--heldout`` selects the scenarios tagged ``heldout`` instead of the
     ``index % 3`` positional split, so a frozen H batch measures held-out
-    performance on its own. Content loading/validation failures exit with code
-    1. Scenario failures are reported without setting a failing exit code.
+    performance on its own. Explicit ``--only`` IDs override tag selection;
+    unknown IDs raise ``KeyError`` after resetting state. Content loading/validation
+    failures exit with code 1. Scenario failures are reported without setting a
+    failing exit code.
     Single-family runs report no training rate; output I/O errors propagate.
     """
     from mailroom_reloaded.sandbox.server.conformance import (

@@ -337,7 +337,9 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
     ) -> dict:
         """List matching entries after the exclusive sequence cursor without marking them read.
 
-        Return the last returned sequence, or ``since`` when no entries match.
+        ``role`` matches either sender or recipient. Return entries in sequence
+        order, their count, and ``last_seq``: the last returned sequence, or
+        ``since`` when no entries match.
         """
         rows = service.mailbox.list(
             direction=direction,
