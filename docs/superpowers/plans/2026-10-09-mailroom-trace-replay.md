@@ -2,12 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status:** draft for review (revision 2, 2026-10-09). This plan proposes work; nothing below is implemented yet.
+> **Status:** draft for review (revision 3, 2026-10-09). This plan proposes work; nothing below is implemented yet.
 >
 > **Decisions so far:**
 > 1. The track is drawn as a **character grid**, not a `<canvas>`.
 > 2. Metrics get a **`run_id` label**, so the Grafana `$run_id` filter works and can link into the replay.
 > 3. The traces must capture **all** data that could help the visualisation, in the style of the original `llm-mailroom`. That is everything `llm-mailroom` traced, everything `The-Mailroom` visualizer consumed, and the per-document and per-field scores from `llm-dojo-scoring`, plus the routing decisions the originals only ever logged.
+> 4. **Capture everything, show a tier.** Every metric is recorded; the viewer, `/ui` and Grafana links show tiers T0/T1 by default (`--tier 2|3` reveals more). Capture and display are separate.
+> 5. **Retention is a toggle.** Showcase runs (shipped) and pinned runs are hard-saved. Ordinary runs are not kept by default, to avoid a backlog. `MAILROOM_TRACE_KEEP=pinned|recent:<N>|all` switches this, also from the TUI.
+> 6. **One archive ledger.** Every metric from traces and logs goes into a single hash-chained, auditable **archive ledger** that takes in all pipeline runs (live and eval) and is viewable and verifiable from the TUI (`ledger`). The ledger is never pruned; only heavy span data is.
+> 7. **`replay ↗` link in `/ui`** on each eval run, plus a `/tui#replay=run:<id>` deep link that actually opens the viewer.
 
 **Goal:** Add `replay`, an alternative viewer launched from `/tui`. It plays a mailroom pipeline session back from captured OpenTelemetry spans (falling back to the audit log) as a live, interactive, scrubbable visualisation. It has play/pause, speed and seek, a station "track" with documents moving along it, a document leaderboard, an event ticker, a per-document inspector, pluggable insight panels, and a follow-live mode.
 
@@ -178,7 +182,9 @@ The **full name is always used**. The Langfuse 35-character alias (`extraction_v
 | **Reconsideration** | `review_causes` (JSON list: `class_miss`, `subclass_miss`, `extraction_miss`, `judge_miss`, `judge_partial`, `schema_invalid`, `guardrail`, `parse_error`, `reporting_incomplete`, `needs_judge_review`, `hollow_extraction`), `needs_reconsideration` | root | port of The-Mailroom `reconsideration.collect_review_causes` (GT and verdicts only, never self-reported confidence) |
 | **Suite extras (when applicable)** | `determination_consistency`, `amount_exactness`, `content_topic_*`, `sentiment_*`, `maud_*` | root | **not vendored today.** Listed so the schema reserves the names; ported only if those suites return. |
 
-A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, rollup, span_scope)}`. It is a slim port of the `SCORE_CONFIGS` and dojo `registry.py` tier/unit/rollup data. It is used to validate names at emit time, to drive the inspector's grouping, and to drive run-level roll-ups in the timeline (mean / sum / none).
+**Tiers (Decision 4).** Every spec also carries a `tier`, borrowed from llm-dojo-scoring's `registry.py` / `pruning.py` (`DEFAULT_DASHBOARD_TIER = 1`): **T0 headline** (status, doc type, verdict, quality, latency, cost), **T1 core** (confidences, tokens, attempts, retries, gate mix), **T2 deep** (per-field scores, calibration, per-call LLM detail), **T3 log-only** (everything else). All tiers are captured and stored in the ledger. Tier only decides what the viewer, `/ui` and dashboards draw, so nothing is lost and the screen stays readable.
+
+A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, rollup, span_scope, tier)}`. It is a slim port of the `SCORE_CONFIGS` and dojo `registry.py` tier/unit/rollup data. It is used to validate names at emit time, to drive the inspector's grouping, and to drive run-level roll-ups in the timeline (mean / sum / none).
 
 ### E. LLM spans (OpenInference, already emitted by `OpenAIInstrumentor` / `CrewAIInstrumentor`)
 
@@ -225,6 +231,80 @@ A small `obs/scores.py` registry holds `SCORE_SPECS = {name: (data_type, unit, r
 | terminal `failed` | `failed` (bay) | `terminal` | failed | `--term-red` |
 
 `--term-magenta` (`#f472b6`) and `--term-yellow` (`#facc15`) were already vendored in `tokens.css` (dark, light and hc). The viewer takes them through the `--term-station-judge` and `--term-station-review` role aliases, added in the brand-kit follow-up.
+
+## Archive ledger (Decision 6)
+
+**Why not `audit_log`.** Research on the current store (`storage/db.py`, `storage/audit_log.py`): the chain is per document, every append takes `BEGIN IMMEDIATE` and scans the whole per-document chain, identical `(node, event, payload)` appends are dropped, payloads are not masked or size-capped, and there is no run header, no checkpoint and no anchor (the docstring admits tail truncation is undetectable). A high-volume metrics stream does not belong there. The ledger is a **new table pair** (`create_all` adds tables without a migration) that links to the document chains by digest.
+
+**Tables**
+- `ledger(seq INTEGER PK global, kind, run_id, doc_id NULL, ts, payload JSON, digest, prev_hash, entry_hash)`.
+- `ledger_metrics(run_id, doc_id, tier, name, value, span_id, ts)`: the full flat metric set (numbers, booleans, short strings), all tiers.
+
+**Hash rules.** Same construction as `llm-mailroom` `schemas/audit.py` and `llm-dojo-scoring` `archive.py` (`canonical_json` with sorted keys, `hash_version`, `prev_hash`, genesis `""`, `entry_hash = sha256(canonical body)`), implemented once beside `schemas/audit.py` so `verify` shares code with the document chains. One **global** chain, appended by a single writer thread that drains a queue in batches, so heavy runs never contend with the document audit chain.
+
+**Entry kinds**
+
+| kind | When | Payload (allow-list only; no document text, prompts or completions) |
+| --- | --- | --- |
+| `run_opened` | run/session starts | full run context: `EvalConfig` (seed, gpu, posture_label, prompt_set, mode, split, classes), model, prompt versions, environment, source. Fixes the missing run header (`eval_docs` stores only `run_id` and `mode`). |
+| `doc_closed` | root span ends | digest over all metrics, route trail, span summary, `audit_log` chain head hash for that `doc_id` (this links the two chains), tier counts |
+| `run_closed` | run ends | counts, Merkle-style root over the run's `doc_closed` digests, tier totals, aggregate roll-ups |
+| `score_late` | an offline judge writes later | score name, value, span id (keeps the in-pipeline `verify` scores authoritative) |
+| `pinned` / `unpinned` | `runs pin|unpin` | run id, actor |
+| `pruned` | retention removes span data | run id, digest, counts. The audit trail still proves the run existed. |
+| `anchor` | `ledger anchor` or on schedule | head hash and count, for external pinning |
+
+**Intake.** Written from the same hook that closes `mailroom.document` (live and eval alike), so it covers every pipeline run. Values pass an allow-list and size caps; this also closes the "no masking on audit payloads" gap. The writer is best-effort for liveness (a queue overflow drops metric rows but writes a `gap` marker entry), never for integrity: an entry is either chained or absent.
+
+**Tail truncation.** `ledger head` prints the head hash and count; `ledger anchor` appends an `anchor` entry; `ledger export-head` writes the head to a file or stdout for external pinning. This is a documented mitigation, not a guarantee.
+
+**API (token-gated like the rest of `/v1`)**
+- `GET /v1/ledger?kind&run_id&doc_id&since&limit&offset` (page), `GET /v1/ledger/{seq}`, `GET /v1/ledger/head`.
+- `GET /v1/ledger/verify[?run_id]` returns `{ok, broken_at, head, count}`; a run-scoped verify checks the run's `doc_closed` entries against `run_closed` and the global chain links in range.
+- `GET /v1/ledger/runs` lists all runs (eval and live buckets) with `kept` class. It replaces `/v1/runs`'s limits for live runs (`/v1/runs/{id}/cards` requires a 12-hex id).
+
+**TUI (`api/tui/commands/ledger.js`)**
+
+```
+mailroom@floor:~$ ledger --run 3fa9c1d20b7e
+ SEQ   KIND         RUN           DOC        HASH          PREV
+ 412   run_opened   3fa9c1d20b7e  —          9c41e07a3b52  genesis
+ 413   doc_closed   3fa9c1d20b7e  a1b2c3d4…  0e77d2a9c1f4  9c41e07a3b52
+ 414   doc_closed   3fa9c1d20b7e  e5f6a7b8…  51aa90e3c7d0  0e77d2a9c1f4
+ …     run_closed   3fa9c1d20b7e  —          b84c11f2096d  …
+ chain: ok  (4 entries, head b84c11f2096d)
+```
+
+- Commands: `ledger` (tail), `ledger ls [--run ID] [--kind K] [--doc ID]`, `ledger show <seq|run>` (key/value, metrics at T0/T1; `--tier 2|3`), `ledger verify [--run ID]`, `ledger head`, `ledger anchor`.
+- Style mirrors The-Mailroom's TUI: borderless table, uppercase headers, 12-character hashes in `--term-fg-dim`, `genesis` on the first row, kind colours from the brand roles (judge-related `--term-station-judge`, parked `--term-station-review`, archived green, failed/pruned red), and a final `chain: ok | broken at <seq>` line exactly like `audit`. All text via `textContent`.
+- `replay` and `inspect` gain a `ledger` panel (the run's or document's entries and the link between a `doc_closed` entry and the document's audit chain head), so the viewer and the audit trail point at each other.
+
+## Retention and pinning (Decision 5)
+
+There is no precedent in the originals (neither llm-mailroom, The-Mailroom nor llm-dojo-scoring has a run registry, retention, pin or golden run; only the pilot `--baseline` diff and HF revision pinning). Today nothing in mailroom-reloaded is ever deleted either.
+
+- **Classes.** `showcase` (shipped with the repo, always kept), `pinned` (user-kept), `ordinary` (pruned). Class lives in the ledger (`pinned`/`unpinned` entries) and a small `run_keep` view.
+- **What is heavy.** Span rows in `traces.db` and cached timelines. **What is light and permanent.** The ledger (digests and the full metric rows).
+- **Setting `MAILROOM_TRACE_KEEP`** (also `runs keep ...` at runtime, which writes a `ledger` entry):
+  - `pinned` (default): keep showcase and pinned runs, plus a short rolling window of live spans (`MAILROOM_TRACE_LIVE_DAYS`, default 3);
+  - `recent:<N>`: also keep the last N ordinary runs;
+  - `all`: keep everything.
+- **Pruning** runs on startup and daily; it deletes only span data, then appends `pruned`. It never touches `ledger` rows, and a `pruned` run still verifies and lists in `ledger`, shown as `data pruned`.
+- **Showcase for new users.** 3-5 curated eval runs ship as portable `replay/v1` files under `examples/replays/` (git-tracked) and are imported on first start (`MAILROOM_SEED_SHOWCASE=1`, default on). They appear in `runs` and `/ui`, open in `replay` with no pipeline run, and their file digests are recorded in the ledger so a modified showcase file fails verification.
+- **TUI.** `runs pin <id>`, `runs unpin <id>`, `runs keep [pinned|recent:N|all]`, `runs --kept`.
+
+### Settings added
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MAILROOM_TRACE_STORE` | on in dev stack | local span store |
+| `MAILROOM_TRACE_KEEP` | `pinned` | `pinned` \| `recent:<N>` \| `all` |
+| `MAILROOM_TRACE_LIVE_DAYS` | `3` | rolling window for live spans |
+| `MAILROOM_SEED_SHOWCASE` | `1` | import shipped showcase runs |
+| `MAILROOM_RUN_BUCKET` | `day` | live `run_id` bucket (`day` \| `hour` \| `process`), metric-label cardinality only; the ledger keeps per-document records |
+| `MAILROOM_LEDGER` | on | write the archive ledger |
+| `MAILROOM_REPLAY_TIER` | `1` | default displayed tier |
+| `MAILROOM_PUBLIC_URL` | `http://localhost:8000` | Grafana links to the viewer |
 
 ## Concept mapping (F1 → mailroom)
 
@@ -294,6 +374,7 @@ replay run:3f9c0a1b2d4e · eval · 48 docs · source spans                ▶ 4�
 
 ## Review Focus
 
+- **Ledger:** writer contention with the document audit chain; the allow-list must never leak document text, prompts or completions; prune must never remove ledger rows; hostile filenames and run ids in `ledger` output; verify cost on long chains (range-scoped verify); showcase files carry a ledger digest.
 - **Attribute allow-list and masking.**
   - Stored spans contain no `llm.input_messages.*`, `llm.output_messages.*` or document text, even with masking off.
   - `input.value` is kept only on root and node spans (Task 3).
@@ -314,6 +395,9 @@ src/mailroom_reloaded/
   obs/reconsideration.py      (new)    port of The-Mailroom collect_review_causes
   obs/metrics.py              (modify) auto-merge run_id/environment labels; retries/escalations/review.causes
   obs/tracing.py              (modify) span store after masking; per-run Phoenix project provider for eval
+  obs/ledger.py               (new)    archive ledger: tables, writer thread, hash/verify (shares code with schemas/audit.py)
+  obs/retention.py            (new)    keep classes, prune, showcase seed, pin/unpin
+  schemas/ledger.py           (new)    Pydantic ledger entry + hash version
   obs/span_store.py           (new)    SqliteSpanExporter, allow-list, retention prune, query helpers
   obs/replay/{__init__,timeline,sessions,otlp_import}.py   (new)
   schemas/replay.py           (new)    Pydantic replay/v1 models
@@ -327,13 +411,19 @@ src/mailroom_reloaded/
   api/tui/terminal.js         (modify) ctx.takeover(factory)
   api/tui/main.js             (modify) registerReplay; #replay= deep link
   api/tui/commands/replay.js  (new)
+  api/tui/commands/ledger.js  (new)    ledger, ledger verify|head|anchor; runs pin|unpin|keep in pipeline.js
+  api/ui/index.html           (modify) Eval runs: third column `replay ↗`
+examples/replays/             (new)    showcase replay/v1 files
+  api/app.py also: /v1/ledger*, /v1/ledger/runs
   api/tui/replay/{clock,model,view,panels,stations}.js     (new)
   api/tui/tokens.css, tui.css (modify) .replay-* layout; station role tokens (done)
 deploy/grafana/dashboards/{pipeline,quality}.json          (modify) replay ↗ / phoenix ↗ links, decision panels
 deploy/otel-collector*.yaml   (optional) commented `file` exporter example
 tests/obs/test_run_context.py, test_span_attrs.py, test_scores.py, test_metrics_run_id.py,
       test_span_store.py, test_replay_timeline.py
-tests/api/test_replay_api.py
+tests/obs/test_ledger.py, test_retention.py
+tests/api/test_replay_api.py, test_ledger_api.py
+tests/tui/js/ledger.test.mjs
 tests/tui/js/replay_{clock,model,view}.test.mjs, takeover.test.mjs
 tests/deploy/test_grafana_links.py
 tests/fixtures/replay/        span + audit fixtures (happy, retry, failed, parked, boss)
@@ -631,14 +721,56 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 - [ ] **Step 2:** `uv run pytest -q` and `uv run ruff check .` pass.
 - [ ] **Step 3: Commit** `docs(replay): tui replay docs, dev harness seed and changelog`.
 
+### Task 13: Archive ledger store, hashing and verification
+
+**Files:** Create `src/mailroom_reloaded/obs/ledger.py`, `schemas/ledger.py`; modify `storage/db.py` (add the two tables to metadata); tests `tests/obs/test_ledger.py`.
+
+**Interfaces:** `ledger.append(kind, run_id, doc_id=None, payload=..., metrics=...)`, `ledger.entries(...)`, `ledger.verify(run_id=None) -> LedgerVerify{ok, broken_at, head, count}`, hash helpers shared with `schemas/audit.py`.
+
+- [ ] **Step 1: Failing tests.** Genesis `""`; chain links; tampering with a payload, a `prev_hash` or a deleted middle row is detected at the right `seq`; canonical JSON is byte-identical to the vendored audit canonicalisation; `ledger_metrics` rows round-trip; concurrent appends from 8 threads keep one linear chain; a repeated identical payload is **not** dropped.
+- [ ] **Step 2:** Implement with a single writer thread and batched `BEGIN IMMEDIATE`; the queue overflow writes a `gap` entry.
+- [ ] **Step 3: Commit** `feat(ledger): global hash-chained archive ledger and metric rows`.
+
+### Task 14: Ledger intake hook, allow-list and anchors
+
+**Files:** Modify `pipeline/flow.py` (`_drive` end), `eval/runner.py` (`run_opened` with the full `EvalConfig`, `run_closed`), `watcher.py` (live bucket), `obs/scores.py` (tier on every spec); tests `tests/obs/test_ledger_intake.py`.
+
+- [ ] **Step 1: Failing tests.** One `doc_closed` per document (live and eval) carrying the `audit_log` head hash of that document; `run_closed` root matches the recomputed Merkle root; every captured score appears in `ledger_metrics` with its tier; payloads contain no document text or prompt/completion content (assert against a hostile fixture); `anchor` entry holds head and count.
+- [ ] **Step 2:** Implement the hook after the root span closes (masking and allow-list run first); `ledger anchor` and `export-head`.
+- [ ] **Step 3: Commit** `feat(ledger): intake hook for all runs, allow-list, anchors`.
+
+### Task 15: Retention, pinning, prune and showcase seed
+
+**Files:** Create `obs/retention.py`, `examples/replays/*.json`; modify `settings.py`, `obs/span_store.py`; tests `tests/obs/test_retention.py`.
+
+- [ ] **Step 1: Failing tests.** Default `pinned` keeps showcase and pinned runs and drops ordinary span data older than the live window; `recent:2` keeps the last two; `all` keeps everything; pruning never deletes ledger rows and appends `pruned`; a pruned run still verifies and lists as `data pruned`; showcase import is idempotent; a modified showcase file fails digest verification; `MAILROOM_SEED_SHOWCASE=0` imports nothing.
+- [ ] **Step 2:** Implement keep classes, prune on startup and daily, pin/unpin, showcase seed.
+- [ ] **Step 3: Commit** `feat(retention): keep classes, pin/unpin, prune and showcase seed`.
+
+### Task 16: Ledger API and TUI commands
+
+**Files:** Modify `api/app.py` (`/v1/ledger*`), `api/tui/main.js`, `api/tui/commands/pipeline.js` (`runs pin|unpin|keep`); create `api/tui/commands/ledger.js`; tests `tests/api/test_ledger_api.py`, `tests/tui/js/ledger.test.mjs`; update the registered-names assertion in `pipeline.test.mjs`.
+
+- [ ] **Step 1: Failing tests.** Token gate on every route; pagination bounds; `verify` returns `broken_at` on a tampered row; `ledger` renders `SEQ KIND RUN DOC HASH PREV` with 12-character hashes, `genesis` on seq 1 and `chain: ok | broken at <seq>`; hostile filenames and run ids render as text (the `HOSTILE` fixture); empty ledger prints `ledger empty`; man pages exist for each new command; `runs pin` rejects invalid ids.
+- [ ] **Step 2:** Implement routes and commands (`textContent` only; `fail()` for API errors).
+- [ ] **Step 3: Commit** `feat(tui): ledger commands, /v1/ledger routes, runs pin/keep`.
+
+### Task 17: `/ui` replay link and `#replay=` deep link
+
+**Files:** Modify `api/ui/index.html` (`loadRuns`, header row), `api/tui/main.js` (`start()` hash handler); tests in `tests/api/test_api.py` and `tests/tui/js/boot.test.mjs`; docs `docs/TUI.md` ("Deep links"), `docs/OPERATIONS.md` ("Audit verification" gains the ledger; replace the stale `app.py:208-217` reference; `/ui` row).
+
+- [ ] **Step 1: Failing tests.** `/ui` Eval runs has a third column with `href="/tui#replay=run:<encoded id>"`, `target=_blank rel=noopener`, and clicking it does not trigger the row's `loadCards`; the empty row `colspan` is 3; a hostile run id is encoded and rendered as text; `start()` with `#replay=run:<id>` runs `replay` after boot, and an unknown or malformed hash is ignored.
+- [ ] **Step 2:** Implement with `createElement`/`textContent` only.
+- [ ] **Step 3: Commit** `feat(ui): replay link per eval run and #replay deep link`.
+
 ## Phasing
 
 | Phase | Tasks | Result |
 | --- | --- | --- |
-| **0. Capture parity** (start here; useful on its own) | 1, 2, 3, 4 | llm-mailroom-level traces and scores in Phoenix, a local span store, a working Grafana `$run_id` with replay and Phoenix links. |
-| **1. Replay MVP** | 5, 7 (sessions and timeline), 8, 9, 10 | A full-fidelity replay of eval runs, and an approximate replay from the audit log for older runs. |
+| **0. Capture parity** (start here; useful on its own) | 1, 2, 3, 4, 13, 14 | llm-mailroom-level traces and scores in Phoenix, a local span store, a working Grafana `$run_id` with replay and Phoenix links, and the archive ledger recording every run. |
+| **1. Replay MVP** | 5, 6 (export/import, needed for showcase), 7 (sessions and timeline), 8, 9, 10, 15, 16, 17 | A full-fidelity replay of eval runs, retention with shipped showcase runs, the `ledger` TUI commands, the `/ui` replay link, and an approximate replay from the audit log for older runs. |
 | **2. Live** | 7 (SSE), 11 | Follow dev or production traffic as it happens. |
-| **3. Portability** | 6 | Replay traces from another host, and share `replay/v1` files. |
+| **3. Portability** | 6 (OTLP file import) | Replay traces from another host, and share `replay/v1` files. |
 
 ## Non-goals
 
@@ -651,12 +783,12 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 
 ## Open questions
 
-1. ~~**Brand tokens**~~ **Resolved:** magenta and yellow were already in the kit; added `--term-station-judge` / `--term-station-review` role aliases.
-2. **Live `run_id` granularity:** a daily bucket (`live-<YYYYMMDD>`, proposed), one per watcher process start, or one per hour?
-3. **Retention:** 14 days for live spans; should eval runs be pinned indefinitely (proposed: yes, with `mailroom replay unpin <run>`)?
-4. **Hosted judge scores:** `mailroom-pipeline-judge` and `mailroom-pipeline-quality` were asynchronous Langfuse evaluators. Here they come from the in-pipeline `verify` node. Is that equivalence acceptable, or should an offline judge pass write scores back into the span store later (as a `mailroom.score` late event)?
-5. ~~**The-Mailroom compatibility**~~ **Resolved:** shipped as Exios66/The-Mailroom#39 (Phoenix source reads `mailroom.document` / `mailroom.node.*`). Original wording: should we also ship a small `mailroom_ui` source adapter PR to The-Mailroom that reads `traces.db` or `/v1/replay`, so the original floor can render mailroom-reloaded runs?
-6. **`/ui` entry point:** add a `replay ↗` link per eval run in `/ui`'s Eval runs section?
+Resolved: brand tokens (role aliases `--term-station-judge` / `--term-station-review`), The-Mailroom compatibility (Exios66/The-Mailroom#39), live `run_id` granularity (Decision 4: day bucket for labels, per-document in the ledger), retention (Decision 5), hosted judge scores (in-pipeline `verify` stays authoritative; offline scores land as `score_late`), and the `/ui` link (Decision 7).
+
+Still open:
+1. **Showcase selection.** Which 3-5 eval runs ship (suggested: one clean run, one with retries and a boss escalation, one with parked and failed documents, one judge/arbiter-heavy)?
+2. **Ledger size budget.** Cap `ledger_metrics` per run (for example 5,000 rows) and write a `gap` marker beyond it, or store everything?
+3. **External anchor.** Should `anchor` also push the head hash to an external store (a git tag, an object store, a log service), or stay manual?
 
 ## Self-review
 
@@ -670,3 +802,8 @@ Times are seconds relative to `session.t0`. The format is event-sourced (no fixe
 - **f1-race-replay feature coverage:** play, pause, speed and seek; the track; the leaderboard; selection and telemetry; insight windows; the stream; the cache. Each maps to a task.
 - **Consistency:** the station table is mirrored in `obs/attrs.py` and `replay/stations.js` and tested for sync. Score names live in one registry (`obs/scores.py`).
 - **Proportion:** code appears only as interfaces, payload shape and test assertions.
+- **Decisions 4-7** (revision 3):
+  - Tiers (Decision 4): section D, `MAILROOM_REPLAY_TIER`, Task 14 and the `--tier` option in Tasks 10 and 16.
+  - Retention and showcase (Decision 5): the Retention section and Task 15.
+  - Archive ledger (Decision 6): the Archive ledger section and Tasks 13, 14 and 16. No ledger row is ever pruned, and prune is a ledger event.
+  - `/ui` link and deep link (Decision 7): Task 17.
