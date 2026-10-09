@@ -314,10 +314,42 @@ async function openViewer(ctx, arg, flags) {
     clock.seek(Math.max(0, elapsed - 2));
   };
 
+  // The live stream replays the whole timeline on every connect (first, `f` off/on, reconnect), so
+  // each item is matched against what the model already holds: `have` counts items per key ever
+  // accepted, `streamSeen` counts them on the current connection, and only the surplus is appended.
+  const LIVE_NAMES = { segment: 'segments', generation: 'generations', event: 'events', score: 'scores' };
+  const liveKey = (name, o) => {
+    if (name === 'event') return `event:${o.t}:${o.doc_id}:${o.kind}:${o.station}`;
+    if (name === 'score') return `score:${o.span_id}:${o.name}:${o.doc_id}`;
+    if (o.span_id) return `${name}:${o.span_id}`;
+    return `${name}:${o.doc_id}:${o.node}:${o.t0}:${o.t1}:${o.attempt}`;
+  };
+  const have = new Map();
+  for (const [name, list] of Object.entries(LIVE_NAMES)) {
+    for (const o of liveTimeline[list]) {
+      if (o && typeof o === 'object') {
+        const k = liveKey(name, o);
+        have.set(k, (have.get(k) ?? 0) + 1);
+      }
+    }
+  }
+  let streamSeen = new Map();
+
   const applyLiveFrame = (name, obj) => {
     if (closed) return;
-    const list = { segment: 'segments', generation: 'generations', event: 'events', score: 'scores' }[name];
+    // The server ends the stream after an `error` frame; do not reconnect into the same answer.
+    if (name === 'error') {
+      follow = false;
+      stopFollow();
+      return;
+    }
+    const list = LIVE_NAMES[name];
     if (!list || !obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+    const key = liveKey(name, obj);
+    const nth = (streamSeen.get(key) ?? 0) + 1;
+    streamSeen.set(key, nth);
+    if (nth <= (have.get(key) ?? 0)) return;
+    have.set(key, nth);
     liveTimeline[list].push(obj);
     boundLiveTimeline(liveTimeline);
     model = createModel(liveTimeline);
@@ -330,6 +362,7 @@ async function openViewer(ctx, arg, flags) {
     const fetchFn = ctx.fetch ?? globalThis.fetch;
     if (typeof fetchFn !== 'function') return;
     const headers = typeof ctx.api?.authHeaders === 'function' ? ctx.api.authHeaders() : {};
+    streamSeen = new Map();
     reader = createFollowReader({
       fetchFn,
       url: `/v1/replay/live?session=${encodeURIComponent(id)}`,

@@ -117,6 +117,8 @@ export function createFollowReader({
       try {
         controller = new AbortController();
         const res = await fetchFn(url, { headers, signal: controller.signal });
+        // A client error (bad id, bad token, no such route) will not heal by retrying.
+        if (res && res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) break;
         if (!res || res.ok !== true || !res.body) {
           throw new Error(`live stream http ${res && res.status ? res.status : '?'}`);
         }

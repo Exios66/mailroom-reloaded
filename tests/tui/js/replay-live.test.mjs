@@ -125,3 +125,19 @@ test('an aborted caller signal stops the reader', async () => {
   await delay(10);
   assert.equal(calls, 1);
 });
+
+test('does not retry a client error (4xx) response', async () => {
+  let calls = 0;
+  const reader = createFollowReader({
+    fetchFn: async () => {
+      calls += 1;
+      return { ok: false, status: 401, body: null };
+    },
+    url: URL,
+    onFrame: () => {},
+    backoffMs: 5,
+  });
+  await reader.done;
+  await delay(40);
+  assert.equal(calls, 1);
+});

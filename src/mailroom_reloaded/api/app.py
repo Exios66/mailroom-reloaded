@@ -495,14 +495,23 @@ def _sse(event: str, data: dict) -> str:
 
 def _live_items(tl):
     """``(event_name, item, seen_key)`` for one timeline snapshot, in a stable order."""
+    # An ``#n`` suffix counts repeats of the same base key within one snapshot, so two
+    # events that share (t, doc, kind, station) are both delivered instead of collapsed.
+    counts: dict[str, int] = {}
+
+    def keyed(base: str) -> str:
+        n = counts.get(base, 0)
+        counts[base] = n + 1
+        return f"{base}#{n}"
+
     for i, seg in enumerate(tl.segments):
-        yield "segment", seg, f"segment:{seg.span_id or i}"
+        yield "segment", seg, keyed(f"segment:{seg.span_id or i}")
     for gen in tl.generations:
-        yield "generation", gen, f"generation:{gen.span_id}"
+        yield "generation", gen, keyed(f"generation:{gen.span_id}")
     for ev in tl.events:
-        yield "event", ev, f"event:{ev.t}:{ev.doc_id}:{ev.kind}:{ev.station}"
+        yield "event", ev, keyed(f"event:{ev.t}:{ev.doc_id}:{ev.kind}:{ev.station}")
     for sc in tl.scores:
-        yield "score", sc, f"score:{sc.span_id}:{sc.name}:{sc.doc_id}"
+        yield "score", sc, keyed(f"score:{sc.span_id}:{sc.name}:{sc.doc_id}")
 
 
 def _item_time(item) -> float:
@@ -579,7 +588,10 @@ def replay_live_endpoint(
                     if max_frames and frames >= max_frames:
                         return
                 try:
-                    tl = build_timeline(sid, store=store, engine=get_engine())
+                    # Sync sqlite reads and a deep copy: keep them off the event loop.
+                    tl = await asyncio.to_thread(
+                        build_timeline, sid, store=store, engine=get_engine()
+                    )
                 except Exception:
                     logger.warning("replay_live_timeline_failed", exc_info=True)
                     yield _sse("error", {"detail": "no timeline"})

@@ -216,3 +216,16 @@ def test_live_stream_emits_ready_segment_and_heartbeat(client):
     assert "segment" in names
     assert "heartbeat" in names
     assert all(name in {"ready", "segment", "generation", "event", "score", "heartbeat", "error"} for name in names)
+
+
+def test_live_items_keep_repeated_events_distinct():
+    """Two events sharing (t, doc, kind, station) get distinct keys, stable across snapshots."""
+    from types import SimpleNamespace as NS
+
+    from mailroom_reloaded.api.app import _live_items
+
+    ev = NS(t=1.0, doc_id="d", kind="retry", station="gate")
+    tl = NS(segments=[], generations=[], events=[ev, ev], scores=[])
+    keys = [k for _, _, k in _live_items(tl)]
+    assert len(keys) == 2 and len(set(keys)) == 2
+    assert keys == [k for _, _, k in _live_items(tl)]

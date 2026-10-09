@@ -552,6 +552,58 @@ test('--follow grows the model and pins the clock to now-2s', async () => {
   }
 });
 
+test('--follow does not duplicate items the stream replays from the loaded timeline', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  const sse = fakeLiveFetch.calls[0].sse;
+  const settle = async () => {
+    await nextTick();
+    await nextTick();
+  };
+  const ev = { t: 30, doc_id: 'd1', kind: 'gate', station: 'intake', payload: {} };
+  // A replayed loaded segment and event are skipped: an accepted item forces a redraw, a skipped one does not.
+  let n = h.view.frames.length;
+  sse.push('segment', TL.segments[0]);
+  sse.push('event', ev);
+  await settle();
+  assert.equal(h.view.frames.length, n, 'replayed loaded items cause no redraw');
+  // A genuinely new item is accepted.
+  sse.push('event', { ...ev, t: 31 });
+  await settle();
+  assert.equal(h.view.frames.length, n + 1, 'a new event redraws once');
+  // A second identical event on the same connection is distinct (count-based), not collapsed.
+  n = h.view.frames.length;
+  sse.push('event', { ...ev, t: 31 });
+  await settle();
+  assert.equal(h.view.frames.length, n + 1, 'a repeated identical event is still accepted');
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('an error frame stops following instead of reconnecting', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  fakeLiveFetch.calls[0].sse.push('error', { detail: 'no timeline' });
+  await nextTick();
+  await nextTick();
+  assert.ok(fakeLiveFetch.calls[0].aborted, 'the reader is stopped');
+  assert.equal(fakeLiveFetch.calls.length, 1, 'no reconnect');
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
 test('boundLiveTimeline caps each list at 5000 and drops items older than 2h', () => {
   assert.equal(LIVE_MAX_ITEMS, 5000);
   const seq = (n, make) => Array.from({ length: n }, (_, i) => make(i));
