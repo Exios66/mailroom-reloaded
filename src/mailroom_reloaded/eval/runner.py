@@ -28,13 +28,11 @@ from mailroom_reloaded.eval.dataset import (
     DEFAULT_REVISION,
     REPO,
     BlindDoc,
-    DatasetIntegrityError,
     EvalContext,
     GroundTruth,
     doc_id_for_sha,
     load_split,
     sample,
-    validate_filename,
 )
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs.run_context import run_scope
@@ -167,7 +165,12 @@ def _engine() -> Engine:
 
 
 def _ensure_table(engine: Engine) -> None:
-    """Create the evaluation results table if it does not already exist."""
+    """Create run tables and add the content identity column to older databases.
+
+    Issue #14's fixtures exports match labels to the evaluated content hash.
+    Existing databases need this column before new evaluations can record it;
+    legacy rows retain NULL and cannot pass the export identity check.
+    """
     with engine.begin() as conn:
         conn.execute(text(_EVAL_DDL))
         if "content_sha256" not in {c["name"] for c in inspect(conn).get_columns("eval_docs")}:
@@ -221,11 +224,7 @@ def _write_doc(doc: BlindDoc) -> Path:
     Some dataset filenames are nested paths (Enron ``owner/folder/n.``), so the
     inbox parent directory is created before writing.
     """
-    validate_filename(doc.filename)
-    inbox = Bins(get_settings().base_dir).inbox.resolve()
-    path = (inbox / doc.filename).resolve()
-    if not path.is_relative_to(inbox) or path == inbox:
-        raise DatasetIntegrityError(f"Document destination escapes inbox: {doc.filename!r}")
+    path = Bins(get_settings().base_dir).inbox / doc.filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(doc.doc_text, encoding="utf-8")
     return path

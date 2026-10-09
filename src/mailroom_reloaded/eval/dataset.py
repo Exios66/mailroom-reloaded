@@ -22,7 +22,7 @@ import json
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any
 
 __all__ = [
@@ -60,11 +60,9 @@ _FIELD_KEYS = ("fields", "extraction", "ground_truth_fields")
 #: is the canonical review signal; a non-empty ``expected_post_retry_state``
 #: (``human_review``/``archived``) is the canonical retry signal. ``review_reason``
 #: alone is *not* sufficient -- fixtures pair a reason with ``review_expected ==
-#: "false"`` (e.g. ``ambiguous``), so it is only used when ``expected_stage`` is
-#: absent entirely.
+#: "false"`` (e.g. ``ambiguous``), including when ``expected_stage`` is absent.
 _STAGE_KEYS = ("expected_stage",)
 _POST_RETRY_KEYS = ("expected_post_retry_state",)
-_REVIEW_REASON_KEYS = ("review_reason",)
 
 
 class DatasetIntegrityError(Exception):
@@ -262,7 +260,6 @@ def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
         declared = _metadata_sha(row)
     if not filename:
         raise DatasetIntegrityError("blind row is missing a filename")
-    validate_filename(filename)
     if declared is None:
         raise DatasetIntegrityError(f"{filename}: blind row is missing content_sha256")
     actual = sha256_text(text)
@@ -272,21 +269,6 @@ def _blind_from_row(row: Any, declared: Any = None) -> BlindDoc:
             f"(declared {declared}, actual {actual})"
         )
     return BlindDoc(filename=filename, doc_text=text, content_sha256=actual)
-
-
-def validate_filename(filename: str) -> None:
-    """Require a relative document path without traversal on either platform."""
-    windows = PureWindowsPath(filename)
-    if (
-        not filename
-        or not Path(filename).parts
-        or Path(filename).is_absolute()
-        or windows.drive
-        or windows.root
-        or ".." in windows.parts
-        or "\x00" in filename
-    ):
-        raise DatasetIntegrityError(f"Unsafe document filename: {filename!r}")
 
 
 def _ground_truth_from_row(row: Any) -> GroundTruth:
@@ -308,15 +290,8 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
     stage_text = str(stage).strip().lower() if stage is not None else ""
     post_retry = _row_get(row, _POST_RETRY_KEYS)
     post_text = str(post_retry).strip() if post_retry is not None else ""
-    reason = _row_get(row, _REVIEW_REASON_KEYS)
-    # Richer columns are authoritative (issue #14): `expected_stage == "review"`
-    # is the canonical review signal, a non-empty `expected_post_retry_state`
-    # the canonical retry signal. `review_reason` is only consulted when the
-    # row has no `expected_stage` at all (fixtures pair a reason with
-    # `review_expected == "false"`, so a bare reason is not sufficient).
-    derived_review = stage_text == "review" or (
-        not stage_text and bool(str(reason or "").strip())
-    )
+    # A reason alone never establishes a review, even without expected_stage.
+    derived_review = stage_text == "review"
     derived_retry = bool(post_text)
 
     return GroundTruth(

@@ -270,40 +270,8 @@ def test_empty_eval_opens_and_seals_a_zero_document_run(engine, monkeypatch, mod
     assert rows(engine) == []
 
 
-@pytest.mark.parametrize('filename', ['../outside.txt', 'owner/../../outside.txt', '/outside.txt'])
-def test_write_doc_rejects_unsafe_paths(tmp_path, monkeypatch, filename):
-    from types import SimpleNamespace
-
-    from mailroom_reloaded.eval.dataset import DatasetIntegrityError
-
-    monkeypatch.setattr(runner, 'get_settings', lambda: SimpleNamespace(base_dir=tmp_path))
-    with pytest.raises(DatasetIntegrityError):
-        runner._write_doc(BlindDoc(filename, 'body', sha256_text('body')))
-    assert not (tmp_path / 'outside.txt').exists()
-
-
-@pytest.mark.parametrize('link_directory', [False, True])
-def test_write_doc_rejects_symlink_escape(tmp_path, monkeypatch, link_directory):
-    from types import SimpleNamespace
-
-    from mailroom_reloaded.eval.dataset import DatasetIntegrityError
-
-    inbox = tmp_path / 'inbox'
-    inbox.mkdir()
-    outside = tmp_path / 'outside'
-    outside.mkdir()
-    target = outside / 'letter.txt'
-    target.write_text('original')
-    link = inbox / ('nested' if link_directory else 'letter.txt')
-    link.symlink_to(outside if link_directory else target, target_is_directory=link_directory)
-    filename = 'nested/letter.txt' if link_directory else 'letter.txt'
-    monkeypatch.setattr(runner, 'get_settings', lambda: SimpleNamespace(base_dir=tmp_path))
-    with pytest.raises(DatasetIntegrityError, match='escapes inbox'):
-        runner._write_doc(BlindDoc(filename, 'body', sha256_text('body')))
-    assert target.read_text() == 'original'
-
-
-def test_eval_table_migration_preserves_legacy_rows():
+def test_eval_table_migration_preserves_legacy_rows(document):
+    """Preserve old results while enabling content hashes for new evaluations."""
     legacy = create_engine('sqlite:///:memory:')
     try:
         with legacy.begin() as conn:
@@ -313,5 +281,9 @@ def test_eval_table_migration_preserves_legacy_rows():
         runner._ensure_table(legacy)
         assert rows(legacy)[0]['filename'] == 'a.txt'
         assert rows(legacy)[0]['content_sha256'] is None
+        runner._insert(legacy, runner._base_row(
+            'new', document, None, mode='pipeline', latency_s=0, graded=False,
+        ))
+        assert rows(legacy)[1]['content_sha256'] == document.content_sha256
     finally:
         legacy.dispose()

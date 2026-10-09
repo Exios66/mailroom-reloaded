@@ -120,10 +120,12 @@ def test_feature_target_parses_hub_string_labels(value, expected):
 
 @pytest.mark.parametrize("extract_route", ["proceed", "human_review"])
 def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch, extract_route):
+    """Preserve target order and score each usable route against its label."""
     monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
     module = _load_module()
 
     def responder(state):
+        """Return stage-specific routes and simulate unusable classify answers."""
         if state["stage"] == "extract":
             return {"route": JevAnswer(type="choice", choice=extract_route, confidence=0.7)}
         confidence = round(float(state["confidence"]), 2)
@@ -203,10 +205,12 @@ def test_harvest_features_refuses_single_class_labels(tmp_path, monkeypatch):
 def test_harvest_features_skips_degenerate_survivors(
     tmp_path, monkeypatch, capsys, surviving_label, existing_output
 ):
+    """Leave output untouched when usable answers lose a target label class."""
     module = _load_module()
     monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
 
     def responder(state):
+        """Return usable routes only for the selected target label class."""
         if state["confidence"] != surviving_label:
             return {}
         # Surviving targets share an expected label but have mixed correctness.
@@ -249,9 +253,11 @@ def test_feature_route_verify_is_not_an_escalation():
         cfg = _StubCfg()
 
         def __init__(self, route):
+            """Configure the route returned by this synthetic Jev client."""
             self._route = route
 
         def ask(self, state, questions):
+            """Return the configured route with a fixed confidence."""
             return {"route": JevAnswer(type="choice", choice=self._route, confidence=0.9)}
 
     assert module._run_feature(_Client("verify"), target)["correct"] == 0

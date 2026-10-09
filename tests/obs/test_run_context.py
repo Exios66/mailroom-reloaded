@@ -209,6 +209,7 @@ class _NullLedger:
 
 
 def test_run_eval_scopes_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Propagate the evaluation run scope to every asynchronous document task."""
     from mailroom_reloaded.eval import runner
 
     captured: list[tuple[str, str, str | None]] = []

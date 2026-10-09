@@ -13,6 +13,7 @@ from mailroom_reloaded.eval.dataset import sha256_text
 
 @pytest.fixture
 def export_run(tmp_path, monkeypatch):
+    """Evaluate a synthetic local dataset and provide its exporter arguments."""
     script = Path(__file__).resolve().parents[1] / 'scripts' / 'jev_export_gate_features.py'
     spec = importlib.util.spec_from_file_location('export_under_test', script)
     module = importlib.util.module_from_spec(spec)
@@ -34,6 +35,7 @@ def export_run(tmp_path, monkeypatch):
     }) + '\n')
 
     async def run_all(cfg, run_id, selected, gts, graded, db_engine):
+        """Record synthetic gate features through the evaluation persistence path."""
         for doc in selected:
             row = runner._base_row(run_id, doc, gts[doc.filename], mode='pipeline', latency_s=0, graded=False)
             row['gate_features'] = json.dumps({'classify': {'confidence': 0.7}})
@@ -50,6 +52,7 @@ def export_run(tmp_path, monkeypatch):
 
 
 def test_export_matching_run_preserves_split_and_label(export_run):
+    """Export labels and the original split when dataset identities match."""
     module, engine, _, output, args = export_run
     assert module.main(args) == 0
     result = json.loads(output.read_text())
@@ -64,6 +67,7 @@ def test_export_matching_run_preserves_split_and_label(export_run):
     ('--revision', 'other-revision'), ('--split', 'train'), ('--local-dir', '/different'),
 ])
 def test_export_rejects_dataset_mismatch_before_loading(export_run, monkeypatch, capsys, option, value):
+    """Reject any differing dataset selector before loading ground truth."""
     module, _, _, output, args = export_run
     monkeypatch.setattr(module, 'load_split', lambda *a, **k: pytest.fail('loaded mismatched dataset'))
     assert module.main([*args, option, value]) == 1
@@ -73,6 +77,7 @@ def test_export_rejects_dataset_mismatch_before_loading(export_run, monkeypatch,
 
 @pytest.mark.parametrize('mutation', ['changed', 'missing', 'unrecorded_hash', 'unrecorded_dataset'])
 def test_export_rejects_unverifiable_documents_without_overwriting(export_run, capsys, mutation):
+    """Keep an existing export intact when content or provenance is unverifiable."""
     module, engine, source, output, args = export_run
     output.write_text('existing export')
     if mutation == 'changed':
@@ -92,6 +97,7 @@ def test_export_rejects_unverifiable_documents_without_overwriting(export_run, c
 
 
 def test_export_rejects_hash_with_matching_doc_id_prefix(export_run):
+    """Require the full content hash even when the shortened document ID matches."""
     module, engine, _, output, args = export_run
     with engine.begin() as conn:
         conn.execute(text('UPDATE eval_docs SET content_sha256 = :sha'),

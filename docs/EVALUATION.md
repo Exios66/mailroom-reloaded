@@ -227,7 +227,10 @@ directory (if used) to match the run's selection in `eval_runs`. It also compare
 each document's full SHA-256 with `eval_docs.content_sha256` before attaching
 labels, and preserves the selected split in the output. Missing provenance or
 content mismatches abort the export. Runs created before these identity fields
-were recorded must be evaluated again before exporting.
+were recorded must be evaluated again before exporting. To support this Issue
+#14 export identity requirement on existing databases, evaluation adds the
+`content_sha256` column to older `eval_docs` tables. Existing rows keep a NULL
+hash and remain ineligible for export; new runs record the full content hash.
 
 `eval/dataset.py` also parses the Hub `"true"`/`"false"` strings to `bool` and
 derives the two flags from `expected_stage == "review"` / a non-empty

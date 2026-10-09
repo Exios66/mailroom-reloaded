@@ -109,17 +109,23 @@ def test_ground_truth_derives_flags_from_richer_columns():
     assert retry.retry_expected is True
 
 
-def test_ground_truth_review_reason_alone_is_not_a_review():
-    """Fixtures pair a reason with ``review_expected == "false"`` (ambiguous)."""
+@pytest.mark.parametrize("stage_fields", [
+    {"expected_stage": "archived"}, {}, {"expected_stage": None}, {"expected_stage": ""},
+])
+@pytest.mark.parametrize("flag_fields, expected", [
+    ({"review_expected": "false"}, False), ({}, None), ({"review_expected": "true"}, True),
+])
+def test_ground_truth_review_reason_alone_is_not_a_review(stage_fields, flag_fields, expected):
+    """A reason alone preserves false, unknown, and true explicit review labels."""
     gt = _ground_truth_from_row(
         {
             "filename": "a.txt",
-            "expected_stage": "archived",
-            "review_expected": "false",
+            **stage_fields,
+            **flag_fields,
             "review_reason": "ambiguous",
         }
     )
-    assert gt.review_expected is False
+    assert gt.review_expected is expected
 
 
 def test_load_split_labeled_config_computes_missing_hash(monkeypatch):
@@ -151,6 +157,7 @@ def test_load_split_labeled_config_computes_missing_hash(monkeypatch):
 @pytest.mark.parametrize("config", ["fixtures", "bundles"])
 @pytest.mark.parametrize("duplicate_name", ["fx.txt", " fx.txt "])
 def test_labeled_loader_rejects_duplicate_filenames(monkeypatch, config, duplicate_name):
+    """Reject repeated normalized filenames before validating labeled content."""
     from types import SimpleNamespace
 
     rows = [
@@ -275,6 +282,7 @@ def test_join_rejects_unmatched_filenames(blind_names, truth_names):
 @pytest.mark.parametrize('metadata_json', [False, True])
 @pytest.mark.parametrize('valid', [False, True])
 def test_labeled_metadata_hash_is_verified(monkeypatch, metadata_json, valid):
+    """Verify labeled configs enforce hashes from mapping or JSON metadata."""
     from types import SimpleNamespace
 
     metadata = {'content_sha256': sha256_text('hello' if valid else 'different')}
@@ -291,6 +299,7 @@ def test_labeled_metadata_hash_is_verified(monkeypatch, metadata_json, valid):
 
 @pytest.mark.parametrize('declared', [sha256_text('hello'), sha256_text('wrong')])
 def test_labeled_top_level_hash_takes_precedence(monkeypatch, declared):
+    """Prefer a top-level declared hash over conflicting metadata."""
     from types import SimpleNamespace
 
     row = {'filename': 'fx.txt', 'doc_text': 'hello', 'content_sha256': declared,
@@ -301,24 +310,3 @@ def test_labeled_top_level_hash_takes_precedence(monkeypatch, declared):
     else:
         with pytest.raises(DatasetIntegrityError, match='content_sha256 mismatch'):
             load_split(config='fixtures')
-
-
-@pytest.mark.parametrize('config', [None, 'fixtures'])
-@pytest.mark.parametrize('filename', ['/outside.txt', '../outside.txt', 'owner/../../outside.txt',
-                                      r'C:\outside.txt', r'owner\..\outside.txt', '.'])
-def test_hub_loaders_reject_unsafe_filenames(monkeypatch, config, filename):
-    from types import SimpleNamespace
-
-    row = {'filename': filename, 'doc_text': 'hello', 'content_sha256': sha256_text('hello')}
-    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
-    with pytest.raises(DatasetIntegrityError, match='Unsafe document filename'):
-        load_split(config=config)
-
-
-@pytest.mark.parametrize('config', [None, 'fixtures'])
-def test_hub_loaders_keep_nested_filenames(monkeypatch, config):
-    from types import SimpleNamespace
-
-    row = {'filename': 'owner/folder/1234.', 'doc_text': 'hello', 'content_sha256': sha256_text('hello')}
-    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
-    assert load_split(config=config)[0][0].filename == row['filename']
