@@ -25,7 +25,8 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `jev` | `jev` | Shows the Jev gate: provider, model, gate in use, calibration thresholds. |
 | `review` | `review` | Lists parked documents. |
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
-| `runs` | `runs` | Lists eval runs. |
+| `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
+| `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
 | `health` | `health` | Checks the API. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
