@@ -525,11 +525,6 @@ _T_ACK = _ENV.from_string(
     "Hello,\n\nWe received your message and have flagged it for priority handling. "
     "We will confirm once we have an update.\n\nBest regards,\nMailroom Correspondent\n"
 )
-_T_QUESTION = _ENV.from_string(
-    "Hello,\n\nThank you for your question. We have noted it and a team member will confirm the "
-    "details with you. We do not share document contents or extracted details by email "
-    "until they have been checked.\n\nBest regards,\nMailroom Correspondent\n"
-)
 
 
 class StandInCorrespondent:
