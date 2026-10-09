@@ -7,3 +7,7 @@ dist/
 *.egg-info/
 .env
 data/
+
+# sandbox server state / pulled content (local)
+.sandbox-state/
+.sandbox-content/

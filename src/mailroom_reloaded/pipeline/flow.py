@@ -868,6 +868,11 @@ def run_document(
     a node crashes (the manifest keeps the completed prefix, so a later call
     resumes). A deadline/token-budget failure or an ingest failure returns a
     state with ``status == "failed"``.
+
+    Reuse the current run scope, or open one inside the calling worker via
+    :func:`ensure_run_scope`, using ``eval_ctx.run_id`` when available. The
+    caller's scope is restored on exit, including on errors. A missing document
+    raises ``FileNotFoundError``; setup and persistence errors also propagate.
     """
     flow = MailroomFlow()
     # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it

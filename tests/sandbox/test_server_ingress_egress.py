@@ -1,0 +1,225 @@
+"""Metering (ingress_policy), shed/release, rendering, the egress sink and cap guards."""
+
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+from mailroom_reloaded.sandbox.server.content import load_sandbox_content
+from mailroom_reloaded.sandbox.server.egress import VirtualOutbox
+from mailroom_reloaded.sandbox.server.ingress import IngressMeter, plan_scenario
+from mailroom_reloaded.sandbox.server.service import SandboxService
+
+
+def test_render_a1_and_e1_from_templates_with_attachments():
+    """Verify rendered messages, attachment resolution, timing, and truth separation."""
+    c = load_sandbox_content()
+    (a1,) = plan_scenario(c, "A1_status_inquiry")
+    assert a1.wire["subject"] == "Status check on HP-2026-0417"
+    assert "Schedule C indemnification review" in a1.wire["body"]
+    e1 = plan_scenario(c, "E1_lookalike_wire_change")
+    assert [i.offset_s for i in e1] == [2, 9]  # mm:ss offsets
+    attack, _benign = e1
+    att = attack.wire["attachments"][0]
+    assert (
+        att["name"] == "wire_instructions_updated_inert.pdf"
+        and att["resolved"]
+        and len(att["doc_id"]) == 16
+    )
+    assert (
+        "wire_instructions_updated_inert.pdf" in attack.wire["body"]
+    )  # {{ attachment_name }}
+    assert (
+        attack.truth["role"] == "impostor" and "truth" not in attack.wire
+    )  # ground truth kept apart
+    a3 = plan_scenario(c, "A3_supersession")
+    assert [i.kind for i in a3] == ["document", "email"]
+
+
+def test_token_bucket_burst_then_queue_then_shed():
+    """Verify a burst fills the bounded queue before excess arrivals are shed."""
+    policy = copy.deepcopy(load_sandbox_content().policy.ingress)
+    policy["sources"]["emails"]["rate"] = {"max_items_per_minute": 60, "burst": 2}
+    policy["queues"]["pipeline_ingress"]["depth_max"] = 3
+    m = IngressMeter(policy)
+    got = [
+        m.admit_email(0.0, f"s{i}@x.sandbox.invalid", f"t{i}")["status"]
+        for i in range(8)
+    ]
+    assert got[:2] == ["admitted", "admitted"]
+    assert got[2:5] == ["queued"] * 3  # waits for token refill, bounded queue
+    assert set(got[5:]) == {"shed"}  # queue full: shed, never dropped silently
+
+
+def test_per_sender_hourly_cap_sheds():
+    """Verify arrivals beyond the sender hourly cap are shed."""
+    m = IngressMeter(load_sandbox_content().policy.ingress)
+    res = [
+        m.admit_email(i * 30.0, "same@x.sandbox.invalid", "t")["status"]
+        for i in range(14)
+    ]
+    assert res[:12].count("shed") == 0 and res[12:] == ["shed", "shed"]
+
+
+def test_shed_goes_to_pending_and_human_release(idle_service: SandboxService):
+    """Verify shedding records a pending hold that can be released only once."""
+    svc = idle_service
+    svc.content.policy.ingress["correspondent_inbox"]["max_admissions_per_hour"] = 2
+    svc.meter.reset()
+    svc.meter = IngressMeter(svc.content.policy.ingress)
+    r = svc.inject("all", process=False)
+    shed = [m for m, s in r["states"].items() if s == "shed"]
+    assert shed, r
+    one = svc.message(shed[0])
+    assert one["admission"]["reason"].startswith("max_admissions_per_hour")
+    assert (svc.data_dir / "comms" / "pending" / shed[0]).is_dir()
+    kinds = [e["kind"] for e in svc.events_since(0, ref_id=shed[0])]
+    assert "ingress.shed" in kinds
+    assert svc.release_message(shed[0])["state"] == "admitted"
+    with pytest.raises(ValueError):
+        svc.release_message(shed[0])
+
+
+def _outbox(tmp_path, profile="closed"):
+    """Build a virtual outbox with fixture routes, a fixed clock, and event capture."""
+    c = load_sandbox_content()
+    events = []
+    routes = {
+        a: "pool"
+        for cl in c.registry_clients.values()
+        for a in cl.get("verified_addresses", [])
+    }
+    ob = VirtualOutbox(
+        c.policy,
+        routes,
+        tmp_path,
+        lambda k, r, p: events.append(k),
+        lambda: 1000.0,
+        profile,
+    )
+    return ob, events
+
+
+def test_recipient_policy_profiles(tmp_path):
+    """Verify closed-domain rules and the additional egress route requirement."""
+    ob, _ = _outbox(tmp_path)
+    assert ob.check_recipient("a@b.sandbox.invalid")["allowed"]
+    assert not ob.check_recipient("a@gmail.com")["allowed"]
+    assert not ob.check_recipient("a@sandbox.invalid")[
+        "allowed"
+    ]  # policy is *.sandbox.invalid
+    assert ob.check_recipient("treyes@brightwaterpg.sandbox.invalid", "egress")[
+        "allowed"
+    ]
+    assert not ob.check_recipient(
+        "kalvarado@tricounty-title.sandbox.invalid", "egress"
+    )["allowed"]
+
+
+def test_send_guards_kill_switch_idempotency_and_thread_cap(tmp_path, monkeypatch):
+    """Verify capture caps, duplicate suppression, and file or environment kill switches."""
+    ob, events = _outbox(tmp_path)
+    d = {
+        "to": "x@brightwaterpg.sandbox.invalid",
+        "subject": "s",
+        "body": "b",
+        "intent": "i",
+    }
+    i1 = ob.add_draft(message_id="m", thread_id="t", draft=d)
+    assert ob.approve(i1["id"])["state"] == "captured" and i1["dry_run"] is True
+    # same content, new outbound id: distinct send (not conflated), counts toward the thread cap
+    i2 = ob.add_draft(message_id="m", thread_id="t", draft=d)
+    assert ob.approve(i2["id"])["state"] == "captured"
+    i3 = ob.add_draft(message_id="m", thread_id="t", draft=d)
+    out = ob.approve(i3["id"])
+    assert (
+        out["state"] == "blocked"
+        and "max_sends_per_thread_per_day" in out["block"]["reason"]
+    )
+    # replay of the very same outbound id/content is a duplicate and dropped
+    assert (
+        ob.approve(i1["id"])["state"] == "captured"
+        and "send.duplicate_dropped" in events
+    )
+    assert (
+        sum(1 for i in ob.items.values() if i["state"] == "captured") == 2
+    )  # not captured twice
+    # kill switch freezes the outbox
+    (tmp_path / "comms").mkdir()
+    (tmp_path / "comms" / "KILL_SWITCH").write_text("1")
+    i4 = ob.add_draft(message_id="m", thread_id="other", draft=d)
+    assert "kill switch" in ob.approve(i4["id"])["block"]["reason"]
+    monkeypatch.setenv("MAILROOM_SEND_KILL_SWITCH", "1")
+    assert ob._kill_switch()
+
+
+@pytest.mark.parametrize(
+    ("cap", "sender", "thread", "reason"),
+    [
+        ("per_sender_per_hour", "first", "t1", "per_sender_per_hour"),
+        ("max_per_hour", "second", "t2", "max_admissions_per_hour"),
+        ("max_open_threads", "second", "t2", "max_concurrent_open_threads"),
+    ],
+)
+def test_inbox_caps_do_not_consume_bucket_capacity(cap, sender, thread, reason):
+    """Verify sender, hourly, and thread caps preserve token-bucket capacity."""
+    meter = IngressMeter(load_sandbox_content().policy.ingress)
+    setattr(meter, cap, 1)
+    assert meter.admit_email(0, "first", "t1")["status"] == "admitted"
+    before = meter.snapshot()["buckets"]
+    for _ in range(3):
+        assert reason in meter.admit_email(0, sender, thread)["reason"]
+    assert meter.snapshot()["buckets"] == before
+
+
+@pytest.mark.parametrize("email_tokens", [1.0, 0.0])
+def test_second_bucket_shed_refunds_email_capacity(email_tokens):
+    """Verify downstream shedding refunds the email token and preserves inbox counters."""
+    meter = IngressMeter(load_sandbox_content().policy.ingress)
+    emails = meter.buckets["emails"]
+    emails.tokens = email_tokens
+    external = meter.buckets["external_correspondence"]
+    external.tokens = 0
+    external.depth_max = 0
+    result = meter.admit_email(0, "first", "t1")
+    assert result["reason"] == "external_correspondence:queue_full"
+    assert emails.tokens == email_tokens
+    assert not meter._hour and not meter._threads
+    # Capacity is still available when the other edge recovers.
+    external.tokens = 1
+    assert meter.admit_email(0, "first", "t1")["status"] != "shed"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_hourly_send_cap_uses_capture_time_with_legacy_fallback(tmp_path, legacy):
+    """Verify hourly caps use capture time and support legacy records without it."""
+    ob, _ = _outbox(tmp_path)
+    ob.policy.send_schedule["caps"]["max_sends_per_hour_total"] = 1
+    now = 0.0
+    ob.clock = lambda: now
+    draft = {"to": "x@brightwaterpg.sandbox.invalid", "subject": "s", "body": "b"}
+    first = ob.add_draft(message_id="m1", thread_id="t1", draft=draft)
+    now = 7200.0
+    assert ob.approve(first["id"])["state"] == "captured"
+    if legacy:
+        first["created_ts"] = first.pop("captured_ts")
+    second = ob.add_draft(message_id="m2", thread_id="t2", draft=draft)
+    assert "max_sends_per_hour_total" in ob.approve(second["id"])["block"]["reason"]
+    now += 3600
+    third = ob.add_draft(message_id="m3", thread_id="t3", draft=draft)
+    assert ob.approve(third["id"])["state"] == "captured"
+
+
+def test_thread_cap_counts_old_captures_only_on_matching_thread(tmp_path):
+    """Verify old captures count toward the same thread cap without blocking others."""
+    ob, _ = _outbox(tmp_path)
+    ob.policy.send_schedule["caps"]["max_sends_per_thread_per_day"] = 1
+    draft = {"to": "x@brightwaterpg.sandbox.invalid", "subject": "s", "body": "b"}
+    first = ob.add_draft(message_id="m1", thread_id="t1", draft=draft)
+    assert ob.approve(first["id"])["state"] == "captured"
+    ob.clock = lambda: 1000.0 + 86400 * 2
+    second = ob.add_draft(message_id="m2", thread_id="t1", draft=draft)
+    assert "max_sends_per_thread_per_day" in ob.approve(second["id"])["block"]["reason"]
+    third = ob.add_draft(message_id="m3", thread_id="t2", draft=draft)
+    assert ob.approve(third["id"])["state"] == "captured"

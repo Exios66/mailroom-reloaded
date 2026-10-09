@@ -1,0 +1,6 @@
+persona_id,client_id,contact_id,role,behavior_file,language,patience_sim_min,channels
+p_harlow_counsel,harlowpryce,hp_dwhitcomb,real,behavior/counsel.yaml,en,120,email
+p_tricounty_real,tricountytitle,tc_kalvarado,real,behavior/closing_partner.yaml,en,45,email
+p_tricounty_impostor,_adversary,_none,impostor,behavior/impostor_wire_fraud.yaml,en,30,email
+p_vendor_spam,_adversary,_none,vendor,behavior/vendor_spam.yaml,en,0,email
+p_treyes_personal,brightwater,bw_treyes,personal-address,behavior/personal_address.yaml,en,120,email

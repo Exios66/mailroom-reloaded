@@ -46,7 +46,7 @@ gmail = [
 embeddings = ["scipy", "sentence-transformers"]
 deploy = ["modal==1.5.5"]
 dev = ["pytest", "pytest-asyncio", "respx", "scikit-learn", "ruff"]
-sandbox = ["jsonschema>=4"]
+sandbox = ["jsonschema>=4", "zstandard", "jinja2"]
 parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.21.0"]
 
 [project.scripts]
@@ -58,6 +58,9 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["src/mailroom_reloaded"]
 # YAML/JSON/text data under the package ships in the wheel (hatchling includes all files in packages).
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "mailroom_reloaded/sandbox/schemas"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

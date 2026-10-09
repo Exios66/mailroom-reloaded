@@ -52,7 +52,10 @@ def current_run() -> RunScope | None:
 
 
 def _safe_run_id(run_id: str) -> str:
-    """``run_id`` if it matches ``[A-Za-z0-9_-]{1,64}``, else a sanitised form."""
+    """Replace characters outside ``[A-Za-z0-9_-]`` with ``_`` and limit to 64.
+
+    Return ``UNSCOPED`` for an empty ID; valid IDs are unchanged.
+    """
     if _RUN_ID_RE.fullmatch(run_id):
         return run_id
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "_", run_id)[:64]
@@ -60,7 +63,12 @@ def _safe_run_id(run_id: str) -> str:
 
 
 def live_run_id(now: datetime | None = None) -> str:
-    """Run id for live traffic: ``MAILROOM_RUN_ID`` or the daily bucket ``live-<YYYYMMDD>``."""
+    """Run id for live traffic: ``MAILROOM_RUN_ID`` or ``live-<YYYYMMDD>``.
+
+    A nonblank override is stripped and sanitized by :func:`_safe_run_id`.
+    Otherwise use the date of ``now`` as supplied, without timezone conversion,
+    or the current UTC date when ``now`` is omitted.
+    """
     configured = (os.environ.get("MAILROOM_RUN_ID") or "").strip()
     if configured:
         return _safe_run_id(configured)
@@ -74,7 +82,12 @@ def run_scope(
     source: str = "watch",
     session_id: str | None = None,
 ) -> Iterator[RunScope]:
-    """Make ``run_id`` the current run for the duration of the block (nestable)."""
+    """Make ``run_id`` the current run for the duration of the block (nestable).
+
+    Yield the active :class:`RunScope` with an ID sanitized by
+    :func:`_safe_run_id`; other labels are preserved as supplied. Restore the
+    previous scope on exit, including when a block exception propagates.
+    """
     scope = RunScope(_safe_run_id(run_id), environment, source, session_id)
     token = _CURRENT.set(scope)
     try:
@@ -84,22 +97,32 @@ def run_scope(
 
 
 def environment_name() -> str:
-    """Deployment environment label: ``MAILROOM_ENVIRONMENT`` (default ``live``)."""
+    """Deployment environment label: ``MAILROOM_ENVIRONMENT`` (default ``live``).
+
+    Strip surrounding whitespace, use ``live`` for an unset or blank value,
+    and sanitize the label with :func:`_safe_run_id`.
+    """
     return _safe_run_id((os.environ.get("MAILROOM_ENVIRONMENT") or "live").strip() or "live")
 
 
 @contextmanager
 def ensure_run_scope(source: str = "watch", run_id: str | None = None) -> Iterator[RunScope]:
-    """Keep the active scope, or open one when there is none.
+    """Yield the active scope unchanged, or open one when there is none.
 
-    With ``run_id`` (an eval run) the new scope is that run in the ``eval``
-    environment; otherwise it is the live daily-bucket scope.
+    An existing scope takes precedence over both arguments. Otherwise a
+    nonempty ``run_id`` opens an ``eval`` scope with the supplied ``source``
+    and session ID ``eval-<run_id>`` (using the unsanitized input). An empty or
+    omitted ID uses :func:`live_run_id` and :func:`environment_name`, including
+    their environment overrides, with no session ID.
+
+    A newly opened scope is cleared on exit; block exceptions propagate.
     """
     existing = _CURRENT.get()
     if existing is not None:
         yield existing
         return
     if run_id:
+        run_id = _safe_run_id(run_id)
         opened = run_scope(run_id, "eval", source, session_id=f"eval-{run_id}")
     else:
         opened = run_scope(live_run_id(), environment_name(), source)

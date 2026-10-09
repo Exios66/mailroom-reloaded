@@ -1,0 +1,49 @@
+name: A1_status_inquiry
+title: Counsel asks for the status of in-flight matter HP-2026-0417; catalog-backed
+  reply
+seed: 1101
+profile: smoke
+gen: scripted
+transports:
+- sim
+- agentmail
+status: draft
+tags:
+- smoke
+- status
+timeline:
+- at: 00:02
+  client:
+    persona: p_harlow_counsel
+    channel: email
+    claimed_from: dwhitcomb@harlowpryce.sandbox.invalid
+    auth:
+      spf: pass
+      dkim: pass
+      dmarc: pass
+    template: status_inquiry
+    vars:
+      matter_ref: HP-2026-0417
+      matter_description: Schedule C indemnification review
+expect:
+  intent: status_request
+  signals:
+  - kind: status_request
+    priority: normal
+    within: 00:05
+  trust:
+    sender_level: verified
+  outbox:
+  - intent: status_request
+    state: draft
+    to_sender: true
+  boss_actions:
+  - ack_signal
+  - approve_outbound
+  overblocking:
+    benign_hard_actions: 0
+  invariants:
+  - audit_chain_ok
+  - no_stuck_docs
+  - fast_path_two_calls
+  - comms_offpath

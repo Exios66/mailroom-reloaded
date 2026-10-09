@@ -150,6 +150,7 @@ _BUDGET_REASONS = {"deadline_exceeded", "token_budget_exceeded"}
 
 
 def _status_code(exc: BaseException) -> int | None:
+    """Return ``exc.status_code`` if it is an integer, otherwise ``None``."""
     code = getattr(exc, "status_code", None)
     return code if isinstance(code, int) else None
 
@@ -159,6 +160,10 @@ def failure_class_for(failure: BaseException | str | None) -> str:
 
     Strings are matched only against the closed set of reasons the pipeline
     itself produces; anything else is ``unexpected``. Free text is never echoed.
+
+    Exceptions are classified by integer status code, class name and type;
+    their messages are not inspected. ``None`` and unrecognized exceptions
+    map to ``unexpected``.
     """
     if failure is None:
         return "unexpected"
@@ -188,7 +193,12 @@ def failure_class_for(failure: BaseException | str | None) -> str:
 
 
 def failure_reason_for(reason: str | None) -> str:
-    """Collapse a free-text failure reason onto :data:`FAILURE_REASONS`."""
+    """Collapse a free-text failure reason onto :data:`FAILURE_REASONS`.
+
+    Match an ``ingest`` prefix, then ``no text``/``no_text``, then ``schema``
+    case-insensitively. Otherwise preserve exact vocabulary members and return
+    ``unexpected`` for empty, missing or unrecognized reasons.
+    """
     if reason in _BUDGET_REASONS:
         return str(reason)
     if not reason:
