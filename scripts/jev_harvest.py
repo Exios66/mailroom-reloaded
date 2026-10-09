@@ -316,12 +316,14 @@ def _harvest_features(args: argparse.Namespace, cfg) -> int:
     labels = {t.expected_escalate for t in targets if t.index in by_index}
     if len(labels) < 2:
         print(
-            f"Skipping write: {len(out_rows)} surviving rows contain fewer than "
+            f"FATAL: {len(out_rows)} surviving rows contain fewer than "
             "two expected_escalate classes after filtering unusable answers; "
-            "a single-class fit is degenerate (issue #14).",
+            "a single-class fit is degenerate (issue #14). "
+            f"No output written to {args.out}; any existing output is preserved "
+            "from a previous run.",
             file=sys.stderr,
         )
-        return 0
+        return 1
     _write_rows(args.out, out_rows)
 
     correct = sum(row["correct"] for row in out_rows)

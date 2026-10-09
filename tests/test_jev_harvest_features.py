@@ -202,10 +202,10 @@ def test_harvest_features_refuses_single_class_labels(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("surviving_label", [0, 1, None])
 @pytest.mark.parametrize("existing_output", [False, True])
-def test_harvest_features_skips_degenerate_survivors(
+def test_harvest_features_refuses_degenerate_survivors(
     tmp_path, monkeypatch, capsys, surviving_label, existing_output
 ):
-    """Leave output untouched when usable answers lose a target label class."""
+    """Fail and explicitly preserve prior output when answers lose a label class."""
     module = _load_module()
     monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
 
@@ -234,8 +234,12 @@ def test_harvest_features_skips_degenerate_survivors(
         ["--mode", "features", "--rows", str(rows_path), "--out", str(out)]
     )
 
-    assert rc == 0
-    assert "surviving rows" in capsys.readouterr().err
+    assert rc == 1
+    stderr = capsys.readouterr().err
+    assert "FATAL:" in stderr
+    assert "surviving rows" in stderr
+    assert f"No output written to {out}" in stderr
+    assert "any existing output is preserved from a previous run" in stderr
     if existing_output:
         assert out.read_text(encoding="utf-8") == "existing calibration rows\n"
     else:
