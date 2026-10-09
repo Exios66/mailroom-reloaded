@@ -182,6 +182,7 @@ def test_length_cap_error_kind(mock_provider):
     assert result.error_kind == "LengthFinishReasonError"
     assert result.data is None
     assert result.schema_valid is False
+    assert result.usage.prompt_tokens > 0  # the capped call was real spend
 
 
 def test_malformed_json_one_repair(mock_provider):
