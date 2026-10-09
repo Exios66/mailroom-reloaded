@@ -1,0 +1,95 @@
+# Metered ingress policy (addendum v2 §7, §13).
+#
+# Documents, emails, and external correspondence enter the pipeline — and the
+# Correspondent inbox — at METERED rates. The sandbox never admits unbounded
+# work: every ingress edge is admission-controlled so neither the document
+# pipeline nor the Correspondent's capacity to triage is overloaded.
+#
+# This file is the sandbox/demo contract. mailroom-reloaded implements it
+# (token buckets, queue guards, shed auditing); production uses the
+# ops runbook values, not these numbers.
+
+schema: mailroom.ingress_policy/v1
+version: "1.0"
+
+principle: >
+  Admit work at a rate the downstream stage can sustain. When an edge is
+  saturated, work waits in a bounded queue; when the queue is full, work is
+  SHED TO comms/pending/ (soft hold) — never silently dropped, never
+  forced through. Every admission, queue, and shed is an auditable event.
+
+# ---------------------------------------------------------------- ingress edges
+sources:
+  documents:
+    edge: pipeline ingress queue (dataset / synthetic document feeds)
+    rate:
+      max_items_per_minute: 30
+      burst: 10
+    max_bytes_per_minute: 104857600   # 100 MiB/min; large docs must not starve the queue
+    on_queue_full: shed_to_pending
+  emails:
+    edge: persona leg gateway (AgentMail sender pool -> sandbox) and live injects
+    rate:
+      max_items_per_minute: 60
+      burst: 20
+    on_queue_full: shed_to_pending
+  external_correspondence:
+    edge: Correspondent inbox (AgentMail client mailroom-sandbox-correspondent-v1)
+    rate:
+      max_items_per_minute: 40
+      burst: 15
+    per_sender_per_hour: 12     # one correspondent cannot flood the inbox
+    on_queue_full: shed_to_pending
+
+# --------------------------------- Correspondent inbox admission (the human-scale guard)
+correspondent_inbox:
+  max_admissions_per_hour: 120     # triage capacity: paced for a single specialist + Boss Desk
+  max_concurrent_open_threads: 30  # beyond this, new threads wait in comms/pending/
+  admission_order: fifo
+  priority_bypass:                 # these skip the fifo wait, still counted in the hourly cap
+    - safety_critical
+    - legal_notice
+  priority_reserve_per_hour: 12    # of the 120, 12 are reserved for safety_critical /
+                                  # legal_notice. Ordinary traffic is capped at 108/hr,
+                                  # so a burst of routine mail can never starve a
+                                  # legal notice out of its signal/action SLA.
+  priority_over_cap:               # bounded, audited escape hatch if the reserve is spent
+    allowed: true
+    max_extra_per_hour: 5
+    audit_event: inbox.priority_over_cap
+  starvation_guard: >
+    A thread waiting in comms/pending/ longer than 4 simulated hours is
+    escalated to the Boss Desk as inbox_starvation rather than left to rot.
+
+# ---------------------------------------------------------------- queue guards
+queues:
+  pipeline_ingress:
+    depth_warn: 500
+    depth_max: 2000
+    on_full: shed_lowest_priority_first   # shed = move to comms/pending/, audit it
+  correspondent_inbox_queue:
+    depth_warn: 100
+    depth_max: 300
+    on_full: shed_to_pending
+
+backpressure:
+  shed_order: [lowest_priority, oldest]
+  never_silently_drop: true
+  shed_destination: comms/pending/
+  shed_audit_event: ingress.shed         # fields: edge, item_id, reason, queue_depth
+  resume_condition: queue_depth_below_warn_for_60s
+
+# ------------------------------------------------------------------ mechanism
+metering_mechanism:
+  algorithm: token_bucket_per_source
+  shared_across_processes: true   # the Correspondent runs as a separate process;
+                                  # buckets live in shared state, not per-process memory
+  clock: simulated_time           # real transports still run at 1x; metering uses sim time
+
+observability:
+  events:
+    - ingress.admitted   # edge, item_id, source
+    - ingress.queued     # edge, item_id, queue_depth
+    - ingress.shed       # edge, item_id, reason, queue_depth
+    - inbox.admitted     # thread_id, wait_seconds
+    - inbox.starvation   # thread_id, waited_sim_hours

@@ -140,3 +140,28 @@ def test_grader_usage_stays_on_the_grade_not_the_sink(mock_provider) -> None:
     grade = judge_grade("t", "correspondence", {"a": 1}, ctx)
     assert grade.usage.prompt_tokens > 0
     assert ctx.usage_sink == []
+
+
+def test_rejected_grade_still_emits_grader_metrics(
+    mock_provider, monkeypatch, reader
+) -> None:
+    """The tokens were spent even when the grader's output fails validation."""
+    from mailroom_reloaded.agents import judge
+
+    spent = SimpleNamespace(
+        prompt_tokens=120,
+        completion_tokens=30,
+        cached_prompt_tokens=0,
+        successful_requests=1,
+    )
+    unparseable = SimpleNamespace(
+        pydantic=None, json_dict=None, raw="not a grade", token_usage=spent
+    )
+    monkeypatch.setattr(judge, "_run", lambda *a, **k: unparseable)
+    ctx = ToolContext(
+        doc_text="t", doc_id="d1", eval_mode=True, ground_truth=lambda _id: {}
+    )
+    with pytest.raises(ValueError):
+        judge_grade("t", "correspondence", {"a": 1}, ctx)
+    assert [(v, a["role"]) for v, a in reader.llm_calls.calls] == [(1, "grader")]
+    assert reader.token_usage.calls

@@ -1,0 +1,111 @@
+# Scheduled outbound email (addendum v2 §7, §13).
+#
+# While the sandbox or demo is RUNNING, outbound email fires on a SET
+# SCHEDULE from FREE models only. There is no free-running agent loop that
+# decides to send mail on its own: every send belongs to a named window,
+# carries an idempotency key, and counts against hard caps. A runaway
+# sender — the "doom loop" — is structurally impossible: the scheduler,
+# the circuit breaker, the kill switch, and the reply-depth cap each
+# independently stop it.
+#
+# ACTIVE PROFILES: sandbox, demo. Production NEVER uses this file:
+# production outbound is draft -> human approval -> send (see protocol/).
+
+schema: mailroom.send_schedule/v1
+version: "1.0"
+
+active_profiles: [sandbox, demo]
+
+models:
+  tier: free_only                 # paid models are forbidden for scheduled sends
+  pool_ref: gen/pool.yaml#free_pool
+  paid_tier_use: forbidden
+
+# ------------------------------------------------------------ send windows
+# The scheduler wakes on these windows, drains the outbox queue up to the
+# window cap, then sleeps. Nothing sends outside a window.
+schedule:
+  - name: correspondent_outbound
+    cron: "*/20 * * * *"          # every 20 minutes while the sandbox/demo runs
+    max_sends_per_window: 25
+    purpose: correspondent replies, acknowledgments, status answers
+  - name: digest
+    cron: "0 * * * *"             # hourly
+    max_sends_per_window: 5
+    purpose: low-priority digest rollups only
+  - name: smoke
+    cron: "*/5 * * * *"           # every 5 minutes
+    max_sends_per_window: 3
+    purpose: S-series self-test traffic; disabled unless smoke profile flag set
+    enabled_flag: MAILROOM_SMOKE_SENDS
+
+# ------------------------------------------------------------------ caps
+caps:
+  # NOTE: window capacities can exceed this cap (correspondent_outbound 3x/hr x 25
+  # = 75, digest 5, smoke 12x/hr x 3 = 36 when enabled -> up to 116/hr offered).
+  # The cap below is the hard ceiling: the scheduler stops admitting sends for
+  # the hour once it is reached, regardless of window allowances.
+  max_sends_per_hour_total: 90
+  max_recipients_per_send: 5
+  max_sends_per_thread_per_day: 2
+  min_seconds_between_sends_same_thread: 3600
+  max_bytes_per_send: 1048576
+
+# ------------------------------------------------------- doom-loop prevention
+doom_loop_prevention:
+  # 1. Kill switch — either one halts ALL scheduled sends within one window.
+  kill_switch:
+    env_var: MAILROOM_SEND_KILL_SWITCH        # set to "1"
+    file_flag: comms/KILL_SWITCH              # presence of file; never committed
+    behavior: scheduler_halts_immediately_outbox_frozen
+
+  # 2. Circuit breaker — the scheduler watches itself.
+  circuit_breaker:
+    consecutive_failures_halt: 5      # 5 failed sends in a row -> halt
+    volume_anomaly_halt: 3.0          # 3x trailing-24h baseline volume -> halt
+    halt_action: stop_scheduler_emit_ops_circuit_open_require_human_reset
+    auto_reset: false                 # a human clears it; the loop never restarts itself
+
+  # 3. Idempotency — the same send can never double-fire, and two
+  #    distinct approved sends are never conflated.
+  idempotency:
+    key: sha256(outbound_message_id + content_hash)  # required on every send
+    outbound_message_id: stable ID assigned at draft approval; retries of the
+                         same approved draft reuse it, a new draft gets a new one
+    duplicate_window_hours: 24                # replays inside the window are dropped
+    replay_audit_event: send.duplicate_dropped
+
+  # 4. Reply-depth cap — no infinite correspondent<->sender ping-pong.
+  max_reply_depth_per_thread: 6               # 7th reply needs Boss Desk approval
+  no_auto_reply_to_auto_reply: true           # auto-replies and bounces never get answers
+  bounce_handling: log_only                   # Correspondent never responds to bounces (protocol §3)
+
+  # 5. No self-triggering — a send never enqueues another send by itself.
+  sends_may_not_enqueue_sends: true            # follow-ups need a new signal via the Boss Desk
+  scheduler_ignores_own_outbox_events: true
+
+# ---------------------------------------------------------- misfire prevention
+misfire_prevention:
+  scheduler_enabled_flag: MAILROOM_SCHEDULER_ENABLED   # default off; set by sandbox up
+  profile_gate: active_profiles_only                   # refuses to run in production profile
+  pre_window_checks:
+    - kill_switch_clear
+    - circuit_closed
+    - outbox_queue_depth_below_max
+  dry_run_mode:
+    env_var: MAILROOM_SEND_DRY_RUN                     # "1" = render + log, do not transmit
+    default_in: [sandbox]
+
+outbox:
+  queue: comms/outbox/               # staged renders wait here for their window
+  max_depth: 500
+  on_full: oldest_digest_first_shed  # correspondent replies are never shed; digests are
+
+observability:
+  events:
+    - send.window_opened
+    - send.sent            # idempotency_key, thread_id, model, window
+    - send.duplicate_dropped
+    - send.window_closed   # sent_count, shed_count
+    - ops.circuit_open     # reason, metric_snapshot
+    - ops.kill_switch_engaged

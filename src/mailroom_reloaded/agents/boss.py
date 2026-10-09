@@ -30,7 +30,12 @@ def _json(value: Any) -> str:
 
 
 def escalate(text: str, state_summary: dict | None, ctx: ToolContext) -> BossDecision:
-    """Adjudicate an escalation from the manifest state summary."""
+    """Adjudicate an escalation from the manifest state summary.
+
+    Append reported boss usage to ``ctx.usage_sink`` and emit LLM metrics
+    before validating the decision. Configuration, crew execution, usage
+    conversion and output validation errors propagate to the caller.
+    """
     tools = tools_for(ROLE, ctx)
     description = (
         f"Escalation summary:\n{_json(state_summary)}\n\n"

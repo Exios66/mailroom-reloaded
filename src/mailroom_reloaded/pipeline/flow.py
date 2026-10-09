@@ -282,7 +282,12 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("grade", NODE_DEADLINES["grade"], 0)
     def _node_grade(self) -> None:
-        """Eval-only: grade the extraction against ground truth (never fails the doc)."""
+        """Grade the extraction against ground truth when an eval context is present.
+
+        Keep successful grader usage in ``usage_by_role``, outside ``usage_total``.
+        Grading errors clear ``state.grade`` and mark usage partial; the surrounding
+        node guard can still raise ``NodeFailed`` if its deadline is exceeded.
+        """
         if self._eval_ctx is None:
             return
         state = self.state
@@ -327,7 +332,10 @@ class MailroomFlow(Flow[MailroomState]):
             self._add_usage(role, usage)
 
     def _mark_usage_partial(self, node_name: str) -> None:
-        """Flag an LLM-calling node that raised mid-call: part of its spend may be unrecorded."""
+        """Flag potentially unrecorded spend once for a known LLM-calling node.
+
+        Ignore other node names; this does not establish where a failure occurred.
+        """
         if node_name in _LLM_NODES and node_name not in self.state.usage_partial_nodes:
             self.state.usage_partial_nodes.append(node_name)
 
@@ -341,7 +349,18 @@ class MailroomFlow(Flow[MailroomState]):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        """Run a node under resume-skip, manifest/audit, span and budget guards."""
+        """Run a node under resume-skip, manifest/audit, span and budget guards.
+
+        Return the node's result, or ``None`` when consuming a resume skip.
+        Per-node overrides replace ``deadline_s`` (seconds) and ``token_budget``
+        (the increase in pipeline total tokens). Nonpositive limits are disabled;
+        exceeding a positive limit after execution fails the document with
+        ``NodeFailed``. Exact limits are allowed; execution is not interrupted.
+
+        Drain collected usage after execution, including on node exceptions.
+        Re-raise ``NodeFailed``; for other node errors, mark LLM usage partial and
+        save state before re-raising. Persistence and audit errors also propagate.
+        """
         if node_name in self._resume_done:
             self._resume_done.remove(node_name)
             return None
@@ -914,6 +933,11 @@ def run_document(
     a node crashes (the manifest keeps the completed prefix, so a later call
     resumes). A deadline/token-budget failure or an ingest failure returns a
     state with ``status == "failed"``.
+
+    Reuse the current run scope, or open one inside the calling worker via
+    :func:`ensure_run_scope`, using ``eval_ctx.run_id`` when available. The
+    caller's scope is restored on exit, including on errors. A missing document
+    raises ``FileNotFoundError``; setup and persistence errors also propagate.
     """
     flow = MailroomFlow()
     # opened here, in the worker thread: a ContextVar set around a thread pool does not cross it
