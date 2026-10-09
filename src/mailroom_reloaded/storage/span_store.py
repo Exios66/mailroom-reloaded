@@ -197,7 +197,6 @@ class SpanStore:
         self.path = Path(path)
         self.rows_per_run = rows_per_run
         self._lock = threading.Lock()
-        self._counts: dict[str, int] = {}
         self._engine: Engine | None = None
 
     @property
@@ -243,30 +242,39 @@ class SpanStore:
         }
 
     def write(self, rows: Sequence[dict[str, Any]]) -> int:
-        """Insert ``rows`` (ignoring duplicates), honouring the per-run cap. Returns rows stored."""
+        """Insert ``rows`` (ignoring duplicates), honouring the per-run cap. Returns rows stored.
+
+        The cap is enforced against the database inside a ``BEGIN IMMEDIATE`` transaction, so
+        separate store instances (processes) cannot exceed it, and the return value counts only
+        rows that were really inserted.
+        """
         if not rows:
             return 0
-        with self._lock, self.engine.begin() as conn:
-            keep: list[dict[str, Any]] = []
-            for row in rows:
-                run = row["run_id"] or ""
-                if run not in self._counts:
-                    self._counts[run] = conn.execute(
-                        select(func.count())
-                        .select_from(_t)
-                        .where(
-                            _t.c.run_id == row["run_id"]
-                            if row["run_id"]
-                            else _t.c.run_id.is_(None)
-                        )
-                    ).scalar_one()
-                if self._counts[run] >= self.rows_per_run:
-                    continue
-                self._counts[run] += 1
-                keep.append(row)
-            if keep:
-                conn.execute(sqlite_insert(_t).on_conflict_do_nothing(), keep)
-            return len(keep)
+        with self._lock, self.engine.connect() as conn:
+            conn.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                stored = 0
+                counts: dict[str | None, int] = {}
+                for row in rows:
+                    run = row["run_id"]
+                    if run not in counts:
+                        where = _t.c.run_id == run if run else _t.c.run_id.is_(None)
+                        counts[run] = conn.execute(
+                            select(func.count()).select_from(_t).where(where)
+                        ).scalar_one()
+                    if counts[run] >= self.rows_per_run:
+                        continue
+                    inserted = conn.execute(
+                        sqlite_insert(_t).on_conflict_do_nothing(), [row]
+                    ).rowcount
+                    if inserted:
+                        counts[run] += 1
+                        stored += 1
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return stored
 
     # ------------------------------------------------------------------ reads
     def _rows(self, where: Any, limit: int) -> list[dict[str, Any]]:
@@ -338,10 +346,9 @@ class SpanStore:
         if not run_ids:
             return 0
         with self._lock, self.engine.begin() as conn:
-            n = conn.execute(delete(_t).where(_t.c.run_id.in_(list(run_ids)))).rowcount
-            for run in run_ids:
-                self._counts.pop(run, None)
-            return n
+            return conn.execute(
+                delete(_t).where(_t.c.run_id.in_(list(run_ids)))
+            ).rowcount
 
     def prune(self, *, keep_runs: Collection[str], older_than_ns: int) -> int:
         """Delete spans that started before ``older_than_ns`` unless their run is in ``keep_runs``."""
@@ -349,9 +356,7 @@ class SpanStore:
         if keep_runs:
             cond = cond & (_t.c.run_id.is_(None) | _t.c.run_id.not_in(list(keep_runs)))
         with self._lock, self.engine.begin() as conn:
-            n = conn.execute(delete(_t).where(cond)).rowcount
-            self._counts.clear()
-            return n
+            return conn.execute(delete(_t).where(cond)).rowcount
 
     def close(self) -> None:
         """Dispose the engine."""

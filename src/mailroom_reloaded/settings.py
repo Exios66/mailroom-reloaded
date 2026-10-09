@@ -26,6 +26,7 @@ def _empty_to_none(value: Any) -> Any:
 _JevStr = Annotated[str | None, BeforeValidator(_empty_to_none)]
 _JevFloat = Annotated[float | None, BeforeValidator(_empty_to_none)]
 _JevInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
+_OptPath = Annotated[Path | None, BeforeValidator(_empty_to_none)]
 
 
 class DocClass(BaseModel):
@@ -187,7 +188,7 @@ class Settings(BaseSettings):
     gmail_push_service_account: str | None = None
     trace_mask: bool = False
     #: SQLite file for the local span store; ``None`` means ``<base_dir>/traces.db``.
-    trace_store_path: Path | None = None
+    trace_store_path: _OptPath = None
     gpu_usd_per_hour: float = 0.80
 
 
