@@ -186,8 +186,10 @@ and click through to Phoenix (`:6006`) and Grafana (`:3000`).
 - [docs/gmail-intake.md](docs/gmail-intake.md) — Gmail intake setup and limits.
 - [docs/DEV_SERVER.md](docs/DEV_SERVER.md) — local dev-server workflow.
 - [deploy/README.md](deploy/README.md) — Modal vLLM deployment.
-- Design and plan: `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`,
-  `docs/superpowers/plans/2026-10-07-mailroom-reloaded.md`.
+- Design: `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`.
+- Plan (single live plan, status ledger and file-placement rules):
+  `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`. Superseded plans:
+  `docs/superpowers/archive/`.
 
 ## Tests
 
