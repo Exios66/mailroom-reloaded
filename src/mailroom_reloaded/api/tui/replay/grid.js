@@ -2,6 +2,8 @@
 // A row is an array of [text, cls] segments. No DOM, no clock; every untrusted
 // string is only sanitised (control chars -> space) and truncated, never interpreted.
 
+import { getPanel } from './panels.js';
+
 const CLASSES = new Set(['dim', 'ok', 'warn', 'err', 'info', 'hot', 'sel']);
 const MIN_COLS = 60;
 const MAX_COLS = 160;
@@ -53,8 +55,8 @@ export function fmtTime(sec) {
   return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${rest % 10}`;
 }
 
-/** Clip a segment list to `cols` characters (code points). */
-function clip(segs, cols) {
+/** Clip a segment list to `cols` characters (code points). Shared with panels.js. */
+export function clip(segs, cols) {
   const out = [];
   let left = cols;
   for (const [t, cls] of segs) {
@@ -254,7 +256,23 @@ function ledgerRows({ ledger, cols }) {
 }
 
 const LEGEND =
-  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  e event  q quit';
+  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  p panels  e event  q quit';
+
+/**
+ * Resolve the `panel` selector to rows. Inspector and ledger keep their dedicated
+ * renderers; any other non-'none' string is looked up in the panel registry and its
+ * render(ctx) is called. An unknown id, a throwing renderer or a non-array result
+ * degrades to no panel rows (the frame never throws on a bad panel).
+ */
+function resolvePanel(panel, ctx) {
+  if (panel === 'inspector') return inspectorRows(ctx);
+  if (panel === 'ledger') return ledgerRows(ctx);
+  if (typeof panel !== 'string' || panel === 'none') return [];
+  const spec = getPanel(panel);
+  if (!spec) return [];
+  const rows = safe(() => spec.render(ctx), []);
+  return Array.isArray(rows) ? rows : [];
+}
 
 export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none' } = {}) {
   const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
@@ -271,7 +289,7 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const metrics = metricsRow(ctxo);
   const foot = clip([[LEGEND, 'dim']], C);
   const track = trackRows(ctxo);
-  const panelRows = panel === 'inspector' ? inspectorRows(ctxo) : panel === 'ledger' ? ledgerRows(ctxo) : [];
+  const panelRows = resolvePanel(panel, ctxo);
 
   const budget = R - 4; // header, scrub, metrics, footer
   let panelBudget = 0;
