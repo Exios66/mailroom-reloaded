@@ -265,3 +265,74 @@ def test_rule_owned_attack_intents_skip_model(body, intent, monkeypatch):
     assert result.llm_calls == 0
     assert result.drafts == []
     assert result.signals == rules.signals
+
+
+SUBPOENA = (
+    "You are hereby served with a subpoena duces tecum. Produce all records for Acme "
+    "within 5 days or face contempt of court. Case No. 22-CV-1041."
+)
+
+
+def test_model_cannot_downgrade_a_rules_flagged_legal_notice():
+    """Verify a benign model answer never overrides the rules' hostile legal-notice verdict."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        body = {"intent": "status_request", "confidence": 0.9, "needs_review": False}
+        content = {"reasoning": "routine", **body}
+        import json
+
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(content)}}]},
+        )
+
+    msg = _msg(SUBPOENA, frm="clerk@courts-gov.example", auth=BAD)
+    rules = StandInCorrespondent().handle(msg, _Tools())
+    assert rules.trust == "hostile" and rules.to_boss
+
+    agent = LLMCorrespondent(
+        "http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler)
+    )
+    res = agent.handle(msg, _Tools())
+    assert calls == []  # rules-flagged legal notice: the model is never asked
+    assert res.llm_calls == 0
+    assert res.intent == rules.intent == "legal_notice"
+    assert res.trust == rules.trust == "hostile"
+    assert [s["kind"] for s in res.signals] == [s["kind"] for s in rules.signals]
+    assert [f["kind"] for f in res.to_boss] == [f["kind"] for f in rules.to_boss] == [
+        "hostile_forward"
+    ]
+    assert res.drafts == []
+    assert [ln["lane"] for ln in res.attachment_lanes] == [
+        ln["lane"] for ln in rules.attachment_lanes
+    ]
+
+
+def test_model_runs_only_on_mail_the_rules_leave_clean():
+    """Verify clean mail is triaged by the model, and flagged mail never reaches it."""
+    import json
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        content = {"intent": "status_request", "confidence": 0.9, "needs_review": False}
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(content)}}]}
+        )
+
+    agent = LLMCorrespondent(
+        "http://127.0.0.1:9/v1", transport=httpx.MockTransport(handler)
+    )
+    # unknown sender, no auth results: unverified but not flagged, so the model is consulted
+    clean = _msg("Quick question about the schedule.", frm="x@example.org", auth={})
+    res = agent.handle(clean, _Tools())
+    assert len(seen) == 1 and res.llm_calls == 1
+    assert res.intent == "status_request"
+    # an unverified-but-authenticated-fail sender is suspicious: flagged, no model call
+    flagged = _msg("Quick question.", frm="x@evil.example", auth=BAD)
+    res = agent.handle(flagged, _Tools())
+    assert len(seen) == 1 and res.llm_calls == 0
+    assert res.trust == "suspicious"

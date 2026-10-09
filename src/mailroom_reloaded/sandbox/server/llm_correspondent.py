@@ -121,6 +121,7 @@ class LLMCorrespondent(StandInCorrespondent):
         self._transport = transport
         self._calls = 0
         self._fallbacks: list[str] = []
+        self._rules_only = False
 
     # -------------------------------------------------------------- model call
     def _ask(self, msg: WireMessage, tools: CorrespondentTools) -> dict | None:
@@ -159,7 +160,11 @@ class LLMCorrespondent(StandInCorrespondent):
 
         Model confidence below 0.5 forces review regardless of its review flag.
         """
-        if tri.intent in {"disclosure_request", "spam_or_phishing"}:
+        if self._rules_only or tri.intent in {
+            "disclosure_request",
+            "spam_or_phishing",
+            "legal_notice",
+        }:
             return None
         out = self._ask(msg, tools)
         if out is None:
@@ -178,7 +183,20 @@ class LLMCorrespondent(StandInCorrespondent):
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
         self._calls, self._fallbacks = 0, []
-        res = super().handle(msg, tools)
+        # 1. rules only: the model never sees mail the safety screen or rules already flag
+        self._rules_only = True
+        try:
+            res = super().handle(msg, tools)
+        finally:
+            self._rules_only = False
+        flagged = res.trust in {"hostile", "suspicious"} or any(
+            s.get("kind") == "possible_attack" for s in res.signals
+        )
+        # 2. clean mail only: the model may choose among benign intents. It can add
+        #    escalations (a model-chosen legal_notice from a suspicious sender is hostile)
+        #    but its output is never allowed to downgrade a rules flag.
+        if not flagged:
+            res = super().handle(msg, tools)
         # invariants, enforced in code after the model: never trusted from it
         if res.trust in {"hostile", "suspicious"} or any(
             s.get("kind") == "possible_attack" for s in res.signals
