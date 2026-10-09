@@ -324,11 +324,14 @@ class StandInCorrespondent:
             return ("hostile" if bad else "suspicious"), reasons + [
                 f"domain is a lookalike of {match['of']}"
             ]
-        if how == "address":
+        if how in {"address", "domain"}:
+            # a registered address or a registered (primary or alias) domain with fully
+            # passing authentication is verified; failing auth is suspicious; missing
+            # auth results leave the sender unverified
             if ok:
                 return "verified", reasons
             return ("suspicious" if bad else "unverified"), reasons
-        if how in {"domain", "name_hint"}:
+        if how == "name_hint":
             return ("suspicious" if bad else "unverified"), reasons
         return ("suspicious" if bad else "unverified"), reasons
 
@@ -458,7 +461,7 @@ class StandInCorrespondent:
                 "safety: instruction-like text directed at the assistant; zero tool calls driven by it"
             )
             return result(
-                trust="hostile" if trust in {"suspicious", "hostile"} else "suspicious",
+                trust="hostile" if trust != "verified" else "suspicious",
                 intent="possible_prompt_injection",
                 issue_class="possible_prompt_injection",
                 signals=[
