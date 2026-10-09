@@ -181,6 +181,17 @@ def ingest(path: Path) -> IngestResult:
                     blocks.append(block.text)
             raw = "\n".join(blocks)
             method, pages, stats = "text", 1, {}
+        elif suffix in {".png", ".jpg", ".jpeg"}:
+            try:
+                raw = transcribe_pages(path, page_usage)
+            except Exception as exc:  # noqa: BLE001 - ingest never raises
+                return _fail(
+                    "vision",
+                    f"image vision transcription failed: {exc}",
+                    pages=1,
+                    usage=sum(page_usage, Usage()),
+                )
+            method, pages, stats = "vision", 1, {"text_layer": False}
         elif suffix == ".pdf":
             try:
                 raw, pages = _pdf.extract_text(path)

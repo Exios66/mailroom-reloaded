@@ -127,3 +127,14 @@ def test_docx_preserves_paragraph_and_table_order(tmp_path):
     assert result.error is None
     assert result.text.index('begins') < result.text.index('Acme') < result.text.index('ends')
 
+
+def test_image_attachment_uses_vision(tmp_path, monkeypatch):
+    path = tmp_path / 'scan.png'
+    path.write_bytes(b'synthetic image')
+    seen = []
+    monkeypatch.setattr(clerk, 'transcribe_pages', lambda p, usage_out=None: seen.append(p) or 'Signed by Alice')
+    result = ingest(path)
+    assert result.error is None
+    assert result.method == 'vision'
+    assert result.text == 'Signed by Alice'
+    assert seen == [path]
