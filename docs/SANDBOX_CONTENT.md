@@ -7,19 +7,23 @@ this document and a schema disagree, the schema wins.
 
 ## Schemas
 
-| File | Validates |
+| File | Contract |
 |---|---|
 | `scenario.v2.json` | `scenarios/<Series>/*.yaml` (`mailroom.scenario/v2`; series enum `A-G`, `S`, `T`, AM1) |
 | `registry.v1.json` | compiled client registry (`mailroom.comm.registry/v1`, the comm/v1 registry) |
 | `overlay.v1.json` | one JSONL line of `email/overlay/*.jsonl` |
 | `gen_spec.v1.json` | `gen/specs/*.yaml` |
 | `persona_behavior.v1.json` | `personas/behavior/*.yaml` |
-| `content_files.json` | CSV headers and row rules for every tabular content file; ID conventions |
+| `content_files.json` | Catalog of CSV headers and row rules for every tabular content file; ID conventions |
 | `relation_kinds.v1.json` | the eight relation kinds (**new in M0**; `unknown` is a linked_docs placeholder, not a kind) |
 | `signal_kinds.v1.json` | signal/v1 kinds (**new in M0**; mirrors the content validator's `SIGNAL_KINDS`) |
 | `event_kinds.v1.json` | sandbox event-log kinds (**new in M0**; addendum section 9.4) |
 
-The first six are copied verbatim from content v0.5.0 (`f650cfd`); their
+`content_files.json` is a catalog, not a validator. The content validator must
+read it and explicitly compare each CSV header against the corresponding
+`files` entry's `header` array.
+
+The first six originated in content v0.5.0 (`f650cfd`); their
 `$id`s still point at the content repo. The three enum schemas did not exist
 there and are added here because the plan assigns them to M0.
 
