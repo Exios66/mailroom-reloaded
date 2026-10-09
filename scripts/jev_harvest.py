@@ -313,6 +313,15 @@ def _harvest_features(args: argparse.Namespace, cfg) -> int:
 
     # Deterministic row order: the input row order, not completion order.
     out_rows = [by_index[t.index] for t in targets if t.index in by_index]
+    labels = {t.expected_escalate for t in targets if t.index in by_index}
+    if len(labels) < 2:
+        print(
+            f"Skipping write: {len(out_rows)} surviving rows contain fewer than "
+            "two expected_escalate classes after filtering unusable answers; "
+            "a single-class fit is degenerate (issue #14).",
+            file=sys.stderr,
+        )
+        return 0
     _write_rows(args.out, out_rows)
 
     correct = sum(row["correct"] for row in out_rows)

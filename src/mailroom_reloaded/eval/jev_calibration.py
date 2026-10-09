@@ -121,9 +121,10 @@ def _search_thresholds(q: np.ndarray, y: np.ndarray) -> tuple[float, float]:
 
     A plateau that is no better than chance (balanced accuracy ``<= 0.5``) is
     also neutral: on the reported degenerate fit (issue #14) the plateau spans
-    the whole range, so its edges are ``accept=1.0`` / ``verify=0.0`` -- a gate
-    that trusts every answer and never escalates. Returning the neutral
-    operating points instead refuses to emit that dangerous artifact.
+    the whole range, so its edges are ``accept=1.0`` / ``verify=0.0``: route
+    confidence below 1.0 enters the verify band, where choices can escalate to
+    human review; only confidence 1.0 reaches accept. Returning the neutral
+    operating points instead avoids that degenerate artifact.
     """
     if q.size == 0 or np.unique(y).size < 2:
         return _NEUTRAL["accept_threshold"], _NEUTRAL["verify_threshold"]

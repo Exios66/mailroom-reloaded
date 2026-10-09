@@ -227,8 +227,9 @@ writes a neutral calibration (`temperature 1.0`, `accept 0.8`, `verify 0.5`,
   is no better than chance, `_search_thresholds` returns the neutral operating
   points (`accept 0.8` / `verify 0.5`) instead of the plateau edges. Without
   this, a degenerate label source (all-`false` `retry_expected`/`review_expected`)
-  produced `accept=1.0` / `verify=0.0` — a gate that trusts every answer and
-  never escalates. The `fixtures` config in
+  produced `accept=1.0` / `verify=0.0`: route confidence below 1.0 enters the
+  verify band, where choices can escalate to human review; only confidence
+  1.0 reaches accept. The `fixtures` config in
   `Lucius-Morningstar/mailroom-reloaded-fixtures` is the positive-label source;
   `scripts/jev_harvest.py --mode features` also refuses a single-class batch.
 - The gate consumes **both thresholds**. Inside the medium band Jev's

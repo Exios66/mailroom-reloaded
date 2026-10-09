@@ -118,13 +118,14 @@ def test_feature_target_parses_hub_string_labels(value, expected):
     assert target.expected_escalate is expected
 
 
-def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch):
+@pytest.mark.parametrize("extract_route", ["proceed", "human_review"])
+def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch, extract_route):
     monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
     module = _load_module()
 
     def responder(state):
         if state["stage"] == "extract":
-            return {"route": JevAnswer(type="choice", choice="proceed", confidence=0.7)}
+            return {"route": JevAnswer(type="choice", choice=extract_route, confidence=0.7)}
         confidence = round(float(state["confidence"]), 2)
         if confidence == 0.8:
             return {"route": JevAnswer(type="choice", choice="retry", confidence=0.9)}
@@ -156,7 +157,7 @@ def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch):
     out = _read_rows(out_path)
     assert len(out) == 3
     # Deterministic input order, not completion order; calibration-row shape.
-    assert [r["correct"] for r in out] == [1, 1, 0]
+    assert [r["correct"] for r in out] == [1, 1, int(extract_route == "human_review")]
     assert all(
         set(r) == {"split", "provider", "model", "doc_type", "confidence", "correct"}
         for r in out
@@ -195,6 +196,46 @@ def test_harvest_features_refuses_single_class_labels(tmp_path, monkeypatch):
     )
     assert rc == 1
     assert not out.exists()
+
+
+@pytest.mark.parametrize("surviving_label", [0, 1, None])
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_harvest_features_skips_degenerate_survivors(
+    tmp_path, monkeypatch, capsys, surviving_label, existing_output
+):
+    module = _load_module()
+    monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
+
+    def responder(state):
+        if state["confidence"] != surviving_label:
+            return {}
+        # Surviving targets share an expected label but have mixed correctness.
+        route = "retry" if state["stage"] == "classify" else "proceed"
+        return {"route": JevAnswer(type="choice", choice=route, confidence=0.9)}
+
+    monkeypatch.setattr(module, "JevClient", lambda cfg: _StubClient(responder))
+    rows = [
+        {"stage": stage, "confidence": label, label_key: label}
+        for label in (0, 1)
+        for stage, label_key in (
+            ("classify", "retry_expected"), ("extract", "review_expected")
+        )
+    ]
+    rows_path = _write_rows(tmp_path / "features.jsonl", rows)
+    out = tmp_path / "out.jsonl"
+    if existing_output:
+        out.write_text("existing calibration rows\n", encoding="utf-8")
+
+    rc = module.main(
+        ["--mode", "features", "--rows", str(rows_path), "--out", str(out)]
+    )
+
+    assert rc == 0
+    assert "surviving rows" in capsys.readouterr().err
+    if existing_output:
+        assert out.read_text(encoding="utf-8") == "existing calibration rows\n"
+    else:
+        assert not out.exists()
 
 
 def test_feature_route_verify_is_not_an_escalation():
