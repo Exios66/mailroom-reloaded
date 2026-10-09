@@ -314,3 +314,45 @@ def test_watermark_and_empty_store(store) -> None:
     assert store.watermark() == 0 and store.list_runs() == []
     _fake_run(_provider(store))
     assert store.watermark() > 0
+
+
+def test_cap_holds_across_two_store_instances_and_counts_only_real_inserts(
+    tmp_path,
+) -> None:
+    path = tmp_path / "shared.db"
+    a, b = SpanStore(path, rows_per_run=5), SpanStore(path, rows_per_run=5)
+    try:
+        with run_scope("r"):
+            _fake_run(_provider(a), "d1")  # 3 spans
+            _fake_run(_provider(b), "d2")  # only 2 fit
+        assert a.count("r") == 5 and b.count("r") == 5
+        rows = a.spans_for_run("r")
+        enc = {
+            **rows[0],
+            "attrs": json.dumps(rows[0]["attrs"]),
+            "events": json.dumps(rows[0]["events"]),
+        }
+        assert b.write([{**enc, "span_id": "e" * 16, "run_id": "other"}]) == 1
+        assert (
+            b.write([{**enc, "span_id": "e" * 16, "run_id": "other"}]) == 0
+        )  # a duplicate is not "stored"
+    finally:
+        a.close()
+        b.close()
+
+
+def test_a_blank_trace_store_path_means_the_default(monkeypatch, tmp_path) -> None:
+    from mailroom_reloaded import settings
+    from mailroom_reloaded.storage.span_store import default_span_store_path
+
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    monkeypatch.setenv("MAILROOM_TRACE_STORE_PATH", "")
+    settings.get_settings.cache_clear()
+    try:
+        assert settings.get_settings().trace_store_path is None
+        assert default_span_store_path() == tmp_path / "traces.db"
+        monkeypatch.setenv("MAILROOM_TRACE_STORE_PATH", str(tmp_path / "x.db"))
+        settings.get_settings.cache_clear()
+        assert default_span_store_path() == tmp_path / "x.db"
+    finally:
+        settings.get_settings.cache_clear()
