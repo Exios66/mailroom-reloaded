@@ -52,6 +52,10 @@ def test_tui_assets_served(client):
     assert resp.status_code == 200
     assert "--term-amber: #ffb86c" in resp.text
     assert "--term-bg-deep: #050709" in resp.text
+    assert "--term-magenta: #f472b6" in resp.text
+    assert "--term-yellow: #facc15" in resp.text
+    assert "--term-station-judge: var(--term-magenta)" in resp.text
+    assert "--term-station-review: var(--term-yellow)" in resp.text
     assert client.get("/tui/assets/tui.css").status_code == 200
 
 
