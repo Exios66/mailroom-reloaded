@@ -295,10 +295,13 @@ def call_structured(
 ) -> LLMResult:
     """One structured completion (see :func:`_call_structured`), recorded as a ``mailroom.llm.<role>`` span.
 
-    The span carries the role, model, token counts and cost for the replay's generations
-    list and never message content. It is kind ``SPAN`` and uses ``mailroom.*`` attribute
+    Explicit span attributes carry the role, model, token counts and cost for the replay's
+    generations list without message content. It is kind ``SPAN`` and uses ``mailroom.*`` attribute
     names (not ``llm.token_count.*``) so a backend that sums LLM spans does not count a
     call twice next to the instrumentor's own span.
+
+    Returns the result from :func:`_call_structured` and propagates its errors,
+    including ``LengthFinishReasonError`` with the accumulated call usage.
     """
     tracer = trace.get_tracer("mailroom.llm")
     with tracer.start_as_current_span(f"mailroom.llm.{role}") as span:
@@ -329,7 +332,11 @@ def call_structured(
 def _annotate_llm_span(
     span: Any, role: str, usage: Usage | None, result: LLMResult | None = None
 ) -> None:
-    """Model, token and cost attributes for a ``mailroom.llm.<role>`` span (best effort)."""
+    """Add model, token and USD cost attributes, suppressing annotation errors.
+
+    With no ``usage``, only model and provider are recorded. With usage, a supplied
+    ``result`` adds tool-round, parse-success and uncapped-completion flags.
+    """
     try:
         r = resolve(role)
         span.set_attribute("mailroom.model", r.model)
@@ -366,9 +373,19 @@ def _call_structured(
     """One structured completion, with up to three tool rounds first.
 
     Two-phase protocol: tool rounds never carry ``response_format``; the final
-    turn carries the strict ``response_format`` (from ``response_format`` or the
-    extraction schema of ``schema_doc_type``) and, when tools were offered,
-    ``tool_choice="none"``. Raises ``LengthFinishReasonError`` on a length cap.
+    turn carries it when supplied explicitly or derived from the extraction
+    schema of ``schema_doc_type``. Only vLLM receives
+    ``tool_choice="none"``, when tool calling did not fall back to inlined results.
+    ``timeout`` is the SDK request timeout in seconds, not a whole-call deadline.
+    ``sampling`` overrides the role's defaults; logprobs are requested only when
+    the provider supports them.
+
+    Returns content, a parsed JSON object (or ``None`` if none can be parsed),
+    aggregate usage, finish reason, optional label logprob and tool-round count.
+    Emits usage metrics. Raises ``LengthFinishReasonError`` with accumulated
+    usage for a capped tool call or final answer. Unknown roles or extraction
+    schemas raise ``KeyError``; invalid provider configuration raises
+    ``ValueError``. Unhandled provider errors propagate after transport retries.
     """
     if response_format is None and schema_doc_type is not None:
         from mailroom_reloaded.schemas.extraction import response_format as _rf

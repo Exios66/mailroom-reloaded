@@ -257,7 +257,11 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("report_catalog_archive", NODE_DEADLINES["report_catalog_archive"], 0)
     def _node_report_catalog_archive(self) -> None:
-        """Compile the report, archive the file and upsert the catalog record."""
+        """Compile the report, archive the file and upsert the catalog record.
+
+        Defer a failed catalog upsert through ``catalog_pending``; report and
+        archival errors propagate.
+        """
         state = self.state
         report = compile_report(state)
         report["llm_calls"] = self._llm_calls
@@ -283,7 +287,12 @@ class MailroomFlow(Flow[MailroomState]):
 
     @guarded("grade", NODE_DEADLINES["grade"], 0)
     def _node_grade(self) -> None:
-        """Eval-only: grade the extraction against ground truth (never fails the doc)."""
+        """In eval mode, grade against ground truth and emit grading scores.
+
+        Judge errors clear the grade and mark usage partial. Successful grading
+        usage is recorded separately from pipeline totals. Capture errors can
+        propagate under pytest, and the node remains subject to its guard.
+        """
         if self._eval_ctx is None:
             return
         state = self.state
@@ -343,7 +352,14 @@ class MailroomFlow(Flow[MailroomState]):
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
     ) -> Any:
-        """Run a node under resume-skip, manifest/audit, span and budget guards."""
+        """Run a node under resume-skip, manifest/audit, span and budget guards.
+
+        Return the node result, or ``None`` when skipping a completed node.
+        Per-node overrides replace ``deadline_s`` (seconds) and ``token_budget``;
+        nonpositive limits are disabled. Check limits after execution and raise
+        ``NodeFailed`` if either is exceeded. Other node errors propagate after
+        saving state and marking usage partial; persistence errors also propagate.
+        """
         if node_name in self._resume_done:
             self._resume_done.remove(node_name)
             return None
@@ -438,7 +454,11 @@ class MailroomFlow(Flow[MailroomState]):
         raise NodeFailed(node_name, reason)
 
     def _park(self, reason: str) -> MailroomState:
-        """Park the document in ``review/`` with manifest/audit updates."""
+        """Mark the document parked, attempt moving it to ``review/`` and return its state.
+
+        Persist the manifest and audit reason. Relocation and catalog errors are
+        suppressed; manifest and audit errors propagate.
+        """
         state = self.state
         state.route_trail.append("human_review")
         state.status = "parked"
@@ -546,7 +566,10 @@ class MailroomFlow(Flow[MailroomState]):
         trace_capture.emit_event("route", **{"from": frm, "to": to, "reason": reason})
 
     def _retry_event(self, kind: str, attempt: int, result: Any) -> None:
-        """Record a gate retry and tag the next node span with its ``retry_kind``."""
+        """Record a gate retry and tag the next sort/extract span with its ``retry_kind``.
+
+        ``attempt`` is one-based. Omit the maximum if its taxonomy lookup fails.
+        """
         self._retry_kind = kind
         try:
             max_attempts = load_taxonomy().confidence_for(self._effective_doc_type()).retry_max
@@ -651,7 +674,12 @@ class MailroomFlow(Flow[MailroomState]):
         overrides: dict[str, Any] | None,
         eval_ctx: Any | None,
     ) -> None:
-        """Claim the file, load its manifest and restore state for this run."""
+        """Claim the file, load its manifest and restore state for this run.
+
+        Raise ``FileNotFoundError`` if the selected work path does not exist.
+        Ignore invalid state within a loaded manifest; manifest validation and
+        other I/O errors propagate.
+        """
         self._bins = (overrides or {}).get("bins") or Bins(get_settings().base_dir)
         self._overrides = dict(overrides or {})
         self._eval_ctx = eval_ctx
@@ -764,7 +792,11 @@ class MailroomFlow(Flow[MailroomState]):
             logger.warning("ledger_end_failed", exc_info=True)
 
     def _drive_nodes(self) -> MailroomState:
-        """Deterministically walk the guarded nodes and gates to a terminal bin."""
+        """Walk guarded nodes and gates, returning the final document state.
+
+        Catch ``NodeFailed`` to end the walk with its current state; other errors
+        propagate. After archival, run pending eval grading when enabled.
+        """
         self._resume_done = set(self._manifest.completed_nodes)
         state = self.state
         node = self._resume_start()
