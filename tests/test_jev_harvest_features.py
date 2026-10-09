@@ -176,3 +176,42 @@ def test_main_features_requires_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
     rc = module.main(["--mode", "features", "--out", str(tmp_path / "out.jsonl")])
     assert rc == 1
+
+
+def test_harvest_features_refuses_single_class_labels(tmp_path, monkeypatch):
+    """A single label class is degenerate; refuse before building a client."""
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    module = _load_module()
+    monkeypatch.setattr(module, "JevClient", lambda cfg: pytest.fail("client built"))
+
+    rows = [
+        {"split": "train", "stage": "classify", "confidence": 0.8, "retry_expected": 0},
+        {"split": "train", "stage": "extract", "confidence": 0.3, "review_expected": 0},
+    ]
+    out = tmp_path / "out.jsonl"
+    rc = module.main(
+        ["--mode", "features", "--rows", str(_write_rows(tmp_path / "f.jsonl", rows)),
+         "--out", str(out)]
+    )
+    assert rc == 1
+    assert not out.exists()
+
+
+def test_feature_route_verify_is_not_an_escalation():
+    """``verify`` is the caution tier, not a review; only real routes escalate."""
+    module = _load_module()
+    target = module._feature_target(
+        {"stage": "extract", "review_expected": 1, "confidence": 0.4}, 0
+    )
+
+    class _Client:
+        cfg = _StubCfg()
+
+        def __init__(self, route):
+            self._route = route
+
+        def ask(self, state, questions):
+            return {"route": JevAnswer(type="choice", choice=self._route, confidence=0.9)}
+
+    assert module._run_feature(_Client("verify"), target)["correct"] == 0
+    assert module._run_feature(_Client("human_review"), target)["correct"] == 1

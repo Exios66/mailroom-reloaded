@@ -118,12 +118,20 @@ def _search_thresholds(q: np.ndarray, y: np.ndarray) -> tuple[float, float]:
     Both are points on the best-accuracy plateau; ``accept`` is its upper edge
     and ``verify`` its lower edge, so ``verify <= accept`` always holds. With a
     single label class or no rows the neutral defaults are returned.
+
+    A plateau that is no better than chance (balanced accuracy ``<= 0.5``) is
+    also neutral: on the reported degenerate fit (issue #14) the plateau spans
+    the whole range, so its edges are ``accept=1.0`` / ``verify=0.0`` -- a gate
+    that trusts every answer and never escalates. Returning the neutral
+    operating points instead refuses to emit that dangerous artifact.
     """
     if q.size == 0 or np.unique(y).size < 2:
         return _NEUTRAL["accept_threshold"], _NEUTRAL["verify_threshold"]
     cand = _candidates(q)
     scores = [_balanced_accuracy(q, y, t) for t in cand]
     best = max(scores)
+    if best <= 0.5 + 1e-12:
+        return _NEUTRAL["accept_threshold"], _NEUTRAL["verify_threshold"]
     tied = [t for t, s in zip(cand, scores) if s >= best - 1e-12]
     return float(tied[-1]), float(tied[0])
 

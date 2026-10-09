@@ -119,6 +119,12 @@ def eval(
     judge_sample_rate: float = typer.Option(1.0, "--judge-sample-rate", min=0.0, max=1.0),
     split: str = typer.Option("test", "--split"),
     local_dir: Path = typer.Option(None, "--local-dir", exists=True, file_okay=False),
+    dataset_repo: str = typer.Option(
+        None, "--dataset-repo", help="Hub repo override (e.g. the fixtures adaptation)."
+    ),
+    config: str = typer.Option(
+        None, "--config", help="Single labeled config (fixtures/bundles) instead of the join."
+    ),
     gpu_usd_per_hour: float = typer.Option(0.80, "--gpu-usd-per-hour"),
 ) -> None:
     """Run an evaluation posture and print its ``run_id``."""
@@ -139,6 +145,8 @@ def eval(
         judge_sample_rate=judge_sample_rate,
         split=split,
         local_dir=local_dir,
+        dataset_repo=dataset_repo,
+        dataset_config=config,
         gpu_usd_per_hour=gpu_usd_per_hour,
     )
     run_id = run_eval(cfg)

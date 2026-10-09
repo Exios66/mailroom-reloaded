@@ -1,6 +1,7 @@
 """Offline dataset validation and sampling boundary cases."""
 
 import json
+import sys
 
 import pytest
 
@@ -8,6 +9,7 @@ from mailroom_reloaded.eval.dataset import (
     BlindDoc,
     DatasetIntegrityError,
     GroundTruth,
+    _ground_truth_from_row,
     load_split,
     sample,
     sha256_text,
@@ -66,6 +68,84 @@ def test_loader_aliases_unicode_hashes_and_ground_truth_json(tmp_path):
         maud_clause_labels=["single label"],
         retry_expected=False,
     )
+
+
+def test_ground_truth_parses_hub_string_flags():
+    """The Hub serves the escalation flags as ``"true"``/``"false"`` strings."""
+    gt = _ground_truth_from_row(
+        {
+            "filename": "a.txt",
+            "retry_expected": "true",
+            "review_expected": "false",
+            "expected_stage": "archived",
+        }
+    )
+    assert gt.retry_expected is True
+    assert gt.review_expected is False
+
+
+def test_ground_truth_derives_flags_from_richer_columns():
+    """Richer columns win over the degenerate all-false booleans (issue #14)."""
+    review = _ground_truth_from_row(
+        {
+            "filename": "r.txt",
+            "retry_expected": "false",
+            "review_expected": "false",
+            "expected_stage": "review",
+            "review_reason": "low_confidence",
+        }
+    )
+    assert review.review_expected is True
+
+    retry = _ground_truth_from_row(
+        {
+            "filename": "t.txt",
+            "retry_expected": "false",
+            "review_expected": "false",
+            "expected_stage": "archived",
+            "expected_post_retry_state": "human_review",
+        }
+    )
+    assert retry.retry_expected is True
+
+
+def test_ground_truth_review_reason_alone_is_not_a_review():
+    """Fixtures pair a reason with ``review_expected == "false"`` (ambiguous)."""
+    gt = _ground_truth_from_row(
+        {
+            "filename": "a.txt",
+            "expected_stage": "archived",
+            "review_expected": "false",
+            "review_reason": "ambiguous",
+        }
+    )
+    assert gt.review_expected is False
+
+
+def test_load_split_labeled_config_computes_missing_hash(monkeypatch):
+    """A self-contained labeled config (fixtures) needs no declared sha256."""
+    from types import SimpleNamespace
+
+    from mailroom_reloaded.eval import dataset as ds
+
+    rows = [
+        {
+            "filename": "fx.txt",
+            "doc_text": "hello",
+            "expected": "contract",
+            "retry_expected": "true",
+            "expected_stage": "archived",
+            "expected_post_retry_state": "human_review",
+        }
+    ]
+    fake = SimpleNamespace(load_dataset=lambda *a, **k: rows)
+    monkeypatch.setitem(sys.modules, "datasets", fake)
+
+    docs, gts = ds.load_split(
+        revision="rev", split="train", repo="org/repo", config="fixtures"
+    )
+    assert docs[0].content_sha256 == sha256_text("hello")
+    assert gts["fx.txt"].retry_expected is True
 
 
 @pytest.fixture

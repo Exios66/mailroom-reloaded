@@ -207,20 +207,44 @@ and `{stage: {features, coef, intercept, threshold}}` for
 `models/route_gate.json` (`eval/train_gate.py:17-22`). Training requires the
 `dev` extra (scikit-learn, `pyproject.toml:48`).
 
+**Positive labels (issue #14).** The core `ground_truth` config carries no
+positive escalation examples (`retry_expected`/`review_expected` are `"false"`
+for all rows), so a fit on it has a single label class and `train_gate` refuses
+it. The positive-label source is the `fixtures` config, mirrored in
+`Lucius-Morningstar/mailroom-reloaded-fixtures` (core `v9.2`, `1eb5b42c`). Run
+the eval/export against it and fit from there:
+
+```bash
+uv run mailroom eval --dataset-repo Lucius-Morningstar/mailroom-reloaded-fixtures \
+  --revision v9.2-reloaded --config fixtures --split train --per-class 50
+uv run python scripts/jev_export_gate_features.py \
+  --dataset-repo Lucius-Morningstar/mailroom-reloaded-fixtures \
+  --revision v9.2-reloaded --config fixtures
+```
+
+`eval/dataset.py` also parses the Hub `"true"`/`"false"` strings to `bool` and
+derives the two flags from `expected_stage == "review"` / a non-empty
+`expected_post_retry_state` when the booleans are absent or contradict them.
+
 ### Jev calibration
 
 The opt-in Jev gate is calibrated separately. `fit_jev_calibration`
-(`eval/jev_calibration.py:106-138`) fits temperature by binary NLL and then
+(`eval/jev_calibration.py:162-200`) fits temperature by binary NLL and then
 searches `accept_threshold` / `verify_threshold` on the **calibrated**
 confidence by balanced accuracy, reporting ECE before/after, and writes
 `models/jev_calibration.json` (`load_jev_gate` in `agents/jev.py`). It reuses
 `train_gate._check_train`, so only `split="train"` rows are accepted and a
-non-`train` split raises `ValueError` (`eval/jev_calibration.py:115`).
+non-`train` split raises `ValueError` (`eval/jev_calibration.py:173`).
 
 ```bash
 # Rows are {split, confidence, correct} (correct is 0/1):
 uv run mailroom jev calibrate --rows rows.jsonl --out models/jev_calibration.json
 ```
+
+A balanced-accuracy plateau no better than chance yields the **neutral**
+operating points (`accept 0.8` / `verify 0.5`), never the degenerate
+`accept=1.0` / `verify=0.0` that a single-class label source produces (issue
+#14); a genuinely separable fit keeps its verify/accept band.
 
 Jev's shipped calibration is fit on the author's teacher/MASSIVE data and **does
 not transfer**; re-fit on your own rows (issue #8). `JevGate.decide` consumes

@@ -55,6 +55,17 @@ _SHA_KEYS = ("content_sha256", "sha256", "content_hash")
 #: ``gt_fields`` blob is absent (local JSONL fixtures).
 _FIELD_KEYS = ("fields", "extraction", "ground_truth_fields")
 
+#: Richer ground-truth columns that encode the escalation decision the two
+#: boolean labels are meant to carry (issue #14). ``expected_stage == "review"``
+#: is the canonical review signal; a non-empty ``expected_post_retry_state``
+#: (``human_review``/``archived``) is the canonical retry signal. ``review_reason``
+#: alone is *not* sufficient -- fixtures pair a reason with ``review_expected ==
+#: "false"`` (e.g. ``ambiguous``), so it is only used when ``expected_stage`` is
+#: absent entirely.
+_STAGE_KEYS = ("expected_stage",)
+_POST_RETRY_KEYS = ("expected_post_retry_state",)
+_REVIEW_REASON_KEYS = ("review_reason",)
+
 
 class DatasetIntegrityError(Exception):
     """A blind document's ``content_sha256`` does not match its bytes."""
@@ -196,6 +207,36 @@ def _row_get(row: Any, keys: tuple[str, ...], default: Any = None) -> Any:
     return default
 
 
+def _as_flag(value: Any) -> bool | None:
+    """Parse a boolean ground-truth label.
+
+    The Hub serves ``retry_expected``/``review_expected`` as the strings
+    ``"true"``/``"false"``; ``None``/blank stay ``None`` and booleans/ints pass
+    through. Returning a ``bool`` (not the truthy string ``"false"``) is the
+    contract the ``GroundTruth`` dataclass declares.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return text in {"1", "true", "t", "yes", "y"} if text else None
+    return bool(value)
+
+
+def _resolve_flag(explicit: bool | None, derived: bool | None) -> bool | None:
+    """Merge an explicit boolean label with one derived from richer columns.
+
+    A positive derived signal wins over an explicit ``False`` (the richer
+    columns are authoritative per issue #14); otherwise the explicit value is
+    kept, and an explicit ``None`` with no derived signal stays ``None``.
+    """
+    if explicit is True or derived is True:
+        return True
+    if explicit is False:
+        return False
+    return None
+
+
 def _metadata_sha(row: Any) -> Any:
     """``content_sha256`` from the blind row's ``metadata`` blob, if present."""
     meta = _row_get(row, ("metadata",))
@@ -247,6 +288,21 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
             value = _row_get(row, fallback)
         return _as_list(value)
 
+    stage = _row_get(row, _STAGE_KEYS)
+    stage_text = str(stage).strip().lower() if stage is not None else ""
+    post_retry = _row_get(row, _POST_RETRY_KEYS)
+    post_text = str(post_retry).strip() if post_retry is not None else ""
+    reason = _row_get(row, _REVIEW_REASON_KEYS)
+    # Richer columns are authoritative (issue #14): `expected_stage == "review"`
+    # is the canonical review signal, a non-empty `expected_post_retry_state`
+    # the canonical retry signal. `review_reason` is only consulted when the
+    # row has no `expected_stage` at all (fixtures pair a reason with
+    # `review_expected == "false"`, so a bare reason is not sufficient).
+    derived_review = stage_text == "review" or (
+        not stage_text and bool(str(reason or "").strip())
+    )
+    derived_retry = bool(post_text)
+
     return GroundTruth(
         filename=filename,
         expected=_row_get(row, ("expected", "expected_doc_type", "label", "doc_type")),
@@ -254,9 +310,13 @@ def _ground_truth_from_row(row: Any) -> GroundTruth:
         fields=fields,
         cuad_clause_labels=clause("cuad_clause_labels", ("cuad_clause_labels", "cuad_clauses")),
         maud_clause_labels=clause("maud_clause_labels", ("maud_clause_labels", "maud_clauses")),
-        retry_expected=_row_get(row, ("retry_expected",)),
-        review_expected=_row_get(row, ("review_expected",)),
-        expected_stage=_row_get(row, ("expected_stage",)),
+        retry_expected=_resolve_flag(
+            _as_flag(_row_get(row, ("retry_expected",))), derived_retry
+        ),
+        review_expected=_resolve_flag(
+            _as_flag(_row_get(row, ("review_expected",))), derived_review
+        ),
+        expected_stage=stage,
     )
 
 
@@ -324,7 +384,7 @@ def _load_local(local_dir: Path) -> tuple[list[BlindDoc], dict[str, GroundTruth]
 
 
 def _load_live(
-    revision: str, split: str
+    revision: str, split: str, repo: str = REPO
 ) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
     """Load and join Hub configs, requiring the optional datasets package."""
     try:
@@ -335,17 +395,50 @@ def _load_live(
             "pip install 'mailroom-reloaded[eval]'"
         ) from exc
 
-    blind_rows = _load_hf_config(datasets, "default", revision, split)
-    gt_rows = _load_hf_config(datasets, "ground_truth", revision, split)
+    blind_rows = _load_hf_config(datasets, "default", revision, split, repo)
+    gt_rows = _load_hf_config(datasets, "ground_truth", revision, split, repo)
     return _join(blind_rows, gt_rows)
 
 
-def _load_hf_config(datasets: Any, config: str, revision: str, split: str) -> list[Any]:
+def _load_labeled(
+    revision: str, split: str, config: str, repo: str
+) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
+    """Load a self-contained labeled config (``fixtures``/``bundles``).
+
+    Those configs carry ``doc_text`` and the label columns in one row, so no
+    blind/ground-truth join is needed. A config without a declared
+    ``content_sha256`` (the ``fixtures`` shape) has its hash computed from the
+    text; a declared hash is still verified. This is the positive-label source
+    the gate/Jev calibration needs (issue #14) without altering the core
+    ``ground_truth`` config.
+    """
+    try:
+        import datasets
+    except ImportError as exc:  # pragma: no cover - exercised only without the extra
+        raise RuntimeError(
+            "the 'eval' extra is required for live dataset loading: "
+            "pip install 'mailroom-reloaded[eval]'"
+        ) from exc
+
+    docs: list[BlindDoc] = []
+    gts: dict[str, GroundTruth] = {}
+    for row in _load_hf_config(datasets, config, revision, split, repo):
+        gt = _ground_truth_from_row(row)
+        text = str(_row_get(row, _TEXT_KEYS, "") or "")
+        declared = _row_get(row, _SHA_KEYS)
+        docs.append(_blind_from_row(row, declared if declared is not None else sha256_text(text)))
+        gts[gt.filename] = gt
+    return docs, gts
+
+
+def _load_hf_config(
+    datasets: Any, config: str, revision: str, split: str, repo: str = REPO
+) -> list[Any]:
     """Load a Hub split, falling back to filtering rows by their split field."""
     try:
-        dataset = datasets.load_dataset(REPO, config, revision=revision, split=split)
+        dataset = datasets.load_dataset(repo, config, revision=revision, split=split)
     except Exception:
-        dataset = datasets.load_dataset(REPO, config, revision=revision)
+        dataset = datasets.load_dataset(repo, config, revision=revision)
         splits = dataset.values() if isinstance(dataset, Mapping) else [dataset]
         rows = [
             row for subset in splits for row in subset
@@ -384,6 +477,8 @@ def load_split(
     split: str = "test",
     *,
     local_dir: Path | None = None,
+    repo: str | None = None,
+    config: str | None = None,
 ) -> tuple[list[BlindDoc], dict[str, GroundTruth]]:
     """Load the blind docs and ground truth for one split.
 
@@ -391,10 +486,18 @@ def load_split(
     offline runs); otherwise ``datasets.load_dataset`` is used behind the
     ``eval`` extra. Every blind document's ``content_sha256`` is verified against
     its bytes and a mismatch raises :class:`DatasetIntegrityError`.
+
+    ``repo`` overrides the default Hub repository (e.g. the fixtures adaptation
+    ``Lucius-Morningstar/mailroom-reloaded-fixtures``). ``config`` loads a
+    single self-contained labeled config (``fixtures``/``bundles``) instead of
+    the ``default`` + ``ground_truth`` join -- the positive-label source the
+    gate/Jev calibration needs (issue #14).
     """
     if local_dir is not None:
         return _load_local(Path(local_dir))
-    return _load_live(revision, split)
+    if config is not None:
+        return _load_labeled(revision, split, config, repo or REPO)
+    return _load_live(revision, split, repo or REPO)
 
 
 # --------------------------------------------------------------------------- sampler

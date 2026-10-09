@@ -126,6 +126,8 @@ class EvalConfig:
     judge_sample_rate: float = 1.0
     split: str = "test"
     local_dir: Path | None = None
+    dataset_repo: str | None = None
+    dataset_config: str | None = None
     gpu_usd_per_hour: float = 0.80
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -525,7 +527,13 @@ def run_eval(cfg: EvalConfig) -> str:
     Raises ``RuntimeError`` if called from a thread with a running event loop.
     """
     run_id = uuid.uuid4().hex[:12]
-    docs, gts = load_split(cfg.revision, cfg.split, local_dir=cfg.local_dir)
+    docs, gts = load_split(
+        cfg.revision,
+        cfg.split,
+        local_dir=cfg.local_dir,
+        repo=cfg.dataset_repo,
+        config=cfg.dataset_config,
+    )
     selected = sample(
         docs, gts, per_class=cfg.per_class, seed=cfg.seed, classes=cfg.classes
     )

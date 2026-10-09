@@ -40,9 +40,11 @@ modes:
     (:func:`_jev_state` over the built :class:`GateFeatures`) -- never the
     document text and never truncated. The label is ``retry_expected`` for
     ``stage="classify"`` and ``review_expected`` for ``stage="extract"``;
-    ``correct = (jev_route != "proceed") == bool(expected_escalate)``. Rows
-    missing the label, or whose route answer is unusable, are skipped and
-    counted.
+    ``correct = escalated == bool(expected_escalate)`` where an escalation is
+    any route other than ``proceed``/``verify`` (matching
+    ``metrics.gate_kpis``). Rows missing the label, or whose route answer is
+    unusable, are skipped and counted. A batch whose labels are all one class is
+    refused: a single-class fit is degenerate (issue #14).
 
 Both modes write the rows ``mailroom jev calibrate`` consumes::
 
@@ -90,6 +92,12 @@ SEED = 42
 CONCURRENCY = 8
 #: Hosted Decisions ``state`` cap: longer inputs return ``max_tokens_exceeded``.
 MAX_STATE_CHARS = 60_000
+
+#: Routes that are neither ``proceed`` nor the mid-confidence ``verify`` tier
+#: are escalations: ``retry``/``re_sort`` (classify) and ``human_review``/``boss``
+#: (extract). The earlier "any non-proceed" test wrongly counted an extract
+#: ``verify`` as a review, which ``metrics.gate_kpis`` does not (issue #14).
+_ESCALATION_EXCLUDED = frozenset({"proceed", "verify"})
 
 QUESTION = "doc_type"
 INSTRUCTIONS = (
@@ -220,7 +228,7 @@ def _run_feature(client: JevClient, target: _FeatureTarget) -> dict | None:
     route = answers.get("route")
     if route is None or route.choice is None or route.confidence is None:
         return None
-    escalated = route.choice != "proceed"
+    escalated = route.choice not in _ESCALATION_EXCLUDED
     return {
         "split": target.split,
         "provider": client.cfg.provider,
@@ -262,6 +270,17 @@ def _harvest_features(args: argparse.Namespace, cfg) -> int:
     )
     if not targets:
         print("FATAL: no usable feature rows after filtering", file=sys.stderr)
+        return 1
+
+    labels = {t.expected_escalate for t in targets}
+    if len(labels) < 2:
+        print(
+            f"FATAL: all {len(targets)} usable rows share expected_escalate="
+            f"{next(iter(labels))}; a fit on a single label class is degenerate "
+            "(issue #14). Re-export the gate features from a config that carries "
+            "positive retry/review labels (e.g. --config fixtures).",
+            file=sys.stderr,
+        )
         return 1
 
     client = JevClient(cfg)

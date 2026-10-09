@@ -130,6 +130,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Local dataset dir (default.jsonl/ground_truth.jsonl) instead of the Hub.",
     )
     parser.add_argument(
+        "--dataset-repo",
+        default=None,
+        help="Hub repo override (e.g. Lucius-Morningstar/mailroom-reloaded-fixtures).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Single labeled config (fixtures/bundles) instead of the default join.",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=DEFAULT_OUT,
@@ -157,7 +167,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        _, gts = load_split(args.revision, args.split, local_dir=args.local_dir)
+        _, gts = load_split(
+            args.revision,
+            args.split,
+            local_dir=args.local_dir,
+            repo=args.dataset_repo,
+            config=args.config,
+        )
     except Exception as exc:  # noqa: BLE001 - surface the exact Hub/dataset error
         print(
             f"FATAL: could not load ground truth {args.revision}/{args.split}: "
