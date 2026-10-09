@@ -381,6 +381,7 @@ def test_resume_skips_completed_nodes(env, mock_provider, monkeypatch):
 
     state = flow_mod.run_document(processing_path, worker_id="w1")
 
+    assert state.report["llm_calls"] == 2
     assert calls["sort"] == 0  # sort was skipped on resume
     assert state.status == "archived"
     entries = audit_log.entries(state.doc_id)
@@ -531,3 +532,27 @@ def test_initial_checkpoint_exists_before_ingest(env, monkeypatch):
     assert manifest is not None
     assert manifest.status == 'processing'
     assert Path(manifest.state['path']).is_file()
+
+
+def test_resume_after_extract_keeps_llm_calls(env, mock_provider, monkeypatch):
+    """Verify a document resumed after extraction still reports the sort and extract calls."""
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
+    real_archive = flow_mod.archive_document
+
+    def boom(*a, **k):
+        raise RuntimeError("boom during archive")
+
+    monkeypatch.setattr(flow_mod, "archive_document", boom)
+    bins, path = _write_inbox(env)
+
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+
+    processing_path = next(iter(bins.processing("w1").glob("*.txt")))
+    monkeypatch.setattr(flow_mod, "archive_document", real_archive)
+    state = flow_mod.run_document(processing_path, worker_id="w1")
+
+    assert state.status == "archived"
+    assert state.report["llm_calls"] == 2

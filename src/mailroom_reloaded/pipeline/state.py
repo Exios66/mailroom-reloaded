@@ -60,6 +60,7 @@ class MailroomState(BaseModel):
     classify_attempts: int = 0
     extract_attempts: int = 0
     boss_reassignments: int = 0
+    llm_calls: int = 0
     resorted: bool = False
 
     # trail and run outputs

@@ -197,6 +197,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.sort = result
         self._add_usage("sorter", result.usage)
         self._llm_calls += 1
+        state.llm_calls = self._llm_calls
 
     @guarded("extract", NODE_DEADLINES["extract"], 0)
     def _node_extract(self) -> None:
@@ -218,6 +219,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.extract = result
         self._add_usage(load_taxonomy().classes[doc_type].specialist, result.usage)
         self._llm_calls += 1
+        state.llm_calls = self._llm_calls
         M.schema_valid.add(1 if result.schema_valid else 0, {"doc_type": doc_type})
 
     @guarded("verify", NODE_DEADLINES["verify"], 0)
@@ -741,6 +743,7 @@ class MailroomFlow(Flow[MailroomState]):
         base.doc_id = doc_id
         base.path = str(work)
         base.eval_mode = eval_ctx is not None
+        self._llm_calls = base.llm_calls
         manifest.state = base.model_dump(mode="json")
         save_manifest(self._bins, manifest)
 
