@@ -274,7 +274,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 - [ ] After merge, X-01 publishes `v0.5.0` from `f650cfd` **using the pinned version**; confirm the asset sha256 equals `7a32e86e...` before touching the lock.
 
 #### K-02: Content tooling must never crash or silently accept bad data
-**Why (measured):** 28 faults injected into a copy of the repo, `tools/validate.py --strict-coverage` run on each: 21 fail cleanly, **4 crash with a traceback** and **2 corrupt data are accepted**:
+**Why (measured):** 28 faults injected into a copy of the repo, `tools/validate.py --strict-coverage` run on each: 21 fail cleanly, **4 crash with a traceback**, **2 corrupt data are accepted**, and **1 oversized scenario is accepted** (informational: no size cap), totaling 28 faults. The harness also includes a valid CRLF control: 29 cases = 21 CLEAN-FAIL + 4 CRASH + 4 MISSED (the two corrupt inputs, oversized scenario and CRLF control):
 
 | Fault | Result today |
 | --- | --- |
@@ -323,7 +323,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 C-01 to C-07 above remain the content-completeness list. K-series items do not replace them; they make the pack safe to ship while those finish. One addition to C-06: record the 32 scenarios that lack a `gen_spec` by name in the PR, so the single validator WARN can become an ERROR when it reaches zero.
 
 #### K-08: Reloaded-side hardening that the pack cannot fix
-- [ ] **Loader reports instead of raising.** `sandbox/content/loader.py` documents that file, JSON and YAML parse errors propagate out of `load_content` (only schema errors enter the report). A pack with one bad YAML file therefore aborts `mailroom sandbox content validate/build` with a traceback instead of an error list. Convert per-file read/parse failures into `ValidationReport.errors` entries (file path included); keep `CompatError` raising. Test in `tests/sandbox/test_content_loader.py`. (Per docstring; not exercised in this audit.)
+- [x] **Loader reports instead of raising.** `sandbox/content/loader.py` records per-file content read and JSON/YAML parse failures in `ValidationReport.errors` with the file path, including smoke manifest digest reads. `CompatError` still raises. `mailroom sandbox content validate` and the initial `build` load surface the report and exit 1. Regression coverage: `tests/sandbox/test_content_validation.py` and `tests/sandbox/test_content_cli.py`.
 - [ ] **Boss decision lifecycle must be recoverable.** Both CodeRabbit reviews (#23, #44) report that a Boss decision can be marked terminal before its effects (attachment actions, drafting) finish, and that restart does not reconcile mailbox, review state and attachment state. Already recorded as follow-up in #44; when R-03 re-cuts the work, require an idempotent, decision-keyed apply step and startup reconciliation. Also keep hard quarantine distinct from a soft review hold (the same reviews flag that a `legitimate` decision can release a hard-quarantined handoff).
 - [ ] Docstring coverage warnings on #23 and #44 (63.9% and 77.9% against 80%) are cosmetic but block the pre-merge check; handle with the R-18 docstring decision (D4).
 

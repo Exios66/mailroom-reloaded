@@ -131,6 +131,38 @@ def test_validate_reports_schema_diagnostics(content_dir):
 
 
 @pytest.mark.parametrize("command", ["validate", "build"])
+@pytest.mark.parametrize("relative", ["content.json", "scenarios/A/A1_status_inquiry.yaml"])
+@pytest.mark.parametrize("failure", ["parse", "read"])
+def test_cli_surfaces_load_failures(content_dir, tmp_path, monkeypatch, command, relative, failure):
+    """Return diagnostics and exit 1, preserving build output without running the exporter."""
+    path = content_dir / relative
+    if failure == "parse":
+        path.write_text("[")
+    else:
+        original = Path.read_text
+
+        def read(self, *args, **kwargs):
+            if self == path:
+                raise PermissionError("read denied")
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", read)
+    run = Mock(side_effect=AssertionError("exporter must not run"))
+    monkeypatch.setattr(content_cli.subprocess, "run", run)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "keep").write_text("existing")
+    args = [content_dir] if command == "validate" else ["--from-dir", content_dir, "--out", out]
+    result = invoke(command, *args)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert f"{relative}:" in result.stderr
+    assert "Traceback" not in result.output
+    run.assert_not_called()
+    assert (out / "keep").read_text() == "existing"
+
+
+@pytest.mark.parametrize("command", ["validate", "build"])
 def test_missing_content_produces_cli_error(tmp_path, command):
     """Report missing content metadata for both validation and build commands."""
     path = tmp_path / "missing"
