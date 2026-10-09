@@ -230,9 +230,19 @@ class SandboxService:
                 if m["state"] == "processing":
                     m["state"] = "admitted"
 
+    def _drain_queue(self) -> None:
+        while True:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                return
+            self._q.task_done()
+
     def reset(self) -> None:
+        self._drain_queue()
+        self.wait_idle(30)
         with self._work_lock, self._lock:
-            self.wait_idle(30)
+            self._drain_queue()
             self.messages, self.events, self.docs, self.batches = {}, [], {}, []
             self._mseq = self._bseq = 0
             self._sim_next = 0.0
@@ -599,24 +609,26 @@ class SandboxService:
             for entry in msg["handoffs"]:
                 self._apply_lane(msg, entry, atts.get(entry["name"]))
             for d in res.drafts:
-                item = self.outbox.add_draft(
-                    message_id=mid,
-                    thread_id=msg["thread_id"],
-                    draft={
-                        "to": d.to,
-                        "subject": d.subject,
-                        "body": d.body,
-                        "intent": d.intent,
-                        "evidence": d.evidence,
-                    },
-                )
                 with self._lock:
+                    item = self.outbox.add_draft(
+                        message_id=mid,
+                        thread_id=msg["thread_id"],
+                        draft={
+                            "to": d.to,
+                            "subject": d.subject,
+                            "body": d.body,
+                            "intent": d.intent,
+                            "evidence": d.evidence,
+                        },
+                    )
                     msg["outbox_ids"].append(item["id"])
-                if self.autonomy == "sandbox":
-                    self.outbox.approve(item["id"], by="boss-desk(autonomy=sandbox)")
-                    for a in msg["bossdesk"]:
-                        if a["action"] == "approve_outbound":
-                            a["state"] = "done"
+                    if self.autonomy == "sandbox":
+                        self.outbox.approve(
+                            item["id"], by="boss-desk(autonomy=sandbox)"
+                        )
+                        for a in msg["bossdesk"]:
+                            if a["action"] == "approve_outbound":
+                                a["state"] = "done"
             msg["flows_done"].append("correspondent")
         if "pipeline" in flows and "pipeline" not in msg["flows_done"]:
             if "correspondent" not in msg["flows_done"]:
@@ -718,8 +730,8 @@ class SandboxService:
 
     # ------------------------------------------------------------------ outbox
     def approve_outbound(self, oid: str, by: str = "reviewer") -> dict:
-        item = self.outbox.approve(oid, by)
         with self._lock:
+            item = self.outbox.approve(oid, by)
             msg = self.messages.get(item["message_id"])
             if msg:
                 for a in msg["bossdesk"]:
@@ -729,12 +741,14 @@ class SandboxService:
         return item
 
     def reject_outbound(self, oid: str, by: str = "reviewer") -> dict:
-        item = self.outbox.reject(oid, by)
+        with self._lock:
+            item = self.outbox.reject(oid, by)
         self._save()
         return item
 
     def set_egress_profile(self, profile: str) -> None:
-        self.outbox.set_profile(profile)
+        with self._lock:
+            self.outbox.set_profile(profile)
         self.emit("config.changed", "config", {"egress_profile": profile})
         self._save()
 

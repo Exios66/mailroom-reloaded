@@ -43,6 +43,7 @@ def test_serve_defaults_are_loopback_8100_smoke():
 
 
 def test_off_loopback_bind_requires_token(monkeypatch):
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", raising=False)
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     res = runner.invoke(cli.app, ["sandbox", "serve", "--host", "0.0.0.0"])
     assert res.exit_code != 0 and isinstance(res.exception, SystemExit)

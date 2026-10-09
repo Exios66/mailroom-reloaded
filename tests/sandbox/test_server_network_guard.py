@@ -61,3 +61,26 @@ def test_full_flow_opened_only_loopback_sockets(live):
     mock_port = int(svc.pipeline.mock.base_url.rsplit(":", 1)[1].split("/")[0])
     assert {p for _, p in svc.guard.connects} == {mock_port}
     assert client.get(f"{API}/outbox").json()["summary"]["transmitted"] == 0
+
+
+@pytest.mark.parametrize("resolver", ["gethostbyname", "gethostbyname_ex"])
+def test_legacy_resolvers_check_before_delegating_and_restore(monkeypatch, resolver):
+    calls = []
+    result = (
+        "127.0.0.1" if resolver == "gethostbyname" else ("localhost", [], ["127.0.0.1"])
+    )
+
+    def original(host):
+        calls.append(host)
+        return result
+
+    monkeypatch.setattr(socket, resolver, original)
+    with NetworkGuard() as guard:
+        resolve = getattr(socket, resolver)
+        with pytest.raises(NetworkBlocked):
+            resolve("mail.example.org")
+        assert calls == []
+        assert guard.blocked == [("resolve", "mail.example.org:None")]
+        assert resolve("localhost") == result
+        assert calls == ["localhost"]
+    assert getattr(socket, resolver) is original

@@ -145,3 +145,70 @@ def test_send_guards_kill_switch_idempotency_and_thread_cap(tmp_path, monkeypatc
     assert "kill switch" in ob.approve(i4["id"])["block"]["reason"]
     monkeypatch.setenv("MAILROOM_SEND_KILL_SWITCH", "1")
     assert ob._kill_switch()
+
+
+@pytest.mark.parametrize(
+    ("cap", "sender", "thread", "reason"),
+    [
+        ("per_sender_per_hour", "first", "t1", "per_sender_per_hour"),
+        ("max_per_hour", "second", "t2", "max_admissions_per_hour"),
+        ("max_open_threads", "second", "t2", "max_concurrent_open_threads"),
+    ],
+)
+def test_inbox_caps_do_not_consume_bucket_capacity(cap, sender, thread, reason):
+    meter = IngressMeter(load_sandbox_content().policy.ingress)
+    setattr(meter, cap, 1)
+    assert meter.admit_email(0, "first", "t1")["status"] == "admitted"
+    before = meter.snapshot()["buckets"]
+    for _ in range(3):
+        assert reason in meter.admit_email(0, sender, thread)["reason"]
+    assert meter.snapshot()["buckets"] == before
+
+
+@pytest.mark.parametrize("email_tokens", [1.0, 0.0])
+def test_second_bucket_shed_refunds_email_capacity(email_tokens):
+    meter = IngressMeter(load_sandbox_content().policy.ingress)
+    emails = meter.buckets["emails"]
+    emails.tokens = email_tokens
+    external = meter.buckets["external_correspondence"]
+    external.tokens = 0
+    external.depth_max = 0
+    result = meter.admit_email(0, "first", "t1")
+    assert result["reason"] == "external_correspondence:queue_full"
+    assert emails.tokens == email_tokens
+    assert not meter._hour and not meter._threads
+    # Capacity is still available when the other edge recovers.
+    external.tokens = 1
+    assert meter.admit_email(0, "first", "t1")["status"] != "shed"
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_hourly_send_cap_uses_capture_time_with_legacy_fallback(tmp_path, legacy):
+    ob, _ = _outbox(tmp_path)
+    ob.policy.send_schedule["caps"]["max_sends_per_hour_total"] = 1
+    now = 0.0
+    ob.clock = lambda: now
+    draft = {"to": "x@brightwaterpg.sandbox.invalid", "subject": "s", "body": "b"}
+    first = ob.add_draft(message_id="m1", thread_id="t1", draft=draft)
+    now = 7200.0
+    assert ob.approve(first["id"])["state"] == "captured"
+    if legacy:
+        first["created_ts"] = first.pop("captured_ts")
+    second = ob.add_draft(message_id="m2", thread_id="t2", draft=draft)
+    assert "max_sends_per_hour_total" in ob.approve(second["id"])["block"]["reason"]
+    now += 3600
+    third = ob.add_draft(message_id="m3", thread_id="t3", draft=draft)
+    assert ob.approve(third["id"])["state"] == "captured"
+
+
+def test_thread_cap_counts_old_captures_only_on_matching_thread(tmp_path):
+    ob, _ = _outbox(tmp_path)
+    ob.policy.send_schedule["caps"]["max_sends_per_thread_per_day"] = 1
+    draft = {"to": "x@brightwaterpg.sandbox.invalid", "subject": "s", "body": "b"}
+    first = ob.add_draft(message_id="m1", thread_id="t1", draft=draft)
+    assert ob.approve(first["id"])["state"] == "captured"
+    ob.clock = lambda: 1000.0 + 86400 * 2
+    second = ob.add_draft(message_id="m2", thread_id="t1", draft=draft)
+    assert "max_sends_per_thread_per_day" in ob.approve(second["id"])["block"]["reason"]
+    third = ob.add_draft(message_id="m3", thread_id="t2", draft=draft)
+    assert ob.approve(third["id"])["state"] == "captured"

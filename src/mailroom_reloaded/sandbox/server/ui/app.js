@@ -152,7 +152,7 @@ async function conformanceView() {
 async function docsView() {
   const d = await api("/documents");
   const t = el("table", {}, el("tr", {}, ["doc_id", "file", "status", "from message"].map((h) => el("th", {}, h))));
-  for (const x of d.documents) t.append(el("tr", {}, el("td", {}, x.doc_id), el("td", {}, x.filename), el("td", {}, chip(x.status, stateKind(x.status === "archived" ? "ok" : x.status))), el("td", {}, x.message_id)));
+  for (const x of d.documents) t.append(el("tr", {}, el("td", {}, x.doc_id), el("td", {}, x.filename), el("td", {}, chip(x.status, stateKind(x.status === "archived" ? "processed" : x.status))), el("td", {}, x.message_id)));
   return d.documents.length ? t : el("p", { class: "muted" }, "No documents have reached the pipeline yet.");
 }
 async function policyView() {
@@ -206,7 +206,7 @@ function traceSections(t) {
   for (const h of t.pipeline) {
     const p = h.pipeline;
     out.push(el("div", { class: "flow b" }, el("div", {}, chip(h.status, stateKind(h.status)), " ", el("b", {}, h.name), " lane ", chip(h.lane), " ", el("span", { class: "muted" }, h.reason)),
-      p ? kv([["status", chip(p.status, stateKind(p.status === "archived" ? "ok" : p.status))], ["doc_id", p.doc_id], ["route", p.route_trail.join(" > ")],
+      p ? kv([["status", chip(p.status, stateKind(p.status === "archived" ? "processed" : p.status))], ["doc_id", p.doc_id], ["route", p.route_trail.join(" > ")],
         ["class", `${p.doc_type || "?"}/${p.doc_subclass || "?"} conf ${p.confidence ?? "?"}`], ["LLM calls", p.structured_llm_calls + (p.reused ? " (reused, already processed)" : "")],
         ["audit", [chip(p.audit_chain_ok ? "chain ok" : "chain BROKEN", p.audit_chain_ok ? "ok" : "bad"), ` ${p.audit_entries} entries `, el("button", { class: "small", onclick: () => guarded(() => showAudit(p.doc_id)) }, "view audit")]]]) : null,
       h.status === "held" ? el("button", { class: "small primary", onclick: () => guarded(async () => { await post(`/messages/${t.message_id}/attachments/${encodeURIComponent(h.name)}/release`); await refreshAll(); }) }, "Human release to pipeline") : null));

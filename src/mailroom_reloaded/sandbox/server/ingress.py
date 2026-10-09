@@ -327,13 +327,6 @@ class IngressMeter:
 
     def admit_email(self, t: float, sender: str, thread_id: str) -> dict:
         edges: list[dict] = []
-        for edge in ("emails", "external_correspondence"):
-            r = {"edge": edge, **self.buckets[edge].take(t)}
-            edges.append(r)
-            if r["status"] == "shed":
-                return self._decision(
-                    edges, "shed", f"{edge}:{r.get('reason', 'queue_full')}", t
-                )
         hist = self._sender.setdefault(sender.lower(), deque())
         while hist and t - hist[0] >= 3600:
             hist.popleft()
@@ -352,6 +345,15 @@ class IngressMeter:
             return self._decision(
                 edges, "shed", f"max_concurrent_open_threads>{self.max_open_threads}", t
             )
+        for edge in ("emails", "external_correspondence"):
+            r = {"edge": edge, **self.buckets[edge].take(t)}
+            edges.append(r)
+            if r["status"] == "shed":
+                if edge == "external_correspondence":
+                    self.buckets["emails"].tokens += 1.0
+                return self._decision(
+                    edges, "shed", f"{edge}:{r.get('reason', 'queue_full')}", t
+                )
         hist.append(t)
         self._hour.append(t)
         self._threads[thread_id] = t

@@ -213,9 +213,11 @@ class VirtualOutbox:
                 caps.get("max_bytes_per_send", 1048576)
             ):
                 block = "message exceeds max_bytes_per_send"
-            elif sum(1 for i in captured if now - i["created_ts"] < 3600) >= int(
-                caps.get("max_sends_per_hour_total", 90)
-            ):
+            elif sum(
+                1
+                for i in captured
+                if now - i.get("captured_ts", i["created_ts"]) < 3600
+            ) >= int(caps.get("max_sends_per_hour_total", 90)):
                 block = "max_sends_per_hour_total reached"
             elif sum(1 for i in captured if i["thread_id"] == item["thread_id"]) >= int(
                 caps.get("max_sends_per_thread_per_day", 2)

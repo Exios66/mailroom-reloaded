@@ -70,11 +70,15 @@ class NetworkGuard:
         orig_connect = socket.socket.connect
         orig_connect_ex = socket.socket.connect_ex
         orig_getaddrinfo = socket.getaddrinfo
+        orig_gethostbyname = socket.gethostbyname
+        orig_gethostbyname_ex = socket.gethostbyname_ex
         orig_smtp_connect = smtplib.SMTP.connect
         self._orig = {
             "connect": orig_connect,
             "connect_ex": orig_connect_ex,
             "getaddrinfo": orig_getaddrinfo,
+            "gethostbyname": orig_gethostbyname,
+            "gethostbyname_ex": orig_gethostbyname_ex,
             "smtp_connect": orig_smtp_connect,
         }
 
@@ -92,6 +96,14 @@ class NetworkGuard:
             guard._check("resolve", host)
             return orig_getaddrinfo(host, *args, **kwargs)
 
+        def gethostbyname(host):  # type: ignore[no-untyped-def]
+            guard._check("resolve", host)
+            return orig_gethostbyname(host)
+
+        def gethostbyname_ex(host):  # type: ignore[no-untyped-def]
+            guard._check("resolve", host)
+            return orig_gethostbyname_ex(host)
+
         def smtp_connect(self_smtp, host="localhost", port=0, source_address=None):  # type: ignore[no-untyped-def]
             with guard._lock:
                 guard.blocked.append(("smtp", f"{host}:{port}"))
@@ -102,6 +114,8 @@ class NetworkGuard:
         socket.socket.connect = connect  # type: ignore[method-assign]
         socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
         socket.getaddrinfo = getaddrinfo  # type: ignore[assignment]
+        socket.gethostbyname = gethostbyname  # type: ignore[assignment]
+        socket.gethostbyname_ex = gethostbyname_ex  # type: ignore[assignment]
         smtplib.SMTP.connect = smtp_connect  # type: ignore[method-assign]
         self.installed = True
         return self
@@ -112,6 +126,8 @@ class NetworkGuard:
         socket.socket.connect = self._orig["connect"]  # type: ignore[method-assign]
         socket.socket.connect_ex = self._orig["connect_ex"]  # type: ignore[method-assign]
         socket.getaddrinfo = self._orig["getaddrinfo"]  # type: ignore[assignment]
+        socket.gethostbyname = self._orig["gethostbyname"]  # type: ignore[assignment]
+        socket.gethostbyname_ex = self._orig["gethostbyname_ex"]  # type: ignore[assignment]
         smtplib.SMTP.connect = self._orig["smtp_connect"]  # type: ignore[method-assign]
         self.installed = False
 

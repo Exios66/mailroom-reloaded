@@ -10,9 +10,9 @@
 # needs, or is given, a network route out by the application.
 #
 # Exposure: the port is published on 127.0.0.1 by default. To serve other hosts
-# set SANDBOX_BIND (e.g. 0.0.0.0) AND MAILROOM_API_TOKEN, and set
-# SANDBOX_ALLOW_UNAUTH=0 so the app's own bind policy refuses to start without
-# the token. `scripts/sandbox.sh up --expose` does all three. See
+# use `scripts/sandbox.sh up --expose` with MAILROOM_API_TOKEN. The helper
+# rejects a non-loopback SANDBOX_BIND without --expose and sets
+# SANDBOX_ALLOW_UNAUTH=0. Direct compose users must set all three explicitly. See
 # docs/SANDBOX_SERVER.md.
 name: mailroom-sandbox
 

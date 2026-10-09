@@ -61,8 +61,6 @@ def test_script_is_executable_and_parses():
 
 
 def test_expose_without_token_refuses(monkeypatch):
-    if shutil.which("docker") is None:
-        pytest.skip("docker CLI not available")
     env = {k: v for k, v in os.environ.items() if k != "MAILROOM_API_TOKEN"}
     res = subprocess.run(
         [str(SCRIPT), "up", "--expose"],
@@ -85,3 +83,54 @@ def test_compose_config_validates():
     if "is not a docker command" in res.stderr or "unknown shorthand" in res.stderr:
         pytest.skip("docker compose plugin not available")
     assert res.returncode == 0, res.stderr
+
+
+@pytest.mark.parametrize(
+    ("bind", "expose", "token", "allowed"),
+    [
+        (None, False, "", True),
+        ("127.0.0.1", False, "", True),
+        ("127.10.20.30", False, "", True),
+        ("[::1]", False, "", True),
+        ("0.0.0.0", False, "", False),
+        ("0.0.0.0", False, "test-token", False),
+        ("192.0.2.1", False, "test-token", False),
+        ("::", False, "test-token", False),
+        ("127.0.0.999", False, "", False),
+        ("0.0.0.0", True, "", False),
+        ("0.0.0.0", True, "   ", False),
+        (None, True, "test-token", True),
+        ("192.0.2.1", True, "test-token", True),
+    ],
+)
+def test_startup_bind_policy(tmp_path, bind, expose, token, allowed):
+    docker = tmp_path / "docker"
+    docker.write_text(
+        "#!/bin/bash\n"
+        'if [[ "$*" == *"up -d --build"* ]]; then\n'
+        '  echo "started:${SANDBOX_BIND:-127.0.0.1}:${SANDBOX_ALLOW_UNAUTH:-1}"\n'
+        "fi\n"
+    )
+    docker.chmod(0o755)
+    env = dict(
+        os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}", MAILROOM_API_TOKEN=token
+    )
+    env.pop("SANDBOX_BIND", None)
+    # Explicit exposure must override an inherited opt-out.
+    env["SANDBOX_ALLOW_UNAUTH"] = "1"
+    if bind is not None:
+        env["SANDBOX_BIND"] = bind
+    res = subprocess.run(
+        [str(SCRIPT), "up", *(["--expose"] if expose else [])],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert (res.returncode == 0) == allowed, res.stderr
+    if allowed:
+        expected_bind = bind or ("0.0.0.0" if expose else "127.0.0.1")
+        assert f"started:{expected_bind}:{0 if expose else 1}" in res.stdout
+    else:
+        assert "started:" not in res.stdout
+        assert "MAILROOM_API_TOKEN" in res.stderr
