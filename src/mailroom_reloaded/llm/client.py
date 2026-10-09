@@ -222,7 +222,11 @@ def price_role(role: str) -> str:
 
 
 def cost_for(role: str, usage: Usage) -> float:
-    """USD cost of ``usage`` at ``role``'s model price (0.0 for an unknown or unpriced role)."""
+    """USD cost of ``usage`` at ``role``'s model price (0.0 for an unknown or unpriced role).
+
+    The eval grader uses the judge's model. Configuration and pricing errors
+    are caught and also return 0.0.
+    """
     try:
         model = load_taxonomy().agent(price_role(role)).model
         return _token_cost(model, usage.prompt_tokens, usage.completion_tokens)
@@ -260,7 +264,9 @@ def record_usage(role: str, usage: Usage) -> None:
     """Emit the LLM metrics for usage that did not go through :func:`call_structured`.
 
     Used by the CrewAI-routed roles (judge, arbiter, boss, eval grader). The
-    grader is labelled with the judge's model. Never raises.
+    grader is labeled with the judge's model. Empty usage is ignored; call counts
+    are used as reported and no duration is recorded. Model resolution and metric
+    emission errors are caught.
     """
     if usage == Usage():
         return
@@ -274,7 +280,12 @@ def record_usage(role: str, usage: Usage) -> None:
 def record_crew_usage(
     role: str, result: Any, sink: list[tuple[str, Usage]] | None = None
 ) -> Usage:
-    """Capture a CrewAI ``CrewOutput.token_usage``: metrics now, ``(role, usage)`` into ``sink``."""
+    """Return usage from a CrewAI result, append it to ``sink`` and emit LLM metrics.
+
+    A supplied sink receives ``(role, usage)`` even when missing ``token_usage``
+    yields zero usage. Usage conversion errors propagate; metric emission
+    errors are caught by :func:`record_usage`.
+    """
     usage = usage_from_crew(getattr(result, "token_usage", None))
     if sink is not None:
         sink.append((role, usage))

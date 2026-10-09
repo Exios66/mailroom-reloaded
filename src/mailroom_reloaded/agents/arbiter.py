@@ -35,7 +35,12 @@ def arbitrate(
     verdict: JudgeVerdict,
     ctx: ToolContext,
 ) -> ArbiterDecision:
-    """Decide the least destructive sufficient action after a judge finding."""
+    """Decide the least destructive sufficient action after a judge finding.
+
+    Append reported arbiter usage to ``ctx.usage_sink`` and emit LLM metrics
+    before validating the decision. Configuration, crew execution, usage
+    conversion and output validation errors propagate to the caller.
+    """
     tools = tools_for(ROLE, ctx)
     description = (
         f"Document type: {doc_type}\n\n"
