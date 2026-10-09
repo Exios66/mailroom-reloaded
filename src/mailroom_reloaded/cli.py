@@ -50,8 +50,12 @@ def listen_port() -> int:
 
 @app.command()
 def serve(
-    host: str = typer.Option(None, "--host", help="Bind host (default MAILROOM_API_HOST)."),
-    port: int = typer.Option(None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."),
+    host: str = typer.Option(
+        None, "--host", help="Bind host (default MAILROOM_API_HOST)."
+    ),
+    port: int = typer.Option(
+        None, "--port", help="Bind port (default MAILROOM_API_PORT/PORT)."
+    ),
     watch: bool = typer.Option(
         True, "--watch/--no-watch", help="Run the embedded inbox watcher with the API."
     ),
@@ -116,7 +120,9 @@ def eval(
     prompt_set: str = typer.Option("frozen_v1", "--prompt-set"),
     merger_mode: str = typer.Option("frozen", "--merger-mode"),
     mode: str = typer.Option("pipeline", "--mode", help="pipeline | specialist_cell"),
-    judge_sample_rate: float = typer.Option(1.0, "--judge-sample-rate", min=0.0, max=1.0),
+    judge_sample_rate: float = typer.Option(
+        1.0, "--judge-sample-rate", min=0.0, max=1.0
+    ),
     split: str = typer.Option("test", "--split"),
     local_dir: Path = typer.Option(None, "--local-dir", exists=True, file_okay=False),
     gpu_usd_per_hour: float = typer.Option(0.80, "--gpu-usd-per-hour"),
@@ -147,8 +153,14 @@ def eval(
 
 @app.command("train-gate")
 def train_gate_command(
-    rows: Path = typer.Option(..., "--rows", exists=True, dir_okay=False, readable=True,
-                             help="JSONL feature rows (eval_docs echoes)."),
+    rows: Path = typer.Option(
+        ...,
+        "--rows",
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        help="JSONL feature rows (eval_docs echoes).",
+    ),
     out: Path = typer.Option(Path("models/route_gate.json"), "--out"),
     calibration: bool = typer.Option(
         False, "--calibration", help="Fit temperature calibration instead of the gate."
@@ -213,7 +225,9 @@ def card(
 @app.command(name="conformance")
 def conformance(
     provider: str = typer.Option(
-        "", "--provider", help="Provider to conformance-test (default: configured provider)."
+        "",
+        "--provider",
+        help="Provider to conformance-test (default: configured provider).",
     ),
     per_class: int = typer.Option(2, "--per-class", min=1),
     revision: str = typer.Option("ed7576b6", "--revision"),
@@ -237,13 +251,151 @@ def conformance(
             {
                 "provider": card.provider,
                 "model": card.model,
-                "roles": {
-                    role: stats.to_dict() for role, stats in card.roles.items()
-                },
+                "roles": {role: stats.to_dict() for role, stats in card.roles.items()},
                 "out": str(out),
             }
         )
     )
+
+
+audit_app = typer.Typer(
+    name="audit",
+    help="Archive ledger: verify the hash chain, anchor its head off-host, export the head.",
+    no_args_is_help=True,
+)
+app.add_typer(audit_app, name="audit")
+
+
+def _short(h: str | None) -> str:
+    """First 12 hex characters of a hash, or ``-``."""
+    return (h or "-")[:12]
+
+
+@audit_app.command("verify")
+def audit_verify(
+    run: str = typer.Option(
+        None, "--run", help="Verify one run instead of the whole ledger."
+    ),
+    external: bool = typer.Option(
+        False, "--external", help="Also compare the head with the external anchor."
+    ),
+) -> None:
+    """Verify the ledger chain (and with ``--external`` the anchor).
+
+    Exit codes: 0 ok, 1 tamper (chain broken, TRUNCATED or REWRITTEN), 3 anchor store
+    unreachable, 4 anchor not configured, 5 STALE (entries unanchored for over 24 h).
+    Code 2 is left to the CLI's own usage errors.
+    """
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    ledger = get_ledger()
+    verdict = ledger.verify(run)
+    if not verdict.ok:
+        where = f" at {verdict.broken_at}" if verdict.broken_at is not None else ""
+        typer.echo(f"chain: broken{where} ({verdict.detail or 'invalid'})")
+        raise typer.Exit(anchor.EXIT_TAMPER)
+    merkle = (
+        ""
+        if verdict.merkle_ok is None
+        else (", merkle ok" if verdict.merkle_ok else ", merkle BAD")
+    )
+    typer.echo(
+        f"chain: ok ({verdict.count} entries, head {verdict.head_seq} {_short(verdict.head_hash)}{merkle})"
+    )
+    if not external:
+        return
+    try:
+        cfg = anchor.get_config()
+    except anchor.AnchorNotConfigured as exc:
+        typer.echo(f"anchor: not configured ({exc})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    if cfg.backend == "export":
+        typer.echo("anchor: export only; pin `mailroom audit export-head` off-host")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED)
+    try:
+        backend = anchor.make_backend(cfg)
+    except anchor.AnchorError as exc:
+        typer.echo(f"anchor: not configured ({cfg.redact(str(exc))})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    try:
+        result = anchor.verify_external(ledger, cfg, backend)
+    finally:
+        close = getattr(backend, "close", None)
+        if close:
+            close()
+    if result.key_file_warning:
+        typer.echo("warning: the anchor key file is world-readable")
+    detail = f": {cfg.redact(result.detail)}" if result.detail else ""
+    typer.echo(
+        f"anchor: {result.status.upper()} (anchored {result.anchored_seq}, local {result.local_seq}, "
+        f"{result.unanchored} unanchored){detail}"
+    )
+    raise typer.Exit(result.exit_code)
+
+
+@audit_app.command("anchor")
+def audit_anchor() -> None:
+    """Push the ledger head to the external anchor now (exit codes as for ``verify``)."""
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    try:
+        cfg = anchor.get_config()
+        backend = anchor.make_backend(cfg)
+    except anchor.AnchorError as exc:
+        typer.echo(f"anchor: not configured ({exc})")
+        raise typer.Exit(anchor.EXIT_NOT_CONFIGURED) from None
+    ledger = get_ledger()
+    try:
+        result = anchor.push_head(ledger, backend)
+    except anchor.AnchorConflict as exc:
+        typer.echo(f"anchor: {cfg.redact(str(exc))}")
+        raise typer.Exit(anchor.EXIT_TAMPER) from None
+    except anchor.AnchorError as exc:
+        typer.echo(f"anchor: unreachable ({cfg.redact(str(exc))})")
+        raise typer.Exit(anchor.EXIT_UNREACHABLE) from None
+    finally:
+        close = getattr(backend, "close", None)
+        if close:
+            close()
+    if result.status == "empty":
+        typer.echo("ledger empty; nothing to anchor")
+        return
+    if result.status == "pushed":
+        ledger.append(
+            "anchor",
+            "ledger",
+            payload={
+                "head": {"seq": result.seq, "entry_hash": result.entry_hash},
+                "count": result.seq,
+                "backend": cfg.backend,
+            },
+        )
+        ledger.flush()
+    typer.echo(f"anchor: {result.status} {result.seq} {_short(result.entry_hash)}")
+
+
+@audit_app.command("export-head")
+def audit_export_head(
+    out: Path = typer.Option(
+        None, "--out", "-o", help="Write the record here instead of stdout."
+    ),
+) -> None:
+    """Print the ledger head as JSON for off-host pinning (works with any anchor setting)."""
+    from mailroom_reloaded.storage import anchor
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    record = anchor.export_head(get_ledger())
+    if record is None:
+        typer.echo("ledger empty")
+        return
+    text = json.dumps(record, sort_keys=True)
+    if out is not None:
+        out.write_text(text + "\n", encoding="utf-8")
+        typer.echo(str(out))
+    else:
+        typer.echo(text)
 
 
 jev_app = typer.Typer(
@@ -268,7 +420,9 @@ def _jev_off() -> None:
 def decide(
     state: str = typer.Option(..., "--state", help="State text/prompt passed to Jev."),
     question_type: str = typer.Option(..., "--type", help="choice | noul | score."),
-    instructions: str = typer.Option(..., "--instructions", help="Question instructions."),
+    instructions: str = typer.Option(
+        ..., "--instructions", help="Question instructions."
+    ),
     criteria: list[str] = typer.Option(
         None, "--criteria", help="Repeatable KEY=DESCRIPTION (choice/noul)."
     ),

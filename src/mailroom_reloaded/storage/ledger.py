@@ -29,7 +29,7 @@ import json
 import math
 import threading
 from collections import deque
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -150,6 +150,7 @@ class Ledger:
         self._stop = False
         self._thread: threading.Thread | None = None
         # accessed by enqueuing threads under _cond; the writer under _cond too
+        self._commit_hooks: list[Callable[[set[str]], None]] = []
         self._dropped: dict[str, int] = {}
         self._overflow_gap: set[str] = set()
 
@@ -160,6 +161,10 @@ class Ledger:
         if self._engine is None:
             self._engine = get_engine()
         return self._engine
+
+    def add_commit_hook(self, hook: Callable[[set[str]], None]) -> None:
+        """Call ``hook(kinds)`` after each committed batch (on the writer thread; failures are logged)."""
+        self._commit_hooks.append(hook)
 
     # ------------------------------------------------------------------ writes
     def append(
@@ -290,6 +295,14 @@ class Ledger:
                 self._pending_rows -= sum(len(i.rows) for i in batch)
                 self._done += len(batch)
                 self._cond.notify_all()
+            self._run_hooks({i.kind for i in batch if i.kind})
+
+    def _run_hooks(self, kinds: set[str]) -> None:
+        for hook in list(self._commit_hooks):
+            try:
+                hook(kinds)
+            except Exception:
+                logger.warning("ledger_commit_hook_failed", exc_info=True)
 
     def _shed_metrics(self, batch: list[_Item]) -> list[_Item]:
         """After repeated write failures drop the batch's metric rows (never chain entries).
@@ -461,7 +474,11 @@ class Ledger:
 
     def count(self, kind: str, run_id: str, doc_id: str | None = None) -> int:
         """Committed entries of ``kind`` for a run (and optionally one document)."""
-        q = select(func.count()).select_from(_t).where(_t.c.kind == kind, _t.c.run_id == run_id)
+        q = (
+            select(func.count())
+            .select_from(_t)
+            .where(_t.c.kind == kind, _t.c.run_id == run_id)
+        )
         if doc_id is not None:
             q = q.where(_t.c.doc_id == doc_id)
         with self.engine.connect() as conn:
@@ -477,7 +494,11 @@ class Ledger:
         )
         with self.engine.connect() as conn:
             rows = conn.execute(q).all()
-        return [r.run_id for r in rows if kind is None or json.loads(r.payload).get("kind") == kind]
+        return [
+            r.run_id
+            for r in rows
+            if kind is None or json.loads(r.payload).get("kind") == kind
+        ]
 
     def entries(
         self,
@@ -687,6 +708,11 @@ def get_ledger() -> Ledger:
         if _default is None:
             _default = Ledger(engine)
             atexit.register(_default.close)
+            from mailroom_reloaded.storage import (
+                anchor,  # lazy: the anchor imports the ledger types
+            )
+
+            anchor.install(_default)
         return _default
 
 
