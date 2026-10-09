@@ -20,6 +20,7 @@ runner = CliRunner()
 
 
 def invoke(*args):
+    """Run a sandbox content command with arguments converted to strings."""
     return runner.invoke(cli.app, ["sandbox", "content", *map(str, args)])
 
 
@@ -30,6 +31,7 @@ def invoke(*args):
     ["--from-dir", "content", "--from-bundle", "bundle", "--url", "https://example.invalid/a"],
 ])
 def test_pull_requires_exactly_one_source(tmp_path, sources):
+    """Reject missing or conflicting pull sources before creating the destination."""
     dest = tmp_path / "out"
     result = invoke("pull", *sources, "--dest", dest)
     assert result.exit_code == 1
@@ -38,6 +40,7 @@ def test_pull_requires_exactly_one_source(tmp_path, sources):
 
 
 def test_pull_from_directory_replaces_destination(content_dir, lock_path, tmp_path):
+    """Replace stale destination files with the complete accepted source directory."""
     dest = tmp_path / "out"
     dest.mkdir()
     (dest / "stale").write_text("old")
@@ -55,6 +58,7 @@ def test_pull_from_directory_replaces_destination(content_dir, lock_path, tmp_pa
     (None, "content.json"),
 ])
 def test_pull_rejection_preserves_existing_destination(content_dir, lock_path, tmp_path, metadata, message):
+    """Preserve existing content when source metadata is missing or incompatible."""
     path = content_dir / "content.json"
     if metadata is None:
         path.unlink()
@@ -71,6 +75,7 @@ def test_pull_rejection_preserves_existing_destination(content_dir, lock_path, t
 
 
 def test_url_pull_without_opt_in_never_calls_fetch(monkeypatch, lock_path, tmp_path):
+    """Require explicit network permission before attempting a URL download."""
     fetch = Mock(side_effect=AssertionError("network access attempted"))
     monkeypatch.setattr(content_cli.bundle_mod, "fetch_url", fetch)
     dest = tmp_path / "out"
@@ -85,6 +90,7 @@ def test_url_pull_without_opt_in_never_calls_fetch(monkeypatch, lock_path, tmp_p
 def test_opted_in_download_is_verified_before_extraction(
     monkeypatch, make_bundle, content_lock, lock_path, tmp_path, tamper,
 ):
+    """Extract an opted-in download only when its bytes match the pinned digest."""
     meta = {"version": "0.5.0", "schema_version": "2.0"}
     archive = make_bundle([("content.json", json.dumps(meta).encode())])
     replace(content_lock, bundle_sha256=sha256_file(archive)).write(lock_path)
@@ -94,6 +100,7 @@ def test_opted_in_download_is_verified_before_extraction(
     monkeypatch.setattr(content_cli.tempfile, "mkdtemp", lambda: str(download_dir))
 
     def fetch(url, out):
+        """Simulate the expected URL download by writing the prepared bundle bytes."""
         assert url == "https://example.invalid/bundle"
         out.write_bytes(payload)
         return out
@@ -114,6 +121,7 @@ def test_opted_in_download_is_verified_before_extraction(
 
 
 def test_validate_reports_schema_diagnostics(content_dir):
+    """Report invalid document paths and schema errors through the CLI."""
     (content_dir / "gen/specs/vendor.yaml").write_text("{}")
     result = invoke("validate", content_dir)
     assert result.exit_code == 1
@@ -124,6 +132,7 @@ def test_validate_reports_schema_diagnostics(content_dir):
 
 @pytest.mark.parametrize("command", ["validate", "build"])
 def test_missing_content_produces_cli_error(tmp_path, command):
+    """Report missing content metadata for both validation and build commands."""
     path = tmp_path / "missing"
     args = [path] if command == "validate" else ["--from-dir", path]
     result = invoke(command, *args)
@@ -132,6 +141,7 @@ def test_missing_content_produces_cli_error(tmp_path, command):
 
 
 def test_status_reports_mismatched_smoke_version(content_lock, lock_path):
+    """Report a version mismatch while retaining valid smoke fixture status."""
     replace(content_lock, tag="v9.9.9").write(lock_path)
     result = invoke("status", "--lock", lock_path)
     assert result.exit_code == 0, result.output
@@ -143,6 +153,7 @@ def test_status_reports_mismatched_smoke_version(content_lock, lock_path):
 
 
 def test_status_missing_lock_is_actionable(tmp_path):
+    """Report an unreadable lock file as a CLI failure."""
     result = invoke("status", "--lock", tmp_path / "missing")
     assert result.exit_code == 1
     assert "cannot read lock" in result.stderr
@@ -152,6 +163,7 @@ def test_status_missing_lock_is_actionable(tmp_path):
 def test_build_preconditions_do_not_run_exporter_or_replace_output(
     monkeypatch, content_dir, tmp_path, failure,
 ):
+    """Preserve output and avoid exporter execution when build prerequisites fail."""
     if failure == "invalid-content":
         (content_dir / "dist/registry.yaml").unlink()
     run = Mock(side_effect=AssertionError("exporter must not run"))
@@ -169,6 +181,7 @@ def test_build_preconditions_do_not_run_exporter_or_replace_output(
 
 @pytest.mark.parametrize("outcome", ["success", "stderr", "stdout", "invalid-smoke"])
 def test_build_validates_export_before_replacing_output(monkeypatch, content_dir, tmp_path, outcome):
+    """Publish only valid staged exports and clean up staging after every outcome."""
     tool = content_dir / "tools/export_smoke.py"
     tool.parent.mkdir()
     tool.touch()
@@ -178,6 +191,7 @@ def test_build_validates_export_before_replacing_output(monkeypatch, content_dir
     staged_paths = []
 
     def run(argv, **kwargs):
+        """Check exporter arguments and simulate success, process failure, or invalid output."""
         assert argv[:5] == [sys.executable, "-I", str(tool), "--root", str(content_dir)]
         assert argv[5] == "--out"
         assert kwargs == {"capture_output": True, "text": True, "check": False}
@@ -211,6 +225,7 @@ def test_build_validates_export_before_replacing_output(monkeypatch, content_dir
 
 
 def test_bump_preserves_repository_and_pins_bundle_metadata(make_bundle, content_lock, lock_path):
+    """Retain the repository while updating the lock from bundle metadata and CLI inputs."""
     meta = {"version": "0.6.0", "schema_version": "2.1", "dataset_revision": "next"}
     archive = make_bundle([("content.json", json.dumps(meta).encode())])
     result = invoke("bump", "--bundle", archive, "--tag", "v0.6.0", "--commit", "1234567",
@@ -226,6 +241,7 @@ def test_bump_preserves_repository_and_pins_bundle_metadata(make_bundle, content
     ({"schema_version": "2.0"}, "dataset_revision"),
 ])
 def test_failed_bump_preserves_existing_lock(make_bundle, lock_path, meta, message):
+    """Preserve the lock when bundle metadata is incompatible or incomplete."""
     original = lock_path.read_bytes()
     archive = make_bundle([("content.json", json.dumps(meta).encode())])
     result = invoke("bump", "--bundle", archive, "--tag", "v0.6.0", "--commit", "1234567",

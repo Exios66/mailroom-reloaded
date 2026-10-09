@@ -15,6 +15,7 @@ EXAMPLES = Path(__file__).parent / "examples"
 
 @pytest.fixture
 def content_dir(tmp_path):
+    """Create a valid content pack with one example of each document kind."""
     root = tmp_path / "content"
     root.mkdir()
     (root / "content.json").write_text(json.dumps({
@@ -34,11 +35,13 @@ def content_dir(tmp_path):
 
 @pytest.fixture
 def content_lock():
+    """Return a synthetic content pin for local bundle and CLI tests."""
     return ContentLock("example/content", "v0.5.0", "abcdef0", "a" * 64, "2.0", "test-revision")
 
 
 @pytest.fixture
 def lock_path(tmp_path, content_lock):
+    """Write the synthetic pin to a temporary lock file and return its path."""
     path = tmp_path / "content.lock"
     content_lock.write(path)
     return path
@@ -50,6 +53,7 @@ def make_bundle(tmp_path):
     zstandard = pytest.importorskip("zstandard")
 
     def make(members):
+        """Write the supplied tar members and payloads to a temporary Zstandard bundle."""
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as archive:
             for member, payload in members:

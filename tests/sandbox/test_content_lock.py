@@ -11,6 +11,7 @@ from mailroom_reloaded.sandbox.content.lock import ContentLock, LockError, sha25
 
 @pytest.mark.parametrize("sha", ["", "a" * 63, "a" * 65, "A" * 64, "g" * 64])
 def test_invalid_digest_cannot_overwrite_lock(content_lock, lock_path, sha):
+    """Reject malformed digests before overwriting an existing lock."""
     original = lock_path.read_bytes()
     with pytest.raises(LockError, match="64 lowercase hex"):
         replace(content_lock, bundle_sha256=sha).write(lock_path)
@@ -19,12 +20,14 @@ def test_invalid_digest_cannot_overwrite_lock(content_lock, lock_path, sha):
 
 @pytest.mark.parametrize("length", [6, 41])
 def test_commit_length_outside_limits_is_rejected(content_lock, length):
+    """Reject commit identifiers shorter than seven or longer than forty characters."""
     with pytest.raises(LockError, match="7-40 char sha"):
         replace(content_lock, commit="a" * length).validate()
 
 
 @pytest.mark.parametrize("length", [7, 40])
 def test_commit_length_boundaries_roundtrip(content_lock, tmp_path, length):
+    """Round-trip locks with commit identifiers at both accepted length boundaries."""
     lock = replace(content_lock, commit="a" * length)
     path = tmp_path / "pin"
     lock.write(path)
@@ -37,6 +40,7 @@ def test_commit_length_boundaries_roundtrip(content_lock, tmp_path, length):
     reason="ContentLock.write leaves numeric digests unquoted; YAML drops leading zeros on read",
 )
 def test_numeric_digest_roundtrip_preserves_leading_zeros(content_lock, tmp_path):
+    """Document the known round-trip failure for an unquoted all-zero digest."""
     lock = replace(content_lock, bundle_sha256="0" * 64)
     path = tmp_path / "pin"
     lock.write(path)
@@ -47,6 +51,7 @@ def test_numeric_digest_roundtrip_preserves_leading_zeros(content_lock, tmp_path
     "repo", "tag", "commit", "bundle_sha256", "schema_version", "dataset_revision",
 ])
 def test_each_lock_field_is_required(content_lock, tmp_path, field):
+    """Report each required lock field when it is omitted."""
     data = asdict(content_lock)
     del data[field]
     path = tmp_path / "pin"
@@ -56,6 +61,7 @@ def test_each_lock_field_is_required(content_lock, tmp_path, field):
 
 
 def test_unknown_lock_fields_are_rejected(content_lock, tmp_path):
+    """Reject unexpected fields in a lock file."""
     path = tmp_path / "pin"
     path.write_text(yaml.safe_dump({**asdict(content_lock), "branch": "main"}))
     with pytest.raises(LockError, match="unexpected \\['branch'\\]"):
@@ -66,6 +72,7 @@ def test_unknown_lock_fields_are_rejected(content_lock, tmp_path):
     (None, "cannot read lock"), ("repo: [", "cannot read lock"), ("", "lock fields"),
 ])
 def test_unreadable_malformed_or_empty_lock(tmp_path, contents, message):
+    """Report missing files, invalid YAML, and empty lock contents as lock errors."""
     path = tmp_path / "pin"
     if contents is not None:
         path.write_text(contents)
@@ -74,6 +81,7 @@ def test_unreadable_malformed_or_empty_lock(tmp_path, contents, message):
 
 
 def test_read_normalizes_yaml_numeric_metadata(content_lock, tmp_path):
+    """Convert YAML numeric schema and dataset metadata to strings on read."""
     data = {**asdict(content_lock), "schema_version": 2.0, "dataset_revision": 123}
     path = tmp_path / "pin"
     path.write_text(yaml.safe_dump(data))
@@ -83,6 +91,7 @@ def test_read_normalizes_yaml_numeric_metadata(content_lock, tmp_path):
 
 
 def test_read_validates_digest(content_lock, tmp_path):
+    """Reject a malformed digest while reading an otherwise complete lock."""
     path = tmp_path / "pin"
     path.write_text(yaml.safe_dump({**asdict(content_lock), "bundle_sha256": "bad"}))
     with pytest.raises(LockError, match="64 lowercase hex"):
@@ -91,6 +100,7 @@ def test_read_validates_digest(content_lock, tmp_path):
 
 @pytest.mark.parametrize("size", [0, 1 << 20, (1 << 20) + 17])
 def test_sha256_includes_bytes_across_chunk_boundary(tmp_path, size):
+    """Hash empty files and payloads at or beyond the streaming chunk boundary."""
     payload = (b"0123456789abcdef" * (size // 16 + 1))[:size]
     path = tmp_path / "bundle"
     path.write_bytes(payload)

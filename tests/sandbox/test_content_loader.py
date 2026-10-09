@@ -26,7 +26,9 @@ runner = CliRunner()
 
 @pytest.fixture
 def no_network(monkeypatch):
+    """Fail immediately if a test attempts socket connection or name resolution."""
     def boom(*a, **k):
+        """Reject a patched socket operation as unexpected network access."""
         raise AssertionError("network access attempted")
     monkeypatch.setattr(socket.socket, "connect", boom)
     monkeypatch.setattr(socket, "create_connection", boom)
@@ -34,6 +36,7 @@ def no_network(monkeypatch):
 
 
 def test_smoke_loads_with_zero_network(no_network):
+    """Load and validate the six committed smoke scenarios without network access."""
     cs = load_content(SMOKE_DIR, strict=True)
     assert cs.kind == "smoke" and cs.report.ok
     assert len(cs.scenarios) == 6 and cs.registry["clients"]
@@ -41,10 +44,12 @@ def test_smoke_loads_with_zero_network(no_network):
 
 
 def test_smoke_budget():
+    """Keep the committed smoke fixture files within the two MiB size budget."""
     assert sum(p.stat().st_size for p in SMOKE_DIR.rglob("*") if p.is_file()) <= 2 * 1024 * 1024
 
 
 def test_tampered_smoke_detected(tmp_path):
+    """Report a manifest digest mismatch after modifying a smoke template."""
     import shutil
     d = tmp_path / "s"
     shutil.copytree(SMOKE_DIR, d)
@@ -53,6 +58,7 @@ def test_tampered_smoke_detected(tmp_path):
 
 
 def test_seeded_lock():
+    """Verify the committed lock identifies the expected smoke content release."""
     lock = ContentLock.read(ROOT / "sandbox" / "content.lock")
     assert lock.tag == "v0.5.0" and lock.commit.startswith("f650cfd")
     assert lock.bundle_sha256.startswith("7a32e86e") and lock.schema_version == "2.0"
@@ -60,6 +66,7 @@ def test_seeded_lock():
 
 
 def test_lock_roundtrip_and_bad_fields(tmp_path):
+    """Round-trip the committed lock and reject a lock missing required fields."""
     lock = ContentLock.read(ROOT / "sandbox" / "content.lock")
     p = tmp_path / "l"
     lock.write(p)
@@ -70,6 +77,7 @@ def test_lock_roundtrip_and_bad_fields(tmp_path):
 
 
 def test_verify_bundle(tmp_path):
+    """Accept matching bundle bytes and reject a mismatched pinned digest."""
     b = tmp_path / "b.bin"
     b.write_bytes(b"hello")
     good = ContentLock("r", "v1", "abcdef0", hashlib.sha256(b"hello").hexdigest(), "2.0", "x")
@@ -80,6 +88,7 @@ def test_verify_bundle(tmp_path):
 
 
 def test_compat():
+    """Accept inclusive code version bounds and reject incompatible schemas or versions."""
     meta = {"schema_version": "2.0", "min_code_version": "0.2.0", "max_code_version": "0.3.0"}
     check_compat(meta, code="0.2.0")
     check_compat(meta, code="0.3.0")
@@ -92,6 +101,7 @@ def test_compat():
 
 
 def test_cli_status_and_validate():
+    """Confirm the seeded lock matches smoke content and CLI validation succeeds."""
     r = runner.invoke(cli.app, ["sandbox", "content", "status", "--lock", str(ROOT / "sandbox/content.lock")])
     assert r.exit_code == 0, r.output
     assert json.loads(r.output)["smoke_matches_lock"] is True
@@ -100,12 +110,14 @@ def test_cli_status_and_validate():
 
 
 def test_pull_url_requires_flag(tmp_path):
+    """Reject URL pulls without explicit network permission."""
     r = runner.invoke(cli.app, ["sandbox", "content", "pull", "--url", "https://x/y",
                                 "--lock", str(ROOT / "sandbox/content.lock"), "--dest", str(tmp_path / "d")])
     assert r.exit_code == 1
 
 
 def _bundle(tmp_path, meta):
+    """Return a temporary Zstandard tar bundle containing the supplied content metadata."""
     zstandard = pytest.importorskip("zstandard")
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tf:
@@ -119,6 +131,7 @@ def _bundle(tmp_path, meta):
 
 
 def test_bump_then_pull_bundle(tmp_path):
+    """Pin and pull a local bundle, then reject the same bundle after tampering."""
     meta = {"schema_version": "2.0", "dataset_revision": "abc", "version": "9.9.9",
             "min_code_version": "0.2.0", "max_code_version": "0.3.0"}
     b = _bundle(tmp_path, meta)

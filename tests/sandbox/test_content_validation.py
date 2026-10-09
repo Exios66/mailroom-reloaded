@@ -11,6 +11,7 @@ from mailroom_reloaded.sandbox.content import CompatError, load_content, loader
 
 
 def test_full_content_layout_loads_each_document_kind(content_dir):
+    """Load and validate registry, scenario, persona, and generation specification examples."""
     content = load_content(str(content_dir), strict=True)
     assert content.root == content_dir
     assert content.kind == "content"
@@ -24,6 +25,7 @@ def test_full_content_layout_loads_each_document_kind(content_dir):
 
 
 def test_optional_content_directories_can_be_absent(content_dir):
+    """Accept a valid registry when optional document directories are absent."""
     for name in ("scenarios", "personas", "gen"):
         shutil.rmtree(content_dir / name)
     content = load_content(content_dir, strict=True)
@@ -32,11 +34,13 @@ def test_optional_content_directories_can_be_absent(content_dir):
 
 
 def test_content_metadata_takes_precedence_over_smoke_manifest(content_dir):
+    """Select the full content layout when both metadata files are present."""
     (content_dir / "manifest.json").write_text('{"schema": "unknown"}')
     assert load_content(content_dir, strict=True).kind == "content"
 
 
 def test_loader_collects_schema_errors_with_file_and_field_paths(content_dir):
+    """Collect document diagnostics and include them in strict validation failures."""
     bad = {
         "scenarios/A/A1_status_inquiry.yaml": ("profile", "unknown"),
         "personas/behavior/biller.yaml": ("persona_id", "invalid"),
@@ -62,6 +66,7 @@ def test_loader_collects_schema_errors_with_file_and_field_paths(content_dir):
 
 @pytest.mark.parametrize("registry", [None, "", "{}"])
 def test_missing_or_empty_registry_reports_error(content_dir, registry):
+    """Report absent or empty registries and reject them in strict mode."""
     path = content_dir / "dist/registry.yaml"
     if registry is None:
         path.unlink()
@@ -74,11 +79,13 @@ def test_missing_or_empty_registry_reports_error(content_dir, registry):
 
 
 def test_unknown_layout_is_rejected(tmp_path):
+    """Reject directories with neither supported metadata file."""
     with pytest.raises(FileNotFoundError, match="neither content.json nor manifest.json"):
         load_content(tmp_path)
 
 
 def test_incompatible_content_is_rejected_before_reading_documents(content_dir):
+    """Check content compatibility before attempting to parse document files."""
     (content_dir / "content.json").write_text('{"schema_version": "3.0"}')
     (content_dir / "dist/registry.yaml").write_text("[")
     with pytest.raises(CompatError, match="schema major 3"):
@@ -90,12 +97,14 @@ def test_incompatible_content_is_rejected_before_reading_documents(content_dir):
     ({"schema": "mailroom.smoke_export/v1", "schema_version": "3.0"}, "smoke schema major"),
 ])
 def test_incompatible_smoke_manifest(tmp_path, metadata, message):
+    """Reject unsupported smoke manifest formats and schema major versions."""
     (tmp_path / "manifest.json").write_text(json.dumps(metadata))
     with pytest.raises(CompatError, match=message):
         load_content(tmp_path)
 
 
 def test_manifest_collects_missing_and_tampered_files(tmp_path):
+    """Report both missing files and digest mismatches from the smoke manifest."""
     root = tmp_path / "smoke"
     shutil.copytree(loader.SMOKE_DIR, root)
     (root / "templates/status_inquiry.j2").unlink()
@@ -108,6 +117,7 @@ def test_manifest_collects_missing_and_tampered_files(tmp_path):
 
 
 def test_smoke_generation_specs_use_gen_directory(tmp_path):
+    """Load smoke generation specifications directly from the gen directory."""
     root = tmp_path / "smoke"
     shutil.copytree(loader.SMOKE_DIR, root)
     (root / "gen").mkdir()
@@ -117,6 +127,7 @@ def test_smoke_generation_specs_use_gen_directory(tmp_path):
 
 
 def test_packaged_schemas_are_found_without_source_checkout(tmp_path, monkeypatch):
+    """Locate schemas relative to the installed package without a source tree."""
     module = tmp_path / "site-packages/mailroom_reloaded/sandbox/content/loader.py"
     schemas = module.parents[1] / "schemas"
     schemas.mkdir(parents=True)
@@ -126,6 +137,7 @@ def test_packaged_schemas_are_found_without_source_checkout(tmp_path, monkeypatc
 
 
 def test_missing_schemas_has_actionable_error(tmp_path, monkeypatch):
+    """Report when schemas are unavailable in both source and package locations."""
     module = tmp_path / "site-packages/mailroom_reloaded/sandbox/content/loader.py"
     monkeypatch.setattr(loader, "__file__", str(module))
     with pytest.raises(FileNotFoundError, match="schemas/ not found"):
