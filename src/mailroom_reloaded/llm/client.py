@@ -222,7 +222,11 @@ def price_role(role: str) -> str:
 
 
 def cost_for(role: str, usage: Usage) -> float:
-    """USD cost of ``usage`` at ``role``'s model price (0.0 for an unknown or unpriced role)."""
+    """USD cost of ``usage`` at ``role``'s model price (0.0 for an unknown or unpriced role).
+
+    The eval grader uses the judge's model. Configuration and pricing errors
+    are caught and also return 0.0.
+    """
     try:
         model = load_taxonomy().agent(price_role(role)).model
         return _token_cost(model, usage.prompt_tokens, usage.completion_tokens)
@@ -260,7 +264,9 @@ def record_usage(role: str, usage: Usage) -> None:
     """Emit the LLM metrics for usage that did not go through :func:`call_structured`.
 
     Used by the CrewAI-routed roles (judge, arbiter, boss, eval grader). The
-    grader is labelled with the judge's model. Never raises.
+    grader is labeled with the judge's model. Empty usage is ignored; call counts
+    are used as reported and no duration is recorded. Model resolution and metric
+    emission errors are caught.
     """
     if usage == Usage():
         return
@@ -274,7 +280,12 @@ def record_usage(role: str, usage: Usage) -> None:
 def record_crew_usage(
     role: str, result: Any, sink: list[tuple[str, Usage]] | None = None
 ) -> Usage:
-    """Capture a CrewAI ``CrewOutput.token_usage``: metrics now, ``(role, usage)`` into ``sink``."""
+    """Return usage from a CrewAI result, append it to ``sink`` and emit LLM metrics.
+
+    A supplied sink receives ``(role, usage)`` even when missing ``token_usage``
+    yields zero usage. Usage conversion errors propagate; metric emission
+    errors are caught by :func:`record_usage`.
+    """
     usage = usage_from_crew(getattr(result, "token_usage", None))
     if sink is not None:
         sink.append((role, usage))
@@ -295,10 +306,13 @@ def call_structured(
 ) -> LLMResult:
     """One structured completion (see :func:`_call_structured`), recorded as a ``mailroom.llm.<role>`` span.
 
-    The span carries the role, model, token counts and cost for the replay's generations
-    list and never message content. It is kind ``SPAN`` and uses ``mailroom.*`` attribute
+    Explicit span attributes carry the role, model, token counts and cost for the replay's
+    generations list without message content. It is kind ``SPAN`` and uses ``mailroom.*`` attribute
     names (not ``llm.token_count.*``) so a backend that sums LLM spans does not count a
     call twice next to the instrumentor's own span.
+
+    Returns the result from :func:`_call_structured` and propagates its errors,
+    including ``LengthFinishReasonError`` with the accumulated call usage.
     """
     tracer = trace.get_tracer("mailroom.llm")
     with tracer.start_as_current_span(f"mailroom.llm.{role}") as span:
@@ -329,7 +343,11 @@ def call_structured(
 def _annotate_llm_span(
     span: Any, role: str, usage: Usage | None, result: LLMResult | None = None
 ) -> None:
-    """Model, token and cost attributes for a ``mailroom.llm.<role>`` span (best effort)."""
+    """Add model, token and USD cost attributes, suppressing annotation errors.
+
+    With no ``usage``, only model and provider are recorded. With usage, a supplied
+    ``result`` adds tool-round, parse-success and uncapped-completion flags.
+    """
     try:
         r = resolve(role)
         span.set_attribute("mailroom.model", r.model)
@@ -366,9 +384,19 @@ def _call_structured(
     """One structured completion, with up to three tool rounds first.
 
     Two-phase protocol: tool rounds never carry ``response_format``; the final
-    turn carries the strict ``response_format`` (from ``response_format`` or the
-    extraction schema of ``schema_doc_type``) and, when tools were offered,
-    ``tool_choice="none"``. Raises ``LengthFinishReasonError`` on a length cap.
+    turn carries it when supplied explicitly or derived from the extraction
+    schema of ``schema_doc_type``. Only vLLM receives
+    ``tool_choice="none"``, when tool calling did not fall back to inlined results.
+    ``timeout`` is the SDK request timeout in seconds, not a whole-call deadline.
+    ``sampling`` overrides the role's defaults; logprobs are requested only when
+    the provider supports them.
+
+    Returns content, a parsed JSON object (or ``None`` if none can be parsed),
+    aggregate usage, finish reason, optional label logprob and tool-round count.
+    Emits usage metrics. Raises ``LengthFinishReasonError`` with accumulated
+    usage for a capped tool call or final answer. Unknown roles or extraction
+    schemas raise ``KeyError``; invalid provider configuration raises
+    ``ValueError``. Unhandled provider errors propagate after transport retries.
     """
     if response_format is None and schema_doc_type is not None:
         from mailroom_reloaded.schemas.extraction import response_format as _rf

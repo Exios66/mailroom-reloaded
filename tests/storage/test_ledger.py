@@ -582,3 +582,46 @@ def test_chain_entries_are_retried_past_five_failures(engine, monkeypatch) -> No
         assert [e.kind for e in lg.entries()] == ["pinned"] and calls["n"] == 9
     finally:
         lg.close()
+
+
+@pytest.mark.parametrize("separate_writer", [False, True])
+def test_run_lifecycle_is_enforced_in_the_write_transaction(
+    engine, separate_writer
+) -> None:
+    first = Ledger(engine)
+    second = Ledger(engine) if separate_writer else first
+    try:
+        first.append("run_opened", "r1", payload={"kind": "live"})
+        if separate_writer:
+            assert first.flush()
+        second.append("run_opened", "r1", payload={"kind": "live"})
+        _doc(second, "r1", 1)
+        second.append("run_closed", "r1", payload={"closed_by": "completed"})
+        if separate_writer:
+            assert second.flush()
+        first.append("run_opened", "r1", payload={"kind": "live"})
+        first.append(
+            "doc_closed",
+            "r1",
+            doc_id="late",
+            payload={"outcome": "completed"},
+            metrics=[MetricRow("late", 1)],
+        )
+        first.append("run_closed", "r1", payload={"closed_by": "completed"})
+        # Administrative records remain repeatable after the run closes.
+        for _ in range(2):
+            first.append("pinned", "r1", payload={"target": "r1", "actor": "tui"})
+        assert first.flush()
+        assert [e.kind for e in first.entries(run_id="r1")] == [
+            "run_opened",
+            "doc_closed",
+            "run_closed",
+            "pinned",
+            "pinned",
+        ]
+        assert first.metric_rows("r1") == []
+        assert first.verify("r1").ok
+    finally:
+        first.close()
+        if separate_writer:
+            second.close()

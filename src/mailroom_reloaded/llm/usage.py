@@ -57,7 +57,12 @@ def add_role_usage(by_role: RoleUsage, role: str, usage: Usage) -> None:
 
 
 def usage_from_crew(token_usage: Any) -> Usage:
-    """Convert a CrewAI ``token_usage`` object into a ``Usage`` (zeros when absent)."""
+    """Convert CrewAI token counts and ``successful_requests`` into usage.
+
+    Missing or false-valued attributes become zero; latency remains zero because
+    it is not reported here. Invalid integer conversions propagate ``TypeError``,
+    ``ValueError`` or ``OverflowError``.
+    """
     return Usage(
         prompt_tokens=int(getattr(token_usage, "prompt_tokens", 0) or 0),
         completion_tokens=int(getattr(token_usage, "completion_tokens", 0) or 0),

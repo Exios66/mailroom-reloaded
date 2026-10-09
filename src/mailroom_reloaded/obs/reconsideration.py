@@ -42,6 +42,10 @@ _DONE_STAGES = frozenset({"archived", "archive", "catalog", "report", "compile_r
 
 
 def _as_float(value: Any) -> float | None:
+    """Convert to float, returning ``None`` for booleans, nulls or invalid values.
+
+    Only ``TypeError`` and ``ValueError`` from conversion are suppressed.
+    """
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -51,6 +55,7 @@ def _as_float(value: Any) -> float | None:
 
 
 def _is_false(value: Any) -> bool:
+    """Recognize false, zero and stripped, case-insensitive false/no/off/0 strings."""
     if value is None:
         return False
     if isinstance(value, str):
@@ -59,6 +64,7 @@ def _is_false(value: Any) -> bool:
 
 
 def _is_true(value: Any) -> bool:
+    """Recognize true, one and stripped, case-insensitive true/yes/on/1 strings."""
     if value is None:
         return False
     if isinstance(value, str):
@@ -78,8 +84,12 @@ def collect_review_causes(
 ) -> list[str]:
     """Canonical cause tokens in stable order; empty when no objective miss is present.
 
-    ``verdict`` is the judge verdict token (``CORRECT`` / ``PARTIAL`` / ``MISS``);
-    ``floor`` is the class's low-confidence threshold.
+    ``verdict`` is the judge verdict token (``CORRECT`` / ``PARTIAL`` / ``MISS``).
+    Extraction scores, expected-field presence and completeness strictly below
+    ``floor`` add causes; equality does not. Class and subclass
+    labels are compared case-insensitively after stripping whitespace, only
+    when both labels are nonempty. Missing scores do not add causes; boolean
+    flags accept 0/1 and true/false, yes/no, on/off strings. Causes are unique.
     """
     scores = scores or {}
     causes: list[str] = []
@@ -131,5 +141,8 @@ def collect_review_causes(
 
 
 def should_reconsider(stage: str | None, causes: Iterable[str]) -> bool:
-    """True when a run looks finished but objective misses remain."""
+    """Return whether causes remain at archive, archived, catalog, report or compile_report.
+
+    Strip and lowercase ``stage`` for comparison; consume ``causes`` in full.
+    """
     return bool(list(causes)) and (stage or "").strip().lower() in _DONE_STAGES

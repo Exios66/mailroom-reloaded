@@ -146,12 +146,19 @@ def _fail(
     pages: int = 0,
     usage: Usage | None = None,
 ) -> IngestResult:
+    """Return an empty-text failure result, preserving supplied metadata and usage."""
     logger.warning("ingest_failed", error=error)
     return IngestResult("", method, pages, stats or {}, {}, error, usage or Usage())  # type: ignore[arg-type]
 
 
 def ingest(path: Path) -> IngestResult:
-    """Read ``path`` to clerk-normalised text. Never raises; failures set ``error``."""
+    """Read a text file or PDF and return clerk-normalized text and ingest metadata.
+
+    PDFs without extractable text use vision transcription. Read, PDF extraction
+    and transcription failures, unsupported suffixes and empty normalized text
+    produce a result with ``error`` set. Reported vision usage is retained even
+    if a later page fails. Path conversion and clerk normalization errors propagate.
+    """
     path = Path(path)
     suffix = path.suffix.lower()
     page_usage: list[Usage] = []

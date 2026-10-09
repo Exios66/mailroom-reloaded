@@ -178,7 +178,14 @@ def _run_chunk(
     sampling: dict[str, Any],
     dagger: bool,
 ) -> tuple[dict | None, bool, str | None, str | None, int, Usage]:
-    """Run one chunk: one repair re-ask, plus one dagger length re-sample."""
+    """Extract a chunk, retrying a parse error once with a repair prompt.
+
+    ``index`` is one-based. ``dagger`` allows one retry of an initial length
+    cap. Return data, schema validity, parse error, error kind, call count and
+    usage, including usage from caught length caps. An unrecovered initial
+    cap returns no data with error kind ``LengthFinishReasonError``. Errors
+    from the repair call (including length caps) and other call errors propagate.
+    """
     messages = _messages(system, doc_type, doc_subclass, chunk, index, total)
     calls = 0
     usage = Usage()

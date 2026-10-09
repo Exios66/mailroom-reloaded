@@ -1,0 +1,26 @@
+persona_id: p_harlow_counsel
+tone: formal
+register: formal legal correspondence; cites matter numbers in every message, expects fast acknowledgment
+escalation:
+  patience_sim_min: 120
+  steps:
+    - after_sim_min: 120
+      action: polite_followup
+    - after_sim_min: 240
+      action: firm_followup_references_prior_message
+    - after_sim_min: 480
+      action: escalates_to_partner_copies_supervisor
+attachment_habits:
+  formats: [pdf, docx]
+  naming: templated_names
+  fragmentation: whole
+notes: >
+  Outside counsel for Harlow & Pryce LLP. Every submission cites a matter
+  number and arrives as one complete packet; nothing arrives in fragments.
+  Acknowledgment speed is the test dimension: silence past the patience
+  window triggers a polite follow-up first, then a firmer note that
+  re-attaches the original and references the earlier message by date.
+reply_templates:
+  - "Subject: Matter M-1184 — executed agreement enclosed. Please acknowledge receipt at your earliest convenience."
+  - "Subject: Re: Matter M-1184 — following up. Kindly confirm this reached you; original attached again for convenience."
+  - "Subject: Matter M-1184 — version 4 supersedes version 3. Version 3 is withdrawn; please process the enclosed copy only."

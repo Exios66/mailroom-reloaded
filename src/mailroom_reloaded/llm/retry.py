@@ -86,7 +86,11 @@ def retry_sleep_seconds(exc: Exception, attempt: int, cold_start_s: float = 90.0
 
 
 def _record_retry_event(exc: Exception, attempt: int, max_attempts: int, delay: float) -> None:
-    """Add a ``mailroom.llm_retry`` event (no message text) to the current span."""
+    """Add a ``mailroom.llm_retry`` event without message text, if recording.
+
+    ``attempt`` is the one-based failed call number; ``max_attempts`` includes
+    the initial call. ``delay`` is in seconds. Annotation errors are suppressed.
+    """
     try:
         span = trace.get_current_span()
         if span.is_recording():
@@ -105,7 +109,14 @@ def _record_retry_event(exc: Exception, attempt: int, max_attempts: int, delay: 
 
 
 def with_retry(fn: Callable[[], T], *, cold_start_s: float = 90, max_attempts: int = 4) -> T:
-    """Call ``fn()``; retry transient failures with exponential backoff, re-raise the last error."""
+    """Return ``fn()``'s result, retrying transient failures with jittered backoff.
+
+    ``max_attempts`` includes the initial call, which runs even when the limit
+    is nonpositive. ``cold_start_s`` is the base delay in seconds for HTTP 503.
+    Record a retry event and sleep before each retry. Nontransient errors and
+    the last error at the attempt limit propagate; backoff configuration and
+    sleep errors also propagate.
+    """
     attempt = 0
     while True:
         attempt += 1

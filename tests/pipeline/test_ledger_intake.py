@@ -432,3 +432,75 @@ def test_an_id_closed_in_the_ledger_by_another_process_is_not_reopened(env) -> N
     lg.flush()
     assert run_ledger.open_run(lg, "old", "live") is False
     assert [e.kind for e in lg.entries(run_id="old")] == ["run_opened", "run_closed"]
+
+
+@pytest.mark.parametrize("persisted", [False, True])
+def test_closed_daily_bucket_rejects_documents(env, monkeypatch, persisted) -> None:
+    from mailroom_reloaded.obs.run_context import live_run_id
+
+    _patch_handoff(monkeypatch)
+    monkeypatch.setattr(flow_mod, "_sort", _sort)
+    monkeypatch.setattr(flow_mod, "_extract", _extract())
+    ledger = get_ledger()
+    run_id = live_run_id()
+    assert run_ledger.open_run(ledger, run_id, "live")
+    run_ledger.close_run(ledger, run_id)
+    assert ledger.flush()
+    if persisted:
+        _reset_registry()  # simulate a restart without the cached closed ID
+
+    _, path = _inbox(env)
+    state = flow_mod.run_document(path, worker_id="w1")
+
+    assert state.status == "archived"
+    assert [e.kind for e in _entries()] == ["run_opened", "run_closed"]
+    assert run_id not in run_ledger._rolled
+    assert ledger.metric_rows(run_id) == []
+    assert ledger.verify(run_id).ok
+
+
+def test_rejected_open_never_records_an_orphan_document(env, monkeypatch) -> None:
+    _patch_handoff(monkeypatch)
+    monkeypatch.setattr(flow_mod, "_sort", _sort)
+    monkeypatch.setattr(flow_mod, "_extract", _extract())
+    ledger = get_ledger()
+    real_append = ledger.append
+
+    def reject_open(kind, *args, **kwargs):
+        return False if kind == "run_opened" else real_append(kind, *args, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", reject_open)
+    _, path = _inbox(env)
+    state = flow_mod.run_document(path, worker_id="w1")
+    assert state.status == "archived"
+    assert _entries() == []
+    assert not run_ledger._open and not run_ledger._rolled
+
+
+@pytest.mark.parametrize(
+    "failure", ["rejected", "append", "count", "config", "open_runs"]
+)
+def test_open_failure_leaves_the_run_retryable(env, monkeypatch, failure) -> None:
+    ledger = get_ledger()
+    if failure == "open_runs":
+        ledger.append("run_opened", "retry", payload={"kind": "live"})
+        assert ledger.flush()
+
+    def fail(*args, **kwargs):
+        if failure == "rejected":
+            return False
+        raise OSError("unavailable")
+
+    with monkeypatch.context() as patch:
+        if failure == "config":
+            patch.setattr(run_ledger, "_config_sha", fail)
+        else:
+            method = "append" if failure == "rejected" else failure
+            patch.setattr(ledger, method, fail)
+        assert run_ledger.open_run(ledger, "retry", "live") is False
+        assert "retry" not in run_ledger._open
+
+    assert run_ledger.open_run(ledger, "retry", "live") is True
+    assert run_ledger.open_run(ledger, "retry", "live") is True
+    run_ledger.close_run(ledger, "retry")
+    assert [e.kind for e in _entries()] == ["run_opened", "run_closed"]
