@@ -71,20 +71,18 @@ def _cost_usd(state: MailroomState) -> float:
     """Per-token cost estimate: each role's usage at that role's configured price.
 
     Roles that report no price cost 0.0, and the eval ``grader`` is excluded (it is
-    not pipeline spend). States saved before per-role capture price the whole total
-    at the sorter's rates, as before.
+    not pipeline spend). Usage in ``usage_total`` that no role accounts for (a resumed
+    pre-capture manifest) is priced at the sorter's rates, as before.
     """
     if state.usage_total.total_tokens == 0:
         return 0.0
     try:
         tax = load_taxonomy()
-        if state.usage_by_role:
-            return sum(
-                _price(tax, role, usage)
-                for role, usage in state.usage_by_role.items()
-                if role != "grader"
-            )
-        return _price(tax, "sorter", state.usage_total)
+        roles = {r: u for r, u in state.usage_by_role.items() if r != "grader"}
+        # spend restored from a manifest saved before per-role capture has no role: price it
+        # at the sorter's rates, as before
+        residual = state.usage_total - sum(roles.values(), Usage())
+        return _price(tax, "sorter", residual) + sum(_price(tax, r, u) for r, u in roles.items())
     except Exception:  # noqa: BLE001 - report must never raise
         return 0.0
 

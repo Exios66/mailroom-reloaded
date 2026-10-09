@@ -256,3 +256,17 @@ def test_report_cost_of_legacy_state_prices_at_the_sorter(monkeypatch) -> None:
     monkeypatch.setattr(report_mod, "load_taxonomy", lambda: tax)
     state = MailroomState(usage_total=Usage(1_000_000, 0, 0.0, 1))
     assert compile_report(state)["cost"]["usd"] == pytest.approx(1.0)
+
+
+def test_report_cost_prices_legacy_residual_at_the_sorter_on_a_resumed_manifest(monkeypatch) -> None:
+    tax = _taxonomy(
+        {
+            "m-sorter": {"input_per_million": 1, "output_per_million": 1},
+            "m-judge": {"input_per_million": 10, "output_per_million": 10},
+        }
+    )
+    monkeypatch.setattr(report_mod, "load_taxonomy", lambda: tax)
+    million = Usage(1_000_000, 1_000_000, 0.0, 1)
+    # one million sorter-priced tokens came from the old manifest, the judge ran after resume
+    state = MailroomState(usage_total=million + million, usage_by_role={"judge": million})
+    assert compile_report(state)["cost"]["usd"] == pytest.approx(2.0 + 20.0)
