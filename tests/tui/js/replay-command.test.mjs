@@ -460,6 +460,22 @@ test('o and g open Phoenix and Grafana with the injected opener', async () => {
   await p;
 });
 
+test('o and g refuse non-http(s) or credential-bearing link config', async () => {
+  const opened = [];
+  const bad = { phoenix_url: 'javascript:alert(1)', grafana_url: 'https://u:p@g.example' };
+  const h = makeCtx({
+    routes: { '/links': bad, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+    open: (url) => opened.push(url),
+  });
+  const p = dispatch(setup(), h.ctx, 'replay r1');
+  await nextTick();
+  h.tk.opts.onKey(key('o'));
+  h.tk.opts.onKey(key('g'));
+  assert.deepEqual(opened, []);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
 test('o and g are a no-op without an opener or link config', async () => {
   const { h, p } = await open('r1', makeCtx({ routes: { '/v1/replay/sessions/run%3Ar1/timeline': TL } }));
   assert.doesNotThrow(() => {

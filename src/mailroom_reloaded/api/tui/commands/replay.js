@@ -166,10 +166,15 @@ function reducedMotion() {
  * null when the config is missing or the session is not a run, so the `o`/`g`
  * keys degrade to a no-op.
  */
+function httpBase(v) {
+  if (typeof v !== 'string' || !/^https?:\/\/[^\s@]+$/i.test(v)) return null;
+  return v.replace(/\/+$/, '');
+}
+
 function externalUrls(links, id) {
   const cfg = links && typeof links === 'object' ? links : {};
-  const phoenix = typeof cfg.phoenix_url === 'string' && cfg.phoenix_url ? cfg.phoenix_url : null;
-  const grafana = typeof cfg.grafana_url === 'string' && cfg.grafana_url ? cfg.grafana_url : null;
+  const phoenix = httpBase(cfg.phoenix_url);
+  const grafana = httpBase(cfg.grafana_url);
   const run = typeof id === 'string' && id.startsWith('run:') ? id.slice(4) : null;
   return {
     phoenix,

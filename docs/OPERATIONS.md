@@ -196,7 +196,7 @@ semconv `gen_ai.client.token.usage` / `gen_ai.client.operation.duration`.
   (default `mailroom-live`). `/ui` fetches it on load to set the header links and each
   eval run's `grafana ↗` (`` `<grafana_url>/d/mailroom-quality?var-run_id=<run_id>` ``)
   and `phoenix ↗` links, beside `replay ↗`; the replay viewer's `o`/`g` keys open the
-  same Phoenix / Grafana URLs. `/links` is public like `/health` and carries no secret.
+  same Phoenix / Grafana URLs. `/links` is public like `/health` and carries no secret. The three URL settings must be plain `http(s)` URLs without credentials, query or fragment (startup fails otherwise); a trailing slash is stripped.
 - **Decision counters.** `mailroom.retries{kind}`, `mailroom.escalations{to}` and
   `mailroom.review.causes{cause}` feed the Pipeline dashboard's *Decisions* row, the
   same retry / escalation / review-cause mix the replay's event ticker shows.
