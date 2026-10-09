@@ -421,3 +421,49 @@ def test_mailbox_lives_in_the_sandbox_data_dir_only(make_client, tmp_path):
     _client, svc = make_client()
     assert svc.mailbox.path.is_file()
     assert str(svc.mailbox.path).startswith(str(tmp_path))
+
+
+def test_mailbox_list_filters_latest_status_and_limits_in_sql(tmp_path, monkeypatch):
+    from mailroom_reloaded.sandbox.server.mailbox import BossMailbox
+
+    mb = BossMailbox(tmp_path / "mailbox.sqlite")
+    try:
+        entries = [
+            mb.post(sender="correspondent", recipient="boss", kind="question",
+                    thread_id="t", message_id=f"m{i}", payload={"i": i})
+            for i in range(5)
+        ]
+        for entry in entries[1:4]:
+            mb.set_status(entry["id"], "read", "boss")
+        mb.set_status(entries[1]["id"], "acted", "boss")
+        mb.set_status(entries[2]["id"], "new", "boss")
+
+        def unexpected_status_lookup(_):
+            pytest.fail("list must resolve status in its SQL query")
+
+        monkeypatch.setattr(mb, "_status_of", unexpected_status_lookup)
+        decoded = []
+        original_row = mb._row
+
+        def decode(row, status):
+            decoded.append(row["id"])
+            return original_row(row, status)
+
+        monkeypatch.setattr(mb, "_row", decode)
+        queries = []
+        mb._conn().set_trace_callback(queries.append)
+        result = mb.list(status="new", since=1, limit=1, role="boss",
+                         direction="correspondent->boss", thread_id="t", kind="question")
+        assert [e["id"] for e in result] == [entries[2]["id"]]
+        assert decoded == [entries[2]["id"]]
+        assert len(queries) == 1
+        assert mb.list(message_id="m1")[0]["status"] == "acted"
+        assert [e["id"] for e in mb.list(status="new", limit=-1)] == [
+            entries[0]["id"], entries[2]["id"]
+        ]
+        assert len(mb.list(limit=-2)) == 3
+        assert mb.list(status="new", limit=-3) == []
+        assert mb.list(limit=-10) == []
+        assert mb.list(limit=0) == []
+    finally:
+        mb.close()

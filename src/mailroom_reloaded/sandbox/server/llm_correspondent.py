@@ -4,7 +4,9 @@ Same :class:`CorrespondentAgent` interface as the rule-based stand-in. It talks 
 operator-configured OpenAI-compatible endpoint that must be on loopback (so the network
 guard stays intact). Only the triage step is delegated: the deterministic pre-filter,
 safety screen, trust level, attachment lanes and quarantine decisions are the stand-in's
-code and run before and after the model. The model chooses among the non-attack intents
+code and run before and after the model. Safety-screen findings precede triage;
+deterministic post-triage rules may also add attack signals, including possible
+impersonation for suspicious legal notices. The model chooses among the non-attack intents
 only; its output is validated against a strict JSON schema, and any failure (transport,
 status, parse, schema, disallowed intent) falls back to the rule-based scoring.
 
@@ -34,7 +36,8 @@ from mailroom_reloaded.sandbox.server.triage import (
 
 __all__ = ["ALLOWED_INTENTS", "OUTPUT_SCHEMA", "LLMCorrespondent", "build_prompt"]
 
-# the model may only choose benign intents; attack classes come from the safety screen
+# The model may only choose benign intents (including legal_notice). Attack signals
+# come from the safety screen and deterministic post-triage rules.
 ALLOWED_INTENTS = (
     "status_request",
     "missing_document_followup",

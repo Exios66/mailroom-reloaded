@@ -33,6 +33,7 @@
    * Return a detached mailbox view grouped by thread in first-seen order.
    * opts.pending is a set of message IDs. Pending forwards offer buttons only
    * when opts.onDecide exists; clicks pass (messageId, decision, reason) to it.
+   * opts.isDeciding reflects the shared request guard, including after a rerender.
    * Rendering does not fetch data or change entry status.
    */
   function renderMailbox(entries, opts) {
@@ -63,6 +64,10 @@
           rel.addEventListener("click", () => o.onDecide(e.message_id, "legitimate", reason.value));
           const q = node("button", "small danger", "Quarantine");
           q.addEventListener("click", () => o.onDecide(e.message_id, "quarantine", reason.value));
+          for (const button of [rel, q]) {
+            button.setAttribute("data-decision-message", e.message_id);
+            button.disabled = !!(o.isDeciding && o.isDeciding(e.message_id));
+          }
           row.append(node("div", "", reason, " ", rel, " ", q));
         }
         box.append(row);

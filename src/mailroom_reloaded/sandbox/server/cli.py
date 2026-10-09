@@ -157,10 +157,9 @@ def conformance(
     """Run selected scenarios in isolation and print conformance and LOFO tables.
 
     The data directory is disposable: runs reset sandbox and pipeline state.
-    Content loading failures exit with code 1. Scenario failures are reported
-    without setting a failing exit code. Fewer than two selected families
-    raise ``ZeroDivisionError`` during LOFO reporting; output I/O errors
-    propagate.
+    Content loading/validation failures exit with code 1. Scenario failures are
+    reported without setting a failing exit code. Single-family runs report
+    no training rate; output I/O errors propagate.
     """
     from mailroom_reloaded.sandbox.server.conformance import (
         dumps,
@@ -183,6 +182,13 @@ def conformance(
     except (ContentSpecError, FileNotFoundError, ValueError, OSError) as exc:
         typer.echo(f"mailroom sandbox conformance: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    if not loaded.cs.report.ok:
+        typer.echo(
+            "content has validation errors:\n"
+            + "\n".join(loaded.cs.report.errors[:10]),
+            err=True,
+        )
+        raise typer.Exit(code=1)
     silence_exporters()
     guard = NetworkGuard().install()
     svc = SandboxService(loaded, data_dir.resolve(), guard=guard).start(worker=False)

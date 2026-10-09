@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS status_log (
   by_role TEXT NOT NULL,
   note TEXT
 );
+CREATE INDEX IF NOT EXISTS status_log_entry_seq ON status_log(entry_id, seq DESC);
 CREATE TRIGGER IF NOT EXISTS entries_no_update BEFORE UPDATE ON entries
 BEGIN SELECT RAISE(ABORT, 'boss_mailbox entries are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS entries_no_delete BEFORE DELETE ON entries
@@ -294,19 +295,28 @@ class BossMailbox:
         if role:
             where.append("(sender_role = ? OR recipient_role = ?)")
             args += [role, role]
-        with self._lock:
-            rows = (
-                self._conn()
-                .execute(
-                    f"SELECT * FROM entries WHERE {' AND '.join(where)} ORDER BY seq",
-                    args,
-                )
-                .fetchall()
-            )
-            out = [self._row(r, self._status_of(r["id"])) for r in rows]
         if status:
-            out = [e for e in out if e["status"] == status]
-        return out[:limit]
+            where.append("status = ?")
+            args.append(status)
+        query = f"""
+            WITH current_entries AS (
+                SELECT entries.*, COALESCE((
+                    SELECT status FROM status_log
+                    WHERE entry_id = entries.id ORDER BY seq DESC LIMIT 1
+                ), 'new') AS status
+                FROM entries
+            ), matching AS (
+                SELECT * FROM current_entries WHERE {' AND '.join(where)}
+            )
+            SELECT * FROM matching ORDER BY seq
+        """
+        if limit < 0:
+            query += " LIMIT (SELECT MAX(0, COUNT(*) + ?) FROM matching)"
+        else:
+            query += " LIMIT ?"
+        with self._lock:
+            rows = self._conn().execute(query, [*args, limit]).fetchall()
+            return [self._row(r, r["status"]) for r in rows]
 
     def count(self) -> int:
         """Return the total number of entries across all statuses."""

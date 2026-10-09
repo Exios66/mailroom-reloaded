@@ -296,8 +296,11 @@ owner.
 Optional LLM-backed Correspondent (`--correspondent llm --llm-base-url http://127.0.0.1:PORT/v1
 [--llm-model NAME]`, default off): only the triage step is delegated; the endpoint must be on
 loopback; the prompt is built from the delegation matrix; output is validated against a strict
-JSON schema and limited to non-attack intents; any transport, status, parse, schema or
-disallowed-intent failure falls back to the rules; hostile-no-reply and quarantine are enforced
+JSON schema and limited to benign intents, including `legal_notice`. Safety-screen
+findings precede triage; deterministic post-triage rules may also add attack signals,
+including possible impersonation for suspicious legal notices. Any transport, status,
+parse, schema or disallowed-intent failure falls back to the rules; hostile-no-reply
+and quarantine are enforced
 in code after the model. **Its quality is unmeasured**: no real model was available, it is
 tested only against the in-process mock (`[mock-intent:...]` markers).
 
@@ -351,7 +354,7 @@ nothing; only the decision POST acts. The UI JS is covered by a node test with a
 
 Deviations: the protocol says quarantine is released by a human only; here the Boss decision
 releases it, on explicit request. Only messages carrying a `possible_attack` signal are
-forwarded (a message classed hostile without one, such as a spoofed legal notice, is not).
+forwarded, including suspicious legal notices flagged by deterministic post-triage rules.
 
 Re-injecting scenarios into a server that already processed them (for example `smoke`
 for A1+E1 and then all six) can fail E1's "no reply" check: the benign companion's

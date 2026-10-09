@@ -105,7 +105,8 @@ def lofo(rows: list[dict]) -> dict[str, Any]:
     No rules are trained here: interpreting rates as held-out performance
     requires tuning without seeing the held-out family beforehand.
 
-    Raise ``ZeroDivisionError`` if rows contain fewer than two families.
+    A fold without training rows has a ``None`` training rate. Empty input
+    raises ``ZeroDivisionError`` when computing aggregate rates.
     """
     fams = sorted({family_of(r["scenario"]) for r in rows})
     folds = []
@@ -125,7 +126,7 @@ def lofo(rows: list[dict]) -> dict[str, Any]:
                 "held_out_rate": round(hp / len(held), 3),
                 "training_n": len(train),
                 "training_pass": tp,
-                "training_rate": round(tp / len(train), 3),
+                "training_rate": round(tp / len(train), 3) if train else None,
                 "held_out_failed_checks": dict(sorted(checks.items())),
             }
         )
@@ -147,8 +148,11 @@ def format_lofo(rep: dict[str, Any]) -> str:
         f"{'fold (held-out family)':<24}{'n':>3}{'pass':>6}{'rate':>7}   training rate"
     ]
     for f in rep["folds"]:
+        training_rate = (
+            "n/a" if f["training_rate"] is None else f"{f['training_rate']:.2f}"
+        )
         lines.append(
-            f"{f['held_out_family']:<24}{f['held_out_n']:>3}{f['held_out_pass']:>6}{f['held_out_rate']:>7.2f}   {f['training_rate']:.2f}"
+            f"{f['held_out_family']:<24}{f['held_out_n']:>3}{f['held_out_pass']:>6}{f['held_out_rate']:>7.2f}   {training_rate}"
         )
     lines.append(
         f"macro mean held-out rate {rep['macro_mean_held_out_rate']:.3f}; micro pass rate {rep['micro_pass_rate']:.3f}"

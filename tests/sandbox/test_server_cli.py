@@ -75,3 +75,24 @@ def test_content_spec_resolution(tmp_path):
         resolve_content_spec("locked", pull_dir=tmp_path / "missing")
     with pytest.raises(ContentSpecError):
         resolve_content_spec("nonsense-dir")
+
+
+def test_conformance_rejects_invalid_content_before_side_effects(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.sandbox.server import content, service, telemetry
+
+    loaded = SimpleNamespace(
+        cs=SimpleNamespace(report=SimpleNamespace(ok=False, errors=["invalid scenario"]))
+    )
+    monkeypatch.setattr(content, "load_sandbox_content", lambda _: loaded)
+    silence = Mock()
+    start = Mock()
+    monkeypatch.setattr(telemetry, "silence_exporters", silence)
+    monkeypatch.setattr(service, "SandboxService", start)
+    res = runner.invoke(cli.app, ["sandbox", "conformance", "--content", "smoke"])
+    assert res.exit_code == 1
+    assert "content has validation errors:\ninvalid scenario" in res.output
+    silence.assert_not_called()
+    start.assert_not_called()

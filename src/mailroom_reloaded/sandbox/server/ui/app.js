@@ -110,23 +110,41 @@ async function messagesView() {
   }
   return el("div", {}, head, d.messages.length ? t : el("p", { class: "muted" }, "No messages yet. Inject a scenario."));
 }
+// Shared across review cards and the mailbox, including views rebuilt by polling.
+const decidingMessages = new Set();
+function syncDecisionButtons() {
+  document.querySelectorAll("button[data-decision-message]").forEach((b) => {
+    b.disabled = decidingMessages.has(b.dataset.decisionMessage);
+  });
+}
+async function decide(messageId, decision, reason) {
+  if (decidingMessages.has(messageId)) return;
+  decidingMessages.add(messageId);
+  syncDecisionButtons();
+  try {
+    await post("/boss/decisions", { message_id: messageId, decision, reason });
+    await refreshAll();
+    await pollMailbox();
+  } finally {
+    decidingMessages.delete(messageId);
+    syncDecisionButtons();
+  }
+}
 /**
  * Build a review card; withButtons enables decisions using the entered reason.
  * Decision clicks post to the API and refresh views, alerting on errors.
  */
 function reviewCard(c, withButtons) {
   const reason = el("input", { placeholder: "reason (recorded)", size: 30 });
-  const decide = (decision) => guarded(async () => {
-    await post("/boss/decisions", { message_id: c.message_id, decision, reason: reason.value });
-    await refreshAll();
-  });
+  const onDecide = (decision) => guarded(() => decide(c.message_id, decision, reason.value));
+  const decisionAttrs = { "data-decision-message": c.message_id, disabled: decidingMessages.has(c.message_id) };
   return el("div", { class: "flow e" },
     el("div", {}, chip(c.state, c.state === "pending" ? "warn" : c.state === "released" ? "ok" : "bad"), " ", c.message_id, " ",
       c.attack_classes.map((a) => chip(a + "/" + c.priority, "bad")), " ", chip(c.category)),
     el("div", { class: "muted" }, "held attachments: " + (c.attachments.join(", ") || "none") + " | signal channel: possible_attack"),
     c.decision ? el("div", {}, `decision: ${c.decision} by ${c.decided_by}: ${c.reason || ""}`) : null,
-    withButtons ? el("div", {}, reason, " ", el("button", { class: "small primary", onclick: () => decide("legitimate") }, "Release (legitimate)"), " ",
-      el("button", { class: "small danger", onclick: () => decide("quarantine") }, "Quarantine")) : null);
+    withButtons ? el("div", {}, reason, " ", el("button", { ...decisionAttrs, class: "small primary", onclick: () => onDecide("legitimate") }, "Release (legitimate)"), " ",
+      el("button", { ...decisionAttrs, class: "small danger", onclick: () => onDecide("quarantine") }, "Quarantine")) : null);
 }
 // ---------------------------------------------------------------- boss mailbox dock (always live)
 const mbx = { entries: [], last: 0, open: false, timer: null };
@@ -143,7 +161,8 @@ async function pollMailbox() {
     $("mbx-badge").textContent = String(window.sbxMailbox.unread(mbx.entries, pending));
     $("mbx-badge").className = "chip " + (pending.size ? "bad" : "");
     if (mbx.open) $("mbx-body").replaceChildren(window.sbxMailbox.renderMailbox(mbx.entries, {
-      pending, onDecide: (mid, decision, reason) => guarded(async () => { await post("/boss/decisions", { message_id: mid, decision, reason }); await refreshAll(); await pollMailbox(); }),
+      pending, isDeciding: (mid) => decidingMessages.has(mid),
+      onDecide: (mid, decision, reason) => guarded(() => decide(mid, decision, reason)),
     }));
   } catch (e) { /* offline or no token yet: keep the last view */ }
 }
