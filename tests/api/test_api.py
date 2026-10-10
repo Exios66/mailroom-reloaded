@@ -293,6 +293,21 @@ def test_links_public(client, monkeypatch):
     }
 
 
+def test_links_phoenix_project_comes_from_settings(client, monkeypatch):
+    """The project name is a Settings field: default when unset, env value otherwise."""
+    from mailroom_reloaded.settings import get_settings
+
+    monkeypatch.delenv("MAILROOM_PHOENIX_PROJECT", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().phoenix_project == "mailroom-live"
+    assert client.get("/links").json()["phoenix_project"] == "mailroom-live"
+
+    monkeypatch.setenv("MAILROOM_PHOENIX_PROJECT", "proj-y")
+    get_settings.cache_clear()
+    assert get_settings().phoenix_project == "proj-y"
+    assert client.get("/links").json()["phoenix_project"] == "proj-y"
+
+
 @pytest.mark.parametrize(
     "bad",
     [

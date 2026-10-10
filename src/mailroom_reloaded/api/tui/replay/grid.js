@@ -101,7 +101,7 @@ function safe(fn, fallback) {
   }
 }
 
-function headerRow({ model, clock, sess }) {
+function headerRow({ model, clock, sess, notice }) {
   const glyph = clock.ended ? '[end]' : clock.playing ? '>' : '||';
   const segs = [
     [' replay ', 'hot'],
@@ -112,6 +112,7 @@ function headerRow({ model, clock, sess }) {
     [`  ${sess.source === 'audit' ? 'audit' : 'spans'}${sess.approx ? ' ~approx' : ''}`, sess.approx ? 'warn' : 'dim'],
   ];
   if (sess.data_pruned) segs.push(['  data pruned', 'err']);
+  if (typeof notice === 'string' && notice) segs.push([`  ${truncate(notice, 60)}`, 'warn']);
   return segs;
 }
 
@@ -287,8 +288,59 @@ function ledgerRows({ ledger, cols }) {
   return out;
 }
 
-const LEGEND =
-  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  p panels  e event  q quit';
+// Footer legend entries as [text, priority]; lower priority numbers survive a narrow terminal first.
+const LEGEND_ITEMS = [
+  ['spc play', 1],
+  ['</> seek', 3],
+  ['[ ] speed', 4],
+  ['0-9 jump', 8],
+  ['j/k select', 6],
+  ['i inspect', 5],
+  ['l ledger', 7],
+  ['p panels', 2],
+  ['e event', 9],
+  ['q quit', 0],
+];
+
+/**
+ * The footer legend for `cols` columns. Entries are dropped from the least important
+ * (event, jump, ledger, ...) until the line fits, so `q quit` always stays; the order
+ * shown is the fixed key order. At 100+ columns every entry is shown.
+ */
+export function legendFor(cols) {
+  const width = Math.max(1, Math.floor(num(cols)));
+  const lenOf = (items) => 1 + items.map((i) => i[0]).join('  ').length;
+  let kept = LEGEND_ITEMS.slice();
+  const byPriority = kept.slice().sort((a, b) => b[1] - a[1]);
+  for (const drop of byPriority) {
+    if (lenOf(kept) <= width || kept.length === 1) break;
+    kept = kept.filter((i) => i !== drop);
+  }
+  return ` ${kept.map((i) => i[0]).join('  ')}`;
+}
+
+/**
+ * Make a panel's rows safe to draw: at most 200 rows of at most 40 segments, every text
+ * a string with control, zero-width and bidi characters turned into spaces and clamped to
+ * 500 characters, every class one of the grid classes (else none), then clipped to `cols`.
+ * Anything that is not a row of `[text, cls]` pairs is dropped.
+ */
+export function sanitizeRows(rows, cols) {
+  if (!Array.isArray(rows)) return [];
+  const out = [];
+  for (const row of rows.slice(0, 200)) {
+    if (!Array.isArray(row)) continue;
+    const segs = [];
+    for (const seg of row.slice(0, 40)) {
+      if (!Array.isArray(seg)) continue;
+      const raw = seg[0];
+      const text = typeof raw === 'string' || typeof raw === 'number' ? String(raw) : '';
+      segs.push([Array.from(text.replace(CTRL_RE, ' ')).slice(0, 500).join(''), CLASSES.has(seg[1]) ? seg[1] : '']);
+    }
+    out.push(clip(segs, cols));
+  }
+  return out;
+}
 
 /**
  * Resolve the `panel` selector to rows. Inspector and ledger keep their dedicated
@@ -302,11 +354,10 @@ function resolvePanel(panel, ctx) {
   if (typeof panel !== 'string' || panel === 'none') return [];
   const spec = getPanel(panel);
   if (!spec) return [];
-  const rows = safe(() => spec.render(ctx), []);
-  return Array.isArray(rows) ? rows : [];
+  return sanitizeRows(safe(() => spec.render(ctx), []), ctx.cols);
 }
 
-export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none', links = null } = {}) {
+export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none', links = null, notice = null } = {}) {
   const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
   const R = clamp(Math.floor(num(rows)) || 30, MIN_ROWS, MAX_ROWS);
   const m = model && typeof model === 'object' ? model : {};
@@ -314,12 +365,12 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const ck = clock && typeof clock === 'object' ? clock : { t: 0, duration: 0, speed: 1, playing: false };
   const sess = m.session && typeof m.session === 'object' ? m.session : {};
   const selIdx = Number.isInteger(sel) ? sel : -1;
-  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links };
+  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links, notice };
 
   const head = clip(headerRow(ctxo), C);
   const scrub = clip(scrubRow(ctxo), C);
   const metrics = metricsRow(ctxo);
-  const foot = clip([[LEGEND, 'dim']], C);
+  const foot = clip([[legendFor(C), 'dim']], C);
   const track = trackRows(ctxo);
   const panelRows = resolvePanel(panel, ctxo);
 

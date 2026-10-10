@@ -885,6 +885,9 @@ class MailroomFlow(Flow[MailroomState]):
                     return self._park("classify_human_review")
             elif node == "gate_extract":
                 state.route_trail.append("gate_extract")
+                # The approved re-extraction has been consumed; a later retry or
+                # resume must not be treated as a fresh approval.
+                state.review_approved = False
                 route = self._extract_route()
                 if route == "report":
                     self._route_event("gate_extract", "report_catalog_archive", route)
@@ -958,6 +961,8 @@ class MailroomFlow(Flow[MailroomState]):
                     getattr(self, node)()
                 except NodeFailed:
                     return state
+                if node == "extract":
+                    state.review_approved = False  # approval consumed by this extraction
                 node = _NEXT[node]
 
         if (

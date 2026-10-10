@@ -215,7 +215,7 @@ def test_live_stream_emits_ready_segment_and_heartbeat(client):
     assert "ready" in names
     assert "segment" in names
     assert "heartbeat" in names
-    assert all(name in {"ready", "segment", "generation", "event", "score", "heartbeat", "error"} for name in names)
+    assert all(name in {"ready", "entity", "segment", "generation", "event", "score", "heartbeat", "error"} for name in names)
 
 
 def test_live_items_keep_repeated_events_distinct():
@@ -229,3 +229,76 @@ def test_live_items_keep_repeated_events_distinct():
     keys = [k for _, _, k in _live_items(tl)]
     assert len(keys) == 2 and len(set(keys)) == 2
     assert keys == [k for _, _, k in _live_items(tl)]
+
+
+def test_live_stream_sends_entities_before_segments(client):
+    """Entity frames let a follower learn documents that start after its first snapshot."""
+    with client.stream("GET", f"/v1/replay/live?session=run:{RUN}") as r:
+        names = _live_frame_names(r.read().decode())
+    assert "entity" in names
+    assert names.index("entity") < names.index("segment")
+
+
+def test_live_items_resend_entity_when_it_finishes():
+    """An entity key changes with its end/outcome, so completion is delivered again."""
+    from types import SimpleNamespace as NS
+
+    from mailroom_reloaded.api.app import _live_items
+
+    def keys(t_end, status):
+        ent = NS(doc_id="d", t_end=t_end, final_status=status, t_start=1.0)
+        tl = NS(entities=[ent], segments=[], generations=[], events=[], scores=[])
+        return [k for _, _, k in _live_items(tl)]
+
+    assert keys(None, None) != keys(5.0, "archived")
+
+
+def test_live_trim_bounds_tracked_items(monkeypatch):
+    """Items older than the window are neither tracked nor sent; keys stay count-based."""
+    import importlib
+    from types import SimpleNamespace as NS
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+
+    monkeypatch.setattr(app_mod, "_LIVE_WINDOW_S", 10.0)
+    monkeypatch.setattr(app_mod, "_LIVE_MAX_TRACKED", 3)
+    events = [NS(t=float(t), doc_id="d", kind="k", station="s") for t in (0, 50, 60, 61, 62)]
+    tl = NS(segments=[], generations=[], events=events, scores=[])
+    entries = list(app_mod._live_items(tl))
+    kept = app_mod._live_trim(entries)
+    assert [e[1].t for e in kept] == [60.0, 61.0, 62.0]
+    # a key that survives the trim is the one an untrimmed snapshot would give it
+    assert [k for _, _, k in kept] == [k for _, _, k in entries[2:]]
+    # an in-progress entity is never trimmed
+    ent = NS(doc_id="old", t_end=None, final_status=None, t_start=0.0)
+    tl2 = NS(entities=[ent], segments=[], generations=[], events=events, scores=[])
+    assert any(n == "entity" for n, _, _ in app_mod._live_trim(list(app_mod._live_items(tl2))))
+
+
+def test_live_trim_keeps_entity_that_finished_late(monkeypatch):
+    """A long-running entity is timed by its end, so its finish frame is not trimmed."""
+    import importlib
+    from types import SimpleNamespace as NS
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    monkeypatch.setattr(app_mod, "_LIVE_WINDOW_S", 10.0)
+    events = [NS(t=100.0, doc_id="d", kind="k", station="s")]
+    ent = NS(doc_id="slow", t_end=99.0, final_status="archived", t_start=0.0)
+    tl = NS(entities=[ent], segments=[], generations=[], events=events, scores=[])
+    kept = app_mod._live_trim(list(app_mod._live_items(tl)))
+    assert any(n == "entity" for n, _, _ in kept)
+
+
+def test_live_row_cap_emits_error_frame_and_ends(client, monkeypatch):
+    """A timeline cut at the span-store read cap is reported, not silently truncated."""
+    from mailroom_reloaded.storage import span_store
+
+    monkeypatch.setattr(span_store, "READ_CAP", 3)
+    clear_cache()
+    with client.stream("GET", f"/v1/replay/live?session=run:{RUN}") as r:
+        body = r.read().decode()
+    assert "event: error" in body
+    assert '"code": "row_cap"' in body
+    assert body.rstrip().endswith("}")
+    assert body.index("event: error") > body.index("event: ready")
+    assert _live_frame_names(body)[-1] == "error"

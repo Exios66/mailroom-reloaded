@@ -508,10 +508,10 @@ test('the man page documents --follow and the f key', () => {
   assert.match(spec.man, /f\s+follow/);
 });
 
-test('--follow grows the model and pins the clock to now-2s', async () => {
+test('--follow grows the model and pins the clock to server now-2s, ignoring the client clock', async () => {
   const realNow = Date.now;
   const F = 1_700_000_000_000;
-  Date.now = () => F;
+  Date.now = () => F + 999_999_000; // a badly skewed browser clock must not move the pin
   fakeLiveFetch.calls = [];
   try {
     const tl = { ...TL, session: { ...TL.session, t0_iso: new Date(F - 5000).toISOString() } };
@@ -524,6 +524,8 @@ test('--follow grows the model and pins the clock to now-2s', async () => {
     );
     assert.equal(fakeLiveFetch.calls.length, 1);
     assert.equal(fakeLiveFetch.calls[0].url, '/v1/replay/live?session=run%3Ar1');
+    // the server's heartbeat carries its wall clock (epoch seconds): 5s after the session start
+    fakeLiveFetch.calls[0].sse.push('heartbeat', { t: F / 1000 });
     // a new segment for d1 must enter the model (the inspector shows its station)
     fakeLiveFetch.calls[0].sse.push('segment', { doc_id: 'd1', node: 'gate', station: 'gate', t0: 1, t1: 2, attempt: 1, status: 'ok' });
     await nextTick();
@@ -600,6 +602,60 @@ test('an error frame stops following instead of reconnecting', async () => {
   await nextTick();
   assert.ok(fakeLiveFetch.calls[0].aborted, 'the reader is stopped');
   assert.equal(fakeLiveFetch.calls.length, 1, 'no reconnect');
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('--follow adds an entity that starts after the first snapshot and upserts its finish', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  const sse = fakeLiveFetch.calls[0].sse;
+  const settle = async () => {
+    await nextTick();
+    await nextTick();
+  };
+  let n = h.view.frames.length;
+  sse.push('entity', TL.entities[0]); // already loaded: no redraw
+  await settle();
+  assert.equal(h.view.frames.length, n, 'a replayed loaded entity is skipped');
+  const fresh = { doc_id: 'd3', filename: 'late.pdf', t_start: 120, t_end: null, final_status: null };
+  sse.push('entity', fresh);
+  sse.push('segment', { doc_id: 'd3', node: 'intake', station: 'intake', t0: 120, t1: 130, attempt: 1, status: 'ok' });
+  await settle();
+  h.timers.tick();
+  h.tk.opts.onKey(key('Home')); // leave follow and look at the end of the run
+  h.tk.opts.onKey(key('End'));
+  const text = lastText(h.view);
+  assert.match(text, /docs 3 of 3/, 'the new document is counted');
+  // the finished version replaces the in-progress one instead of adding a fourth document
+  sse.push('entity', { ...fresh, t_end: 130, final_status: 'archived' });
+  await settle();
+  h.tk.opts.onKey(key('End'));
+  assert.match(lastText(h.view), /docs 3 of 3/);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('a row_cap error frame stops following and shows a notice', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  fakeLiveFetch.calls[0].sse.push('error', { detail: 'timeline truncated at the read cap', code: 'row_cap' });
+  await nextTick();
+  await nextTick();
+  assert.ok(fakeLiveFetch.calls[0].aborted);
+  assert.match(lastText(h.view), /read cap/);
   h.tk.opts.onKey(key('q'));
   await p;
 });

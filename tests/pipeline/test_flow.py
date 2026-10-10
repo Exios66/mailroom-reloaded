@@ -531,6 +531,9 @@ def test_review_correction_survives_crash_and_updates_report(env, mock_provider,
         raise RuntimeError('interrupted correction')
 
     monkeypatch.setattr(flow_mod, '_extract', crash)
+    # A hard crash runs no cleanup; the in-process failure path reopens the document instead
+    # (see tests/test_watcher_review.py), so skip that path to model the process dying.
+    monkeypatch.setattr('mailroom_reloaded.review._reopen_after_flow_failure', lambda *a, **k: False)
     with pytest.raises(RuntimeError, match='interrupted correction'):
         resolve_review(parked.doc_id, 'correct', 'contract', 'license', bins=bins)
     manifest = load_manifest(bins, parked.doc_id)
