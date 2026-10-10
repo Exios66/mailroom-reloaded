@@ -12,14 +12,21 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-10 (status refreshed against `main` @ `b5f09f9`, which includes PR #80; the full day's progress is logged in Section 3.5; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
-row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
-the PR state; the audit tables in Section 4 will go stale within hours.
+**As of:** 2026-10-10 (evening). Status refreshed against reloaded `main` @
+`4ad2df6` and content `main` @ `c3d5cfe` (content PRs #23-#27 merged; the day's
+progress is logged in Section 3.5). **K-05 is not yet complete:** content `#28`
+and reloaded `#89` are still open, so content `main` currently **drifts** from
+reloaded `main` on `gen_spec.v1.json` and `scenario.v2.json`
+(`tools/check_schema_drift.py` → `2 of 6 shared schema(s) differ`). Also open on
+reloaded `main`: `#88` (restores upload/review behaviour broken by `4ad2df6`),
+`#86`, `#87`, `#90`. Before acting on any row marked `[PR]`, run
+`git fetch --all --prune` in both repos and re-check the PR state; the audit
+tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs:** none (issues #81-#84 track the unrun Docker verification) |
-| mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs (2026-10-10 evening):** #88 (restores upload/review behaviour broken by `4ad2df6`), #89 (K-05 upstream: `contrast` + `attack_class` enum), #86 (Docker docs/scripts), #87 (R-08 leakage check), #90 (Docker verify WIP). Issues #81-#84 track the unrun Docker verification. |
+| mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `c3d5cfe` (2026-10-10 evening) | #5/#6/#15 merged; **#23-#27 merged** (K-02, K-01, #12, #13, C-01/C-02; see 3.5); **#28 open** (K-05 schema mirror, blocked on reloaded #89). Content `main` now: 116 scenarios, 54 active strata rows, 233 dataset attachment rows, 228 unit tests OK. |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
 audit was static (files, symbols, commits, PR state). **No Python test run was
@@ -165,12 +172,19 @@ LLM calls get their own `mailroom.llm.<role>` span; takeover tests are inside
 ### 3.4 Content pack (`mailroom-sandbox-content`)
 
 DONE: phases 1.1-1.7, 2.1-2.5, CD19 (no GitHub Actions; local `tools/ci.sh`).
-Verified: `bash tools/ci.sh` exit 0 on `f650cfd`. 88 scenarios (A17 B8 C11 D6 E13 F5 G12 S10 T6);
-30 `review`, 57 `draft`, 1 deprecated, **0 frozen**. Smoke set matches reloaded's
+Verified 2026-10-10 (evening) on content `main` @ `c3d5cfe`: `bash tools/ci.sh`
+exit 0 with the consumer + drift steps SKIPPED (see K-05; against reloaded `main`
+the drift step fails); `tools/validate.py --strict-coverage` → `errors: 0,
+warnings: 1` (the C-06 gen-spec WARN); `python3 -m unittest discover -s tests` →
+**228 tests OK**. 116 scenarios (A17 B8 C11 D6 E13 F5 G12 **H28** S10 T6);
+`taxonomy/strata.csv` 56 rows (54 `active`, 2 `catalog_only`; the 54
+`rows_unverified` are resolved — C-01); `attachments/manifest.csv` 251 rows
+(233 `dataset`, 18 `synthetic_constructed` — C-02); 30 `review`, 57 `draft`,
+1 deprecated, **0 frozen**. Smoke set matches reloaded's
 `sandbox/fixtures/smoke/manifest.json` (A1, A3, B1, D1, E1, F1).
 Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
 
-### 3.5 Progress log, 2026-10-10 (reloaded; newest last)
+### 3.5 Progress log, 2026-10-10 (reloaded + content; newest last)
 
 | PR / issue | What landed | Evidence |
 | --- | --- | --- |
@@ -184,6 +198,12 @@ Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
 | #80 | Merged `b5f09f9` (2026-10-10, owner approved). See "Scan fixes and Docker verification" under Phase 3 | local gates; Docker builds NOT run |
 | #81-#84 | Issues for the Docker work that could not be done here (app image, compose stack, sandbox container, smoke automation) | Phase 3 |
 | #63-#76 | One tracking issue per remaining Phase 6 / R-series item (see Phase 3 and Phase 6) | issue tracker |
+| content #23 | **K-02 done.** `tools/fault_inject.py` `EXPECTED_ACCEPTS` + `tools/validate.py` 1 MB size WARN; `tests/test_validate_faults.py`; harness now `26 CLEAN-FAIL, 3 EXPECTED-ACCEPT, 0 CRASH, 0 MISSED` | content `tools/ci.sh`; merge `46501c9` |
+| content #24 | **K-01 done.** `tests/test_build_bundle.py` (build twice byte-identical; `--release` refuses an unpinned `zstandard`); CONTENT_SPEC §12 verification-authority bullet | content `tools/ci.sh`; merge `ff02875` (+ CodeRabbit `974e5a4`) |
+| content #25 | Issue #12: the deliberate strata-drift fixture no longer leaks a failure-looking `out of date` line (`tests/test_content_v2.py` captures stderr) | content `tools/ci.sh`; merge `85b1bdb` |
+| content #26 | Issue #13: `tools/migrate_scenarios_v2.py` refuses re-runs unless `--confirm-historical-rerun` (`tests/test_migrate_guard.py`) | content `tools/ci.sh`; merge `1b20534` |
+| content #27 | **C-01 + C-02 done.** strata `rows_unverified` 54 → 0 (54 `active`); 233 dataset rows in `attachments/manifest.csv`; `responds_to,answers` added to `relations/dataset_relation_map.csv`; `_dataset_references()` leak-scan exemption; `tests/test_validate.py` | content `tools/ci.sh`; merge `c3d5cfe` (+ CodeRabbit `3882299`) |
+| content #28 / reloaded #89 | **K-05 in progress, NOT merged.** #89 upstreams `contrast` + the `expect.attack_class` enum to reloaded; #28 then mirrors both files byte-for-byte. Until both land, content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`. Verified on the #28 branch against reloaded `d1aa077`: drift none, `tools/ci.sh` green with no skip flags | open PRs |
 
 Counts last measured (this machine): `ruff` clean; `pytest` full run green except the 6 environmental root-user `tests/sandbox/test_server_deploy.py::test_startup_bind_policy` cases that also fail on `main`; one flaky test seen once (`tests/storage/test_span_store.py::test_concurrent_writers_share_the_wal_file`). There is no CI (`.github/workflows` does not exist), so PRs carry no statuses; gates are local.
 
@@ -313,8 +333,8 @@ Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, 
 
 ### Phase 4: content pack to v1.0 (`mailroom-sandbox-content`)
 
-- **C-01 Dataset join (old 3.1).** [ ] Where huggingface.co is reachable: `python3 tools/build_attachments.py --hf --counts --select 3`; fills the 54 `rows_unverified` rows in `taxonomy/strata.csv` via the generator, never by hand.
-- **C-02 Relation truth (3.2).** Needs C-01. [ ] Verify the dataset's relationship vocabulary against reloaded's 8 `relation_kinds.v1.json`, then populate `relations/relations_truth.csv`.
+- **C-01 Dataset join (old 3.1).** [x] DONE (content #27, `c3d5cfe`): the 54 `rows_unverified` rows in `taxonomy/strata.csv` are resolved (54 `active`, 2 `catalog_only`), filled by the generator (`tools/build_attachments.py --hf --counts --select 3`), never by hand.
+- **C-02 Relation truth (3.2).** [x] Dataset join DONE (content #27): 233 dataset rows in `attachments/manifest.csv`, `responds_to`/`answers` added to `relations/dataset_relation_map.csv`. [ ] Still open: verify the dataset's relationship vocabulary against reloaded's 8 `relation_kinds.v1.json`, then populate `relations/relations_truth.csv`.
 - **C-03 Frozen emails (3.3).** Needs an OpenRouter key (owner). [ ] Generate into `emails/frozen/`, set provenance, keep `emails/emails_index.csv` generated.
 - **C-04 Finalise E, S, T (3.4) and review log (3.5).** [ ] Every attack class covered; review log for promoted evasions in `adversary/` + `protocol/`.
 - **C-05 Promotion.** Human step. [ ] `review` -> `frozen` for A13-17, B1-8, C1-11, D1-6 (30 scenarios); H-series stays `draft` until its first single-run (see `docs/HELD_OUT_SCENARIOS.md` in reloaded).
@@ -339,10 +359,10 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 #### K-01: Make the bundle sha256 reproducible. Blocks X-01.
 **Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the pin was first taken from a local build (the pack has since been published with the same sha256).
 **Where:** content `tools/build_bundle.py`, `tools/release.sh`, new `tools/requirements.txt`, `CONTENT_SPEC.md` section on releases.
-- [ ] Pin `zstandard==0.25.0` in `tools/requirements.txt`; `build_bundle.py` always prints the version and, under `--release` (passed by `release.sh` only; unit tests build without it), refuses any other version with a clear message.
+- [x] Pin `zstandard==0.25.0` in `tools/requirements.txt`; `build_bundle.py` always prints the version and, under `--release` (passed by `release.sh` only; unit tests build without it), refuses any other version with a clear message. (Done in content `840e4e8`.)
 - [x] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) to a separate `BUILD_INFO` release asset with the `zstandard` version, so reproducibility can be checked across compressor versions. `SHA256SUMS` stays two lines (an extra line would break `sha256sum -c`). Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras). Done in content `840e4e8` (pinned `zstandard==0.25.0` in `tools/requirements.txt`; `--release` refuses other versions).
-- [ ] Test: build twice, same bytes; build with a wrong zstandard version, expect a refusal (unittest with the version string patched).
-- [ ] Doc: state that the **published asset's bytes** are the verification authority for a download; rebuilds are an audit.
+- [x] Test: build twice, same bytes; build with a wrong zstandard version, expect a refusal (unittest with the version string patched). DONE (content #24, `tests/test_build_bundle.py`, merge `ff02875`).
+- [x] Doc: state that the **published asset's bytes** are the verification authority for a download; rebuilds are an audit. DONE (content #24, `CONTENT_SPEC.md` §12).
 - [x] `v0.5.0` is already published from `f650cfd` and its asset sha256 equals the lock's `7a32e86e...`; any rebuild must use the pinned `zstandard` version and be compared against that sha256 before touching the lock.
 
 #### K-02: Content tooling must never crash or silently accept bad data
@@ -359,11 +379,11 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 | 5 MB scenario file | accepted (informational: no size cap) |
 
 **Where:** content `tools/validate.py` (`read_csv` ~line 145, `load_yaml`, ID-range check ~line 1194), new `tests/test_fault_injection.py`; seed harness is `tools/fault_inject.py` (committed on content branch `claude/upbeat-euler-85ifix`).
-- [ ] One strict CSV reader used everywhere: `utf-8-sig`, reject NUL, reject rows whose cell count differs from the header, reject duplicate keys for every file whose key is declared in `schemas/content_files.json`. Each failure is a reported ERROR naming file and line.
-- [ ] `load_yaml` and the ID-range check report parse errors as ERRORs (no raw traceback anywhere).
-- [ ] Outer guard in `main()`: any other unexpected exception becomes `ERROR internal: <type>: <msg>` and exit code 2, never a bare traceback.
-- [ ] Optional cap (e.g. 1 MB) on scenario/template files, as a WARN first.
-- [ ] Turn `tools/fault_inject.py` into unittest cases (each mutation has an expected outcome; `csv_crlf` is a legitimate accept). Acceptance: 0 CRASH and 0 unexpected MISSED.
+- [x] One strict CSV reader used everywhere: `utf-8-sig`, reject NUL, reject rows whose cell count differs from the header, reject duplicate keys for every file whose key is declared in `schemas/content_files.json`. Each failure is a reported ERROR naming file and line.
+- [x] `load_yaml` and the ID-range check report parse errors as ERRORs (no raw traceback anywhere).
+- [x] Outer guard in `main()`: any other unexpected exception becomes `ERROR internal: <type>: <msg>` and exit code 2, never a bare traceback.
+- [x] Optional cap (1 MB) on scenario/template files, as a WARN first (content #23, `MAX_CONTENT_BYTES`; `tools/validate.py`).
+- [x] Turn `tools/fault_inject.py` into unittest cases (each mutation has an expected outcome; `csv_crlf` is a legitimate accept). Acceptance: 0 CRASH and 0 unexpected MISSED. DONE (content #23): `tests/test_validate_faults.py`; harness now `26 CLEAN-FAIL, 3 EXPECTED-ACCEPT, 0 CRASH, 0 MISSED` (verified 2026-10-10).
 
 #### K-03: Settle the contradictory scenario expectations (the pack-owner list)
 **Why:** the Correspondent cannot pass scenarios whose expectations contradict each other, and every unresolved row inflates the "fail" count that reloaded reads as a code problem. Reloaded #23 (`docs/SANDBOX_SERVER.md` on that branch) lists these as bucket 1, "for the pack owner". Two were **verified here**: S1/S2/S3 render the identical template `routine_status_check` with `intent: unrelated` yet expect `fyi` priority `normal`/`normal`/`high`; D6 expects `outbox: []` for `status_request` while G4 and G7 (same intent) expect a draft reply. The rest are **reported by #23, not yet verified here**.
@@ -382,9 +402,9 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 
 #### K-05: Schema ownership, corrected (replaces the X-03 recommendation)
 **Why (measured):** the earlier audit had the direction reversed. Diffing the two copies, reloaded is the stricter one on `gen_spec.v1.json` (extra `allOf` forbidding real brands/URLs/links/phone numbers, and `required: ["forbidden"]`) and on `persona_behavior.v1.json` (`additionalProperties: false` at four levels; content has none). Content only differs by also allowing relation `unknown` in `scenario.v2.json`. All 142 pack files (scenarios, gen specs, persona behaviors) already validate against reloaded's schemas, so adopting them is safe.
-- [ ] Content copies reloaded's `schemas/*.json` byte-for-byte; drop `unknown`.
-- [ ] Add the schema drift check to `tools/ci.sh` next to strata drift (`MAILROOM_RELOADED`, same pinned-commit fetch).
-- [ ] Update X-03 and D3 accordingly (done in this edit).
+- [ ] Content copies reloaded's `schemas/*.json` byte-for-byte; drop `unknown`. **IN PROGRESS (2026-10-10):** content #28 (mirror) + reloaded #89 (upstream the `contrast` reason and the `expect.attack_class` enum that content carried and the consumer lacked). Both open; **merge #89 before #28**. Until both land, content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`.
+- [x] Add the schema drift check to `tools/ci.sh` next to strata drift (`MAILROOM_RELOADED`, same pinned-commit fetch). DONE (`tools/check_schema_drift.py`; prints a loud SKIPPED notice when `MAILROOM_RELOADED` is unset).
+- [x] Update X-03 and D3 accordingly (done in this edit).
 
 #### K-06: Content CI must load the pack through the consumer's own loader
 **Why (measured):** content branch `feat/heldout-h-series` passes its own `tools/ci.sh` but fails reloaded `main`'s `load_content` (28 schema errors: name `H1_...` does not match `^[A-GST]...`). Content CI cannot see consumer-side contract changes, so the break is found only after pinning. On `main`, the raw checkout and the extracted bundle both load clean (88 scenarios, 14 personas, 40 gen specs, 0 errors).
@@ -432,7 +452,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 | --- | --- | --- |
 | D1 | Which mailbox copy is canonical, #44 or #23? | #44; re-cut #23's triage v2 on top |
 | D2 | Publish `v0.5.0` at `f650cfd` first, then H as `v0.6.0`? Or skip v0.5.0 and re-pin straight to H? | Publish `v0.5.0` first (the lock already says so) |
-| D3 | Schema direction. **Corrected:** reloaded's copies are the stricter ones (K-05), so nothing needs upstreaming. | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check |
+| D3 | Schema direction. **Corrected again 2026-10-10:** reloaded's copies are stricter on `gen_spec`/`persona_behavior`, but content carried two additions reloaded lacked (the `contrast` reason and the `expect.attack_class` enum), so those were upstreamed first (reloaded #89) before content mirrors (content #28). | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check; upstream content-only additions first |
 | D4 | Approve deleting the branches in X-02 (and whether to keep the docstring commit) | Yes for merged; drop docstring commit unless wanted |
 | D5 | Delete the `revert-26-*` branch? | Yes |
 | D6 | Build the deferred replay items (R-13, R-14) now or later? | **Done 2026-10-10** (R-13 via #59, R-14 via #55) |
@@ -453,7 +473,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [x] PR #80 merged (`b5f09f9`).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
-- [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
+- [ ] K-00..K-06 done in the content repo: [x] fault-injection suite shows 0 crashes and 0 unexpected accepts (#23); [x] the bundle sha256 rebuilds identically with the pinned `zstandard` (#24); [x] no un-annotated scenario contradiction remains (K-03 lint in `ci.sh`); [x] content CI loads the pack through reloaded's loader (K-06). [ ] **K-05 still open:** content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json` until reloaded #89 and content #28 merge.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
 - [ ] Docker images build and the compose stack launches with evidence under `docs/evidence/` (issues #81-#84, P6-D4); until then every Docker claim in this plan is static-only.
 - [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).

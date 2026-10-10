@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Refreshed `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`: content PRs #23-#27 merged (K-01, K-02, content issues #12/#13, C-01/C-02), with the verified content `main` state (116 scenarios, 228 unit tests); K-05 marked in progress (content #28 and this repo's #89 still open, so content `main` currently drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`); the open-PR and ledger tables and D3 updated.
+
 ### Added
 
 - TUI `inbox` command (`src/mailroom_reloaded/api/tui/commands/sandbox.js`): opens the sandbox UI's Correspondent inbox (Ingress queue plus the Boss mailbox dock filtered to `role=correspondent`) in a new tab so sandbox simulation experiments can be watched live; flags `--tab`, `--scenario`, `--message`, `--thread`, `--no-mailbox`, `--print`. The link never carries a token. `/tui#inbox` and `/tui#inbox=<tab>` deep links run it (`deeplink.js`), and the replay inspector shows a `sandbox` row when `/links` has `sandbox_url`.
