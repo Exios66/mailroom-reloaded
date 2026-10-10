@@ -34,9 +34,10 @@ import re
 import sys
 import threading
 import time
+from collections.abc import MutableMapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import (
@@ -1075,6 +1076,27 @@ async def lifespan(application: FastAPI):
             await asyncio.to_thread(watcher_thread.join, timeout=30)
 
 
+#: Liveness/readiness/metrics probe paths. FastAPI's native OpenTelemetry would
+#: otherwise create a span per probe (the container healthcheck hits /health every
+#: few seconds), filling Phoenix with health noise instead of pipeline traces.
+_PROBE_PATHS = frozenset({"/health", "/ready", "/metrics", "/livez", "/readyz"})
+
+#: Static asset prefixes served by the UI/TUI; not worth a span each.
+_STATIC_PREFIXES = ("/tui/assets/", "/ui/assets/", "/static/", "/favicon")
+
+
+def _telemetry_exclude(scope: MutableMapping[str, Any]) -> bool:
+    """FastAPI native-telemetry exclude: skip probes and static assets.
+
+    Wired through ``FastAPI(telemetry={"exclude": ...})`` so Phoenix keeps the
+    mailroom pipeline traces instead of health-check and asset noise.
+    """
+    if scope.get("type") != "http":
+        return False
+    path = scope.get("path", "")
+    return path in _PROBE_PATHS or path.startswith(_STATIC_PREFIXES)
+
+
 def create_app() -> FastAPI:
     """Build the API application with its lifespan, routes and UI endpoints."""
     application = FastAPI(
@@ -1082,6 +1104,7 @@ def create_app() -> FastAPI:
         description="Compressed Digital Mailroom API",
         version=__version__,
         lifespan=lifespan,
+        telemetry={"exclude": _telemetry_exclude, "operation_spans": False},
     )
     application.include_router(api)
     application.include_router(push_api)

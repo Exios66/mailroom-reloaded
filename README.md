@@ -58,6 +58,9 @@ documented in [docs/JEV.md](docs/JEV.md).
 
 ## Quickstart
 
+> Step-by-step walkthrough (Docker dev stack, TUI, uploading a real document,
+> Phoenix traces, the Modal vLLM deploy): **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.
+
 ```bash
 cp .env.example .env
 # edit .env: set DEFAULT_PROVIDER and its credentials (openrouter / vllm / llamafile)

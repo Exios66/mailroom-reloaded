@@ -3,9 +3,10 @@
   //
   // Builds deploy/Dockerfile.dev and mounts the repository at /app. The image's
   // /opt/venv lives outside /app, so it survives the mount and the toolchain is
-  // ready with no extra install step (works offline). postStartCommand boots the
-  // bundled mock provider (127.0.0.1:8001) and the API (0.0.0.0:8000) so the
-  // stack is live the moment you attach.
+  // ready with no extra install step (works offline). The repo's ./data is
+  // bind-mounted at /data (the associated volume), so runs persist across
+  // rebuilds. postStartCommand boots the bundled mock provider (127.0.0.1:8001)
+  // and the API (0.0.0.0:8000) so the stack is live the moment you attach.
   //
   // Open with: Command Palette -> "Dev Containers: Reopen in Container".
   // For the full app + watcher + observability stack, use the Docker Compose
@@ -18,6 +19,10 @@
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
   "workspaceFolder": "/app",
+  "mounts": [
+    "source=${localWorkspaceFolder}/data,target=/data,type=bind,consistency=cached"
+  ],
+  "initializeCommand": "mkdir -p ${localWorkspaceFolder}/data",
   "remoteUser": "app",
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
