@@ -46,6 +46,29 @@ def normalize_trace_keep(value: Any) -> str:
 
 
 # Optional Jev knobs: a blank ``.env`` line must mean "unset", not a parse error.
+def _public_link(value: Any) -> Any:
+    """Normalise a configured link base: plain http(s) host, no userinfo/query/fragment.
+
+    ``/links`` is unauthenticated, so a credential-bearing or non-http(s) value must fail
+    at startup rather than be served to every caller. A trailing slash is stripped so
+    ``f"{base}/path"`` never produces ``//``.
+    """
+    if not isinstance(value, str):
+        return value
+    from urllib.parse import urlsplit
+
+    raw = value.strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an http(s) URL with a host")
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise ValueError("must not contain credentials")
+    if parts.query or parts.fragment:
+        raise ValueError("must not contain a query string or fragment")
+    return raw.rstrip("/")
+
+
+_LinkUrl = Annotated[str, BeforeValidator(_public_link)]
 _JevStr = Annotated[str | None, BeforeValidator(_empty_to_none)]
 _JevFloat = Annotated[float | None, BeforeValidator(_empty_to_none)]
 _JevInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
@@ -66,6 +89,7 @@ class DocClass(BaseModel):
 
     @property
     def schema(self) -> str:  # type: ignore[override]
+        """Return the schema name stored under the taxonomy YAML ``schema`` key."""
         return self.schema_name
 
 
@@ -95,6 +119,11 @@ class RunConditions(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Validate run conditions, accepting positional values in field order.
+
+        Positional values override matching keyword arguments; surplus positional
+        values are ignored. Invalid field values raise Pydantic ``ValidationError``.
+        """
         # Positional construction: RunConditions(24000, 8192, 0.7, 2, "frozen")
         if args:
             kwargs.update(zip(type(self).model_fields, args))
@@ -121,6 +150,10 @@ class Taxonomy(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
     def confidence_for(self, doc_type: str | None) -> Thresholds:
+        """Return global thresholds with any overrides for ``doc_type`` applied.
+
+        ``None`` and unknown classes use the global defaults.
+        """
         base = self.confidence
         merged = {k: base[k] for k in ("low", "high", "judge_band_high", "retry_max")}
         if doc_type is not None:
@@ -128,13 +161,20 @@ class Taxonomy(BaseModel):
         return Thresholds(**merged)
 
     def agent(self, name: str) -> AgentCfg:
+        """Return the named agent configuration; raise ``KeyError`` if absent."""
         return self.agents[name]
 
     def specialist_conditions(self, doc_type: str) -> RunConditions:
+        """Return conditions for ``doc_type``; raise ``KeyError`` if absent."""
         return self.conditions[doc_type]
 
 
 def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
+    """Validate a decoded taxonomy mapping and retain it in ``raw``.
+
+    Missing required keys raise ``KeyError``; invalid model fields raise
+    Pydantic ``ValidationError``.
+    """
     classes = {d["key"]: DocClass(**d) for d in data["doc_classes"]}
     return Taxonomy(
         classes=classes,
@@ -148,6 +188,11 @@ def _build_taxonomy(data: dict[str, Any]) -> Taxonomy:
 
 @lru_cache(maxsize=1)
 def load_taxonomy() -> Taxonomy:
+    """Load and cache the packaged YAML taxonomy as a shared instance.
+
+    Resource read errors, YAML parsing errors, missing keys, and Pydantic
+    validation errors propagate to the caller.
+    """
     text = (resources.files("mailroom_reloaded") / "config" / "taxonomy.yaml").read_text("utf-8")
     return _build_taxonomy(yaml.safe_load(text))
 
@@ -224,10 +269,20 @@ class Settings(BaseSettings):
     anchor_key: _JevStr = Field(default=None, repr=False)
     anchor_key_file: _OptPath = None
     gpu_usd_per_hour: float = 0.80
+    # Public base URLs for the UI's outbound observability links (GET /links). With the
+    # ``MAILROOM_`` env prefix these read ``MAILROOM_PUBLIC_URL`` / ``MAILROOM_PHOENIX_URL``
+    # / ``MAILROOM_GRAFANA_URL``. No secret is stored here: each must be a plain http(s) URL without credentials.
+    public_url: _LinkUrl = "http://localhost:8000"
+    phoenix_url: _LinkUrl = "http://localhost:6006"
+    grafana_url: _LinkUrl = "http://localhost:3000"
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Return cached settings loaded from environment variables and ``.env``.
+
+    Invalid settings raise Pydantic ``ValidationError``.
+    """
     return Settings()
 
 

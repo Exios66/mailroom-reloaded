@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 def _now() -> datetime:
+    """Return the current timezone-aware UTC timestamp."""
     return datetime.now(UTC)
 
 

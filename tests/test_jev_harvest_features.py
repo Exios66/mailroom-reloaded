@@ -118,13 +118,16 @@ def test_feature_target_parses_hub_string_labels(value, expected):
     assert target.expected_escalate is expected
 
 
-def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch):
+@pytest.mark.parametrize("extract_route", ["proceed", "human_review"])
+def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch, extract_route):
+    """Preserve target order and score each usable route against its label."""
     monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
     module = _load_module()
 
     def responder(state):
+        """Return stage-specific routes and simulate unusable classify answers."""
         if state["stage"] == "extract":
-            return {"route": JevAnswer(type="choice", choice="proceed", confidence=0.7)}
+            return {"route": JevAnswer(type="choice", choice=extract_route, confidence=0.7)}
         confidence = round(float(state["confidence"]), 2)
         if confidence == 0.8:
             return {"route": JevAnswer(type="choice", choice="retry", confidence=0.9)}
@@ -156,7 +159,7 @@ def test_harvest_features_writes_calibration_rows(tmp_path, monkeypatch):
     out = _read_rows(out_path)
     assert len(out) == 3
     # Deterministic input order, not completion order; calibration-row shape.
-    assert [r["correct"] for r in out] == [1, 1, 0]
+    assert [r["correct"] for r in out] == [1, 1, int(extract_route == "human_review")]
     assert all(
         set(r) == {"split", "provider", "model", "doc_type", "confidence", "correct"}
         for r in out
@@ -176,3 +179,90 @@ def test_main_features_requires_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
     rc = module.main(["--mode", "features", "--out", str(tmp_path / "out.jsonl")])
     assert rc == 1
+
+
+def test_harvest_features_refuses_single_class_labels(tmp_path, monkeypatch):
+    """A single label class is degenerate; refuse before building a client."""
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "local")
+    module = _load_module()
+    monkeypatch.setattr(module, "JevClient", lambda cfg: pytest.fail("client built"))
+
+    rows = [
+        {"split": "train", "stage": "classify", "confidence": 0.8, "retry_expected": 0},
+        {"split": "train", "stage": "extract", "confidence": 0.3, "review_expected": 0},
+    ]
+    out = tmp_path / "out.jsonl"
+    rc = module.main(
+        ["--mode", "features", "--rows", str(_write_rows(tmp_path / "f.jsonl", rows)),
+         "--out", str(out)]
+    )
+    assert rc == 1
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("surviving_label", [0, 1, None])
+@pytest.mark.parametrize("existing_output", [False, True])
+def test_harvest_features_refuses_degenerate_survivors(
+    tmp_path, monkeypatch, capsys, surviving_label, existing_output
+):
+    """Fail and explicitly preserve prior output when answers lose a label class."""
+    module = _load_module()
+    monkeypatch.setattr(module, "jev_config", lambda: _StubCfg())
+
+    def responder(state):
+        """Return usable routes only for the selected target label class."""
+        if state["confidence"] != surviving_label:
+            return {}
+        # Surviving targets share an expected label but have mixed correctness.
+        route = "retry" if state["stage"] == "classify" else "proceed"
+        return {"route": JevAnswer(type="choice", choice=route, confidence=0.9)}
+
+    monkeypatch.setattr(module, "JevClient", lambda cfg: _StubClient(responder))
+    rows = [
+        {"stage": stage, "confidence": label, label_key: label}
+        for label in (0, 1)
+        for stage, label_key in (
+            ("classify", "retry_expected"), ("extract", "review_expected")
+        )
+    ]
+    rows_path = _write_rows(tmp_path / "features.jsonl", rows)
+    out = tmp_path / "out.jsonl"
+    if existing_output:
+        out.write_text("existing calibration rows\n", encoding="utf-8")
+
+    rc = module.main(
+        ["--mode", "features", "--rows", str(rows_path), "--out", str(out)]
+    )
+
+    assert rc == 1
+    stderr = capsys.readouterr().err
+    assert "FATAL:" in stderr
+    assert "surviving rows" in stderr
+    assert f"No output written to {out}" in stderr
+    assert "any existing output is preserved from a previous run" in stderr
+    if existing_output:
+        assert out.read_text(encoding="utf-8") == "existing calibration rows\n"
+    else:
+        assert not out.exists()
+
+
+def test_feature_route_verify_is_not_an_escalation():
+    """``verify`` is the caution tier, not a review; only real routes escalate."""
+    module = _load_module()
+    target = module._feature_target(
+        {"stage": "extract", "review_expected": 1, "confidence": 0.4}, 0
+    )
+
+    class _Client:
+        cfg = _StubCfg()
+
+        def __init__(self, route):
+            """Configure the route returned by this synthetic Jev client."""
+            self._route = route
+
+        def ask(self, state, questions):
+            """Return the configured route with a fixed confidence."""
+            return {"route": JevAnswer(type="choice", choice=self._route, confidence=0.9)}
+
+    assert module._run_feature(_Client("verify"), target)["correct"] == 0
+    assert module._run_feature(_Client("human_review"), target)["correct"] == 1

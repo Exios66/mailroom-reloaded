@@ -37,6 +37,8 @@ INTAKE_SECTION_ROLES: tuple[str, ...] = (
 )
 
 _TEXT_SUFFIXES = {".txt", ".md", ".text"}
+#: Every upload suffix the clerk can parse; the API accepts exactly these.
+SUPPORTED_EXTENSIONS = frozenset(_TEXT_SUFFIXES | {".pdf", ".docx", ".png", ".jpg", ".jpeg"})
 
 
 @dataclass
@@ -82,8 +84,10 @@ def validate_triage(raw: dict) -> dict:
 def validate_intake(result: dict, text: str) -> dict:
     """Clamp an intake answer to the live contracts.
 
-    Sections are kept only with integer in-bounds offsets, monotonic and
-    non-overlapping, catalog roles, at most 40. Invalid sections are dropped.
+    Section offsets are converted to integers and checked against ``text``
+    (start inclusive, end exclusive, in characters). Keep at most 40 sections
+    in start order, dropping invalid or overlapping spans and mapping unknown
+    roles to ``other``.
     """
     text = text or ""
     raw_triage = result.get("triage")
@@ -166,6 +170,30 @@ def ingest(path: Path) -> IngestResult:
         if suffix in _TEXT_SUFFIXES:
             raw = path.read_text(encoding="utf-8", errors="replace")
             method, pages, stats = "text", 1, {}
+        elif suffix == ".docx":
+            from docx import Document
+            from docx.table import Table
+
+            document = Document(path)
+            blocks = []
+            for block in document.iter_inner_content():
+                if isinstance(block, Table):
+                    blocks.extend("\t".join(cell.text for cell in row.cells) for row in block.rows)
+                else:
+                    blocks.append(block.text)
+            raw = "\n".join(blocks)
+            method, pages, stats = "text", 1, {}
+        elif suffix in {".png", ".jpg", ".jpeg"}:
+            try:
+                raw = transcribe_pages(path, page_usage)
+            except Exception as exc:  # noqa: BLE001 - ingest never raises
+                return _fail(
+                    "vision",
+                    f"image vision transcription failed: {exc}",
+                    pages=1,
+                    usage=sum(page_usage, Usage()),
+                )
+            method, pages, stats = "vision", 1, {"text_layer": False}
         elif suffix == ".pdf":
             try:
                 raw, pages = _pdf.extract_text(path)

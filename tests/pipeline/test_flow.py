@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from fakes.openai_server import FakeOpenAI
@@ -380,6 +381,7 @@ def test_resume_skips_completed_nodes(env, mock_provider, monkeypatch):
 
     state = flow_mod.run_document(processing_path, worker_id="w1")
 
+    assert state.report["llm_calls"] == 2
     assert calls["sort"] == 0  # sort was skipped on resume
     assert state.status == "archived"
     entries = audit_log.entries(state.doc_id)
@@ -509,3 +511,125 @@ def test_gate_retry_after_crash_resume_reexecutes_sort(env, mock_provider, monke
     assert calls["n"] == 2
     assert state.classify_attempts == 1  # one retry, not a skipped one plus a real one
     assert state.status == "archived"
+
+
+@pytest.mark.parametrize("sort_confidence", [0.99, 0.5])
+def test_review_correction_survives_crash_and_updates_report(env, mock_provider, monkeypatch, sort_confidence):
+    from mailroom_reloaded.review import resolve_review
+    from mailroom_reloaded.storage.bins import load_manifest
+
+    _patch_handoff(monkeypatch)
+    for _ in range(3):
+        _reply(mock_provider, {**CORR_SUBCLASS, "confidence": sort_confidence})
+    monkeypatch.setattr(flow_mod, '_extract', _fake_extract(confidence=0.1))
+    monkeypatch.setattr(flow_mod, 'escalate', lambda *a, **k: BossDecision(action='human_review'))
+    bins, path = _write_inbox(env)
+    parked = flow_mod.run_document(path, worker_id='w1')
+    assert parked.status == 'parked'
+
+    def crash(*args, **kwargs):
+        raise RuntimeError('interrupted correction')
+
+    monkeypatch.setattr(flow_mod, '_extract', crash)
+    with pytest.raises(RuntimeError, match='interrupted correction'):
+        resolve_review(parked.doc_id, 'correct', 'contract', 'license', bins=bins)
+    manifest = load_manifest(bins, parked.doc_id)
+    assert manifest.status == 'processing'
+    assert Path(manifest.state['path']).is_file()
+    assert manifest.state['extract_attempts'] == 0
+    seen = []
+
+    def extract(text, doc_type, doc_subclass, **kwargs):
+        seen.append((doc_type, doc_subclass))
+        return _fake_extract()(text, doc_type, doc_subclass, **kwargs)
+
+    monkeypatch.setattr(flow_mod, '_extract', extract)
+    result = flow_mod.run_document(Path(manifest.state['path']), worker_id='resume')
+    assert seen == [('contract', 'license')]
+    assert result.status == result.report['status'] == 'archived'
+    assert result.report['classification']['doc_type'] == 'correspondence'  # the sorter's result
+    assert result.report['final_classification'] == {'doc_type': 'contract', 'doc_subclass': 'license'}
+    assert audit_log.verify_chain(audit_log.entries(result.doc_id)).ok
+
+
+def test_initial_checkpoint_exists_before_ingest(env, monkeypatch):
+    from mailroom_reloaded.storage.bins import doc_id_for, load_manifest
+
+    bins, path = _write_inbox(env)
+    doc_id = doc_id_for(path)
+
+    def crash(*args):
+        checkpoint = load_manifest(bins, doc_id)
+        assert checkpoint is not None
+        assert Path(checkpoint.state['path']).is_file()
+        raise RuntimeError('ingest interruption')
+
+    monkeypatch.setattr(flow_mod, '_ingest', crash)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id='w1')
+    manifest = load_manifest(bins, doc_id)
+    assert manifest is not None
+    assert manifest.status == 'processing'
+    assert Path(manifest.state['path']).is_file()
+
+
+def test_resume_after_extract_keeps_llm_calls(env, mock_provider, monkeypatch):
+    """Verify a document resumed after extraction still reports the sort and extract calls."""
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
+    real_archive = flow_mod.archive_document
+
+    def boom(*a, **k):
+        raise RuntimeError("boom during archive")
+
+    monkeypatch.setattr(flow_mod, "archive_document", boom)
+    bins, path = _write_inbox(env)
+
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+
+    processing_path = next(iter(bins.processing("w1").glob("*.txt")))
+    monkeypatch.setattr(flow_mod, "archive_document", real_archive)
+    state = flow_mod.run_document(processing_path, worker_id="w1")
+
+    assert state.status == "archived"
+    assert state.report["llm_calls"] == 2
+
+
+def test_approve_after_boss_reassignment_keeps_boss_class(env, mock_provider, monkeypatch):
+    """Verify approving a document parked after a boss reassignment extracts and archives under that class."""
+    from mailroom_reloaded.review import resolve_review
+
+    _patch_handoff(monkeypatch)
+    for _ in range(3):
+        _reply(mock_provider, {**CORR_SUBCLASS, "confidence": 0.99})
+
+    def extract(text, doc_type, doc_subclass, **kwargs):
+        if doc_type == "insurance_claim":
+            return ExtractResult(doc_type, {}, False, None, 0.1, None, 1, Usage(calls=1))
+        return _fake_extract(confidence=0.1)(text, doc_type, doc_subclass, **kwargs)
+
+    monkeypatch.setattr(flow_mod, "_extract", extract)
+    monkeypatch.setattr(
+        flow_mod, "escalate",
+        lambda *a, **k: BossDecision(action="reassign_class", doc_type="insurance_claim"),
+    )
+    bins, path = _write_inbox(env)
+    parked = flow_mod.run_document(path, worker_id="w1")
+    assert parked.status == "parked"
+    assert parked.boss.action == "reassign_class"
+
+    seen = []
+
+    def approved_extract(text, doc_type, doc_subclass, **kwargs):
+        seen.append(doc_type)
+        return _fake_extract(confidence=1.0)(text, doc_type, doc_subclass, **kwargs)
+
+    monkeypatch.setattr(flow_mod, "_extract", approved_extract)
+    result = resolve_review(parked.doc_id, "approve", bins=bins)
+    assert seen == ["insurance_claim"]
+    assert result.status == "archived"
+    assert len(list(bins.archive.glob("insurance_claim/*.txt"))) == 1
+    assert result.report["classification"]["doc_type"] == "correspondence"
+    assert result.report["final_classification"]["doc_type"] == "insurance_claim"

@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-09** by [the core plan](../plans/2026-10-09-mailroom-core-plan.md). Kept for history only; do not edit or add tasks here.
+
 # Status comment for issue #1 (mailroom-reloaded plan tracker)
 
 Draft, not posted. Date: 2026-10-08. Version: 0.2.0.

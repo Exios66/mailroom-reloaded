@@ -31,12 +31,20 @@ PRODUCTION DOCTRINE (mailroom pipeline):
 
 
 def _vision_cfg() -> tuple[int, int]:
+    """Return the vision page cap and dots per inch, defaulting to 10 and 150.
+
+    Taxonomy loading and integer conversion errors propagate.
+    """
     cfg = load_taxonomy().raw.get("vision") or {}
     return int(cfg.get("max_pages", 10)), int(cfg.get("dpi", 150))
 
 
 def render_pdf_pages(path: Path, cap: int | None = None, dpi: int | None = None) -> list[str]:
-    """Render PDF pages to PNG data URIs. ``cap`` of 0/None renders every page."""
+    """Render PDF pages in order as PNG data URIs at ``dpi`` dots per inch.
+
+    ``None`` or a nonpositive ``cap`` renders every page. Omitted ``dpi`` uses
+    the taxonomy setting. PDF opening and rendering errors propagate.
+    """
     import fitz
 
     if dpi is None:

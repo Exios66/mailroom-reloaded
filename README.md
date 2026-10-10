@@ -160,7 +160,9 @@ is `false`. A session id is `run:<id>`, `session:<id>`, `doc:<id>` or
 `window:<from_ns>-<to_ns>`; a bare id means a run.
 
 Uploads are capped at 50 MB (`MAILROOM_MAX_UPLOAD_BYTES`) and accept
-`.txt .md .pdf .docx .rtf .html .htm` (`api/app.py:60-66`).
+`.txt .md .text .pdf .docx .png .jpg .jpeg` (`SUPPORTED_EXTENSIONS` in
+`ingest/clerk.py`). Images and scanned PDFs need a configured vision provider.
+RTF and HTML are rejected with 400 because the clerk has no parser for them.
 
 ### `/ui`
 
@@ -186,8 +188,10 @@ and click through to Phoenix (`:6006`) and Grafana (`:3000`).
 - [docs/gmail-intake.md](docs/gmail-intake.md) — Gmail intake setup and limits.
 - [docs/DEV_SERVER.md](docs/DEV_SERVER.md) — local dev-server workflow.
 - [deploy/README.md](deploy/README.md) — Modal vLLM deployment.
-- Design and plan: `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`,
-  `docs/superpowers/plans/2026-10-07-mailroom-reloaded.md`.
+- Design: `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`.
+- Plan (single live plan, status ledger and file-placement rules):
+  `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`. Superseded plans:
+  `docs/superpowers/archive/`.
 
 ## Tests
 

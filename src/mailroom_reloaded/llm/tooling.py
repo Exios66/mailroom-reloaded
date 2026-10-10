@@ -42,7 +42,9 @@ class ToolLike(Protocol):
     description: str
     params_model: type[BaseModel]
 
-    def fn(self, **kwargs: Any) -> str: ...
+    def fn(self, **kwargs: Any) -> str:
+        """Execute the tool with model-supplied arguments and return its text result."""
+        ...
 
 
 @dataclass
@@ -60,6 +62,7 @@ _NO_TOOLS: set[tuple[str, str]] = set()
 
 
 def reset_tool_support_cache() -> None:
+    """Forget all endpoint/model pairs previously marked as rejecting tools."""
     _NO_TOOLS.clear()
 
 
@@ -69,7 +72,11 @@ _NOT_TOOL_SUPPORT_MARKERS = ("context length", "context window", "too many token
 
 
 def is_tool_rejection(exc: Exception) -> bool:
-    """A 400 whose body says the endpoint/model does not support tool calling."""
+    """Heuristically detect tool rejection from exception text.
+
+    Match tool/function mentions unless size or invalid-schema markers occur.
+    The caller limits this check to ``BadRequestError`` responses.
+    """
     text = str(exc).lower()
     if any(m in text for m in _NOT_TOOL_SUPPORT_MARKERS):
         return False
@@ -77,10 +84,12 @@ def is_tool_rejection(exc: Exception) -> bool:
 
 
 def mark_no_tools(key: tuple[str, str]) -> None:
+    """Cache a ``(base_url, model)`` pair so later calls use inline tool results."""
     _NO_TOOLS.add(key)
 
 
 def tool_spec(tool: ToolLike) -> dict[str, Any]:
+    """Return an OpenAI function specification using the tool parameter schema."""
     return {
         "type": "function",
         "function": {
@@ -114,6 +123,7 @@ def chat_create(client: Any, req: dict[str, Any]) -> tuple[Any, Usage]:
     timing: dict[str, float] = {}
 
     def _once() -> Any:
+        """Request one completion and record its duration in seconds on success."""
         start = time.monotonic()
         resp = client.chat.completions.create(**req)
         timing["s"] = time.monotonic() - start
@@ -131,7 +141,12 @@ def chat_create(client: Any, req: dict[str, Any]) -> tuple[Any, Usage]:
 
 
 def _prefill_arg_sets(tool: ToolLike) -> list[dict[str, Any]] | None:
-    """Argument sets a tool can be run with unprompted, or None when it needs free-form input."""
+    """Return argument combinations for unprompted tool execution.
+
+    No required arguments yield [{}]. Required enum/const arguments yield at
+    most eight combinations; free-form arguments or more combinations yield
+    ``None``.
+    """
     schema = tool.params_model.model_json_schema()
     required = schema.get("required", [])
     props = schema.get("properties", {})

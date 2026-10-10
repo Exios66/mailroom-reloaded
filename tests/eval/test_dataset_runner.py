@@ -167,6 +167,20 @@ def _patch_judge(monkeypatch):
     monkeypatch.setattr(flow_mod, "judge_grade", fake_grade)
 
 
+def _route_by_role(provider, sorter_reply):
+    """Answer the sorter with ``sorter_reply`` and every other role with ``{}``, in any order.
+
+    Overlapping documents make requests in no fixed order, so replies are keyed on the
+    request's system prompt (the sorter prompt carries its ``sorter_v14`` provenance tag).
+    """
+    def route(body):
+        system = next((m["content"] for m in body["messages"] if m["role"] == "system"), "")
+        content = sorter_reply if "sorter_v14" in system else "{}"
+        return {"kind": "reply", "content": content, "finish_reason": "stop"}
+
+    provider.route(route)
+
+
 def _script_pipeline(provider, sampled, gts):
     """Queue sorter and extraction replies for every sampled document."""
     for doc in sampled:
@@ -443,7 +457,8 @@ def test_eval_run_records_rows(env, mock_provider, monkeypatch):
     _patch_coverage(monkeypatch)
     _patch_judge(monkeypatch)
     sampled, gts = _sampled()
-    _script_pipeline(mock_provider, sampled, gts)
+    first = gts[sampled[0].filename]
+    _route_by_role(mock_provider, _sorter_payload(first.expected, first.expected_subclass))
 
     run_id = run_eval(
         EvalConfig(
@@ -518,7 +533,8 @@ def test_eval_run_is_recorded_in_the_archive_ledger(env, mock_provider, monkeypa
     _patch_coverage(monkeypatch)
     _patch_judge(monkeypatch)
     sampled, gts = _sampled()
-    _script_pipeline(mock_provider, sampled, gts)
+    first = gts[sampled[0].filename]
+    _route_by_role(mock_provider, _sorter_payload(first.expected, first.expected_subclass))
 
     run_id = run_eval(
         EvalConfig(local_dir=FIXTURES, per_class=2, seed=42, concurrency=4, judge_sample_rate=1.0)

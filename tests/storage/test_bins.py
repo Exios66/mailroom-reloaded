@@ -90,3 +90,54 @@ def test_resume_point():
     assert next_node(m, NODE_ORDER) == "gate_classify"
     m.completed_nodes = list(NODE_ORDER)
     assert next_node(m, NODE_ORDER) is None
+
+
+def test_enqueue_publishes_complete_bytes_and_survives_immediate_claim(tmp_path, monkeypatch):
+    import os
+
+    bins = Bins(tmp_path)
+    real_link = os.link
+    claimed = []
+
+    def publish(src, dest):
+        assert not [p for p in bins.inbox.iterdir() if not p.name.startswith('.')]
+        assert src.read_bytes() == b'complete document'
+        real_link(src, dest)
+        claimed.append(bins.claim(dest, 'watcher'))
+
+    monkeypatch.setattr(os, 'link', publish)
+    dest = bins.enqueue(b'complete document', 'letter.txt')
+    assert not dest.exists()
+    assert claimed[0].read_bytes() == b'complete document'
+    assert not list(bins.inbox.iterdir())
+
+
+def test_enqueue_collision_preserves_both_contents(tmp_path):
+    bins = Bins(tmp_path)
+    first = bins.enqueue(b'first', 'letter.txt')
+    second = bins.enqueue(b'second', 'letter.txt')
+    assert first != second
+    assert first.read_bytes() == b'first'
+    assert second.read_bytes() == b'second'
+
+
+def test_enqueue_cleans_staging_on_publish_failure(tmp_path, monkeypatch):
+    import os
+
+    bins = Bins(tmp_path)
+
+    def fail(*args):
+        raise OSError('disk failure')
+
+    monkeypatch.setattr(os, 'link', fail)
+    with pytest.raises(OSError, match='disk failure'):
+        bins.enqueue(b'document', 'letter.txt')
+    assert not list(bins.inbox.iterdir())
+
+
+def test_enqueue_publishes_world_readable_file(tmp_path):
+    import stat
+
+    bins = Bins(tmp_path)
+    dest = bins.enqueue(b'letter', 'letter.txt')
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o644

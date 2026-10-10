@@ -419,3 +419,35 @@ def test_lock_degrades_without_fcntl(bins, monkeypatch):
     lock = watcher._acquire_watcher_lock(bins.base / watcher.WATCHER_LOCK_NAME)
     assert lock is not None
     watcher._release_lock(lock)
+
+
+@pytest.mark.parametrize("failure_site", ["ledger_for", "close_other_live_runs"])
+def test_startup_continues_when_ledger_closeout_fails(bins, monkeypatch, failure_site):
+    monkeypatch.setattr(watcher._run_ledger, "ledger_for", Mock(return_value=Mock()))
+    failure = Mock(side_effect=OSError("ledger unavailable"))
+    monkeypatch.setattr(watcher._run_ledger, failure_site, failure)
+    instance = watcher.Watcher(bins, "worker")
+
+    assert instance.resume_processing() == 0
+
+    failure.assert_called_once()
+    assert instance._startup_done is True
+
+
+def test_startup_sweeps_only_stale_upload_staging_files(bins):
+    """Verify startup removes abandoned upload staging files and keeps fresh ones and documents."""
+    import os
+    import time
+
+    stale = bins.inbox / ".upload-stale"
+    fresh = bins.inbox / ".upload-fresh"
+    document = bins.inbox / "letter.txt"
+    for path in (stale, fresh, document):
+        path.write_bytes(b"content")
+    old = time.time() - 2 * 3600
+    os.utime(stale, (old, old))
+    instance = watcher.Watcher(bins, "worker")
+    assert instance.resume_processing() == 0
+    assert not stale.exists()
+    assert fresh.exists()
+    assert document.exists()

@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -26,6 +27,7 @@ class FakeOpenAI:
         self.requests: list[dict[str, Any]] = []
         self._queue: deque[dict[str, Any]] = deque()
         self._reject_tools = False
+        self._router: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
         self._lock = threading.Lock()
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
@@ -47,6 +49,15 @@ class FakeOpenAI:
     def fail(self, status: int, times: int = 1, message: str = "scripted failure") -> FakeOpenAI:
         for _ in range(times):
             self._queue.append({"kind": "fail", "status": status, "message": message})
+        return self
+
+    def route(self, fn: Callable[[dict[str, Any]], dict[str, Any] | None]) -> FakeOpenAI:
+        """Answer each request with the item ``fn(body)`` returns; ``None`` falls back to the FIFO queue.
+
+        Use this when concurrent callers make requests in no fixed order, so the
+        reply must be chosen by request content rather than by arrival order.
+        """
+        self._router = fn
         return self
 
     def reject_tools(self) -> FakeOpenAI:
@@ -77,9 +88,11 @@ class FakeOpenAI:
                         {"error": {"message": "tools are not supported", "type": "invalid_request_error"}},
                         status_code=400,
                     )
-                if not self._queue:
-                    return JSONResponse({"error": {"message": "script exhausted"}}, status_code=418)
-                item = self._queue.popleft()
+                item = self._router(body) if self._router is not None else None
+                if item is None:
+                    if not self._queue:
+                        return JSONResponse({"error": {"message": "script exhausted"}}, status_code=418)
+                    item = self._queue.popleft()
             if item["kind"] == "fail":
                 return JSONResponse({"error": {"message": item["message"]}}, status_code=item["status"])
             return JSONResponse(self._completion(item, body))

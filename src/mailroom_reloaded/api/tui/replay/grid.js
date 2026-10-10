@@ -2,6 +2,8 @@
 // A row is an array of [text, cls] segments. No DOM, no clock; every untrusted
 // string is only sanitised (control chars -> space) and truncated, never interpreted.
 
+import { getPanel } from './panels.js';
+
 const CLASSES = new Set(['dim', 'ok', 'warn', 'err', 'info', 'hot', 'sel']);
 const MIN_COLS = 60;
 const MAX_COLS = 160;
@@ -53,8 +55,8 @@ export function fmtTime(sec) {
   return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${rest % 10}`;
 }
 
-/** Clip a segment list to `cols` characters (code points). */
-function clip(segs, cols) {
+/** Clip a segment list to `cols` characters (code points). Shared with panels.js. */
+export function clip(segs, cols) {
   const out = [];
   let left = cols;
   for (const [t, cls] of segs) {
@@ -116,7 +118,8 @@ function headerRow({ model, clock, sess }) {
 function trackRows({ model, st, sel, cols }) {
   const stations = Array.isArray(model.stations) ? model.stations : [];
   const docs = Array.isArray(st.docs) ? st.docs : [];
-  const total = Math.max(1, docs.length);
+  // Bars scale to the documents started by t, so the count of future documents does not show.
+  const total = Math.max(1, typeof st.started === 'number' ? st.started : docs.length);
   const counts = st.counts && typeof st.counts === 'object' ? st.counts : {};
   const out = [];
   for (const s of stations) {
@@ -155,9 +158,13 @@ function scrubRow({ model, clock, cols }) {
 
 function metricsRow({ model, st, cols }) {
   const totals = safe(() => model.runningTotalsAt(st.t), {}) || {};
-  const roll = (model.rollups && typeof model.rollups === 'object' ? model.rollups : {});
+  const firstPass = safe(() => model.firstPassAt(st.t), null);
+  const docs = Array.isArray(st.docs) ? st.docs : [];
+  // Documents started by t, out of all documents; the total is labelled as such.
+  const started = typeof st.started === 'number' ? st.started : docs.length;
+  const total = typeof st.total === 'number' ? st.total : docs.length;
   const segs = [
-    [` docs ${(st.docs || []).length}  done `, 'dim'],
+    [` docs ${started} of ${total}  done `, 'dim'],
     [String(num(st.done)), 'ok'],
     ['  failed ', 'dim'],
     [String(num(st.failed)), num(st.failed) > 0 ? 'err' : ''],
@@ -165,21 +172,43 @@ function metricsRow({ model, st, cols }) {
     [String(num(st.active)), 'info'],
     [`  tok ${compact(totals.tokens)}  ${money(totals.cost_usd)}  calls ${num(totals.llm_calls)}`, ''],
   ];
-  if (typeof roll.first_pass_rate === 'number' && Number.isFinite(roll.first_pass_rate)) {
-    segs.push([`  first-pass ${Math.round(roll.first_pass_rate * 100)}%`, 'info']);
-  }
+  // First-pass over the documents finished by t (model.firstPassAt); '--' until one has finished.
+  const fp = typeof firstPass === 'number' && Number.isFinite(firstPass) ? `${Math.round(firstPass * 100)}%` : '--';
+  segs.push([`  first-pass ${fp}`, 'info']);
   return clip(segs, cols);
 }
 
-function inspectorRows({ model, st, clock, sel, cols }) {
+/** The run's outbound observability URLs, one text row each (links may be null). */
+function externalLinkRows({ sess, links, cols }) {
+  const cfg = links && typeof links === 'object' ? links : {};
+  const phoenix = typeof cfg.phoenix_url === 'string' ? cfg.phoenix_url : '';
+  const grafana = typeof cfg.grafana_url === 'string' ? cfg.grafana_url : '';
+  const id = sess && typeof sess.id === 'string' ? sess.id : '';
+  const run = id.startsWith('run:') ? id.slice(4) : null;
+  const out = [];
+  if (phoenix) {
+    out.push(clip([[' phoenix  ', 'dim'], [truncate(phoenix, cols - 10), 'info']], cols));
+  }
+  if (grafana && run) {
+    const url = `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}`;
+    out.push(clip([[' grafana  ', 'dim'], [truncate(url, cols - 10), 'info']], cols));
+  }
+  return out;
+}
+
+function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
   const docs = Array.isArray(st.docs) ? st.docs : [];
   const d = sel >= 0 && sel < docs.length ? docs[sel] : null;
   const out = [clip([[' ─ inspector ' + '─'.repeat(cols), 'dim']], cols)];
+  out.push(...externalLinkRows({ sess, links, cols }));
   if (!d) {
     out.push(clip([[' no document selected (j/k)', 'dim']], cols));
     return out;
   }
-  const ent = safe(() => model.docAt(d.doc_id), null) || {};
+  const ent = safe(() => model.docAt(d.doc_id, clock.t), null) || {};
+  // Outcome fields are read only once the document has finished; before that it is in progress.
+  const done = d.finished === true;
+  const outcome = done ? ent : {};
   out.push(clip([[' file ', 'dim'], [truncate(d.filename || ent.filename, cols - 8), 'sel']], cols));
   out.push(
     clip(
@@ -187,19 +216,24 @@ function inspectorRows({ model, st, clock, sel, cols }) {
         [' station ', 'dim'], [truncate(d.station, 16), 'info'],
         ['  status ', 'dim'], [truncate(d.status, 10), d.status === 'failed' ? 'err' : 'ok'],
         ['  attempt ', 'dim'], [truncate(d.attempt ?? 1, 4), ''],
-        ['  verdict ', 'dim'], [truncate(d.verdict ?? ent.verdict, 16), ''],
+        ['  verdict ', 'dim'], [truncate(d.verdict ?? outcome.verdict, 16), ''],
       ],
       cols,
     ),
   );
-  const causes = Array.isArray(ent.review_causes) && ent.review_causes.length ? ent.review_causes.map(clean).join(',') : '—';
+  const causes = Array.isArray(outcome.review_causes) && outcome.review_causes.length ? outcome.review_causes.map(clean).join(',') : '—';
+  const finalCells = done
+    ? [
+        [' final ', 'dim'], [truncate(d.final_status ?? outcome.final_status, 12), ''],
+        ['/', 'dim'], [truncate(d.final_stage ?? outcome.final_stage, 16), ''],
+      ]
+    : [[' final ', 'dim'], ['in progress', 'info']];
   out.push(
     clip(
       [
-        [' final ', 'dim'], [truncate(d.final_status ?? ent.final_status, 12), ''],
-        ['/', 'dim'], [truncate(d.final_stage ?? ent.final_stage, 16), ''],
-        ['  failure ', 'dim'], [truncate(ent.failure_class, 16), ent.failure_class ? 'err' : 'dim'],
-        ['  causes ', 'dim'], [truncate(causes, 30), ent.review_causes && ent.review_causes.length ? 'warn' : 'dim'],
+        ...finalCells,
+        ['  failure ', 'dim'], [truncate(outcome.failure_class, 16), outcome.failure_class ? 'err' : 'dim'],
+        ['  causes ', 'dim'], [truncate(causes, 30), outcome.review_causes && outcome.review_causes.length ? 'warn' : 'dim'],
       ],
       cols,
     ),
@@ -254,9 +288,25 @@ function ledgerRows({ ledger, cols }) {
 }
 
 const LEGEND =
-  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  e event  q quit';
+  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  p panels  e event  q quit';
 
-export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none' } = {}) {
+/**
+ * Resolve the `panel` selector to rows. Inspector and ledger keep their dedicated
+ * renderers; any other non-'none' string is looked up in the panel registry and its
+ * render(ctx) is called. An unknown id, a throwing renderer or a non-array result
+ * degrades to no panel rows (the frame never throws on a bad panel).
+ */
+function resolvePanel(panel, ctx) {
+  if (panel === 'inspector') return inspectorRows(ctx);
+  if (panel === 'ledger') return ledgerRows(ctx);
+  if (typeof panel !== 'string' || panel === 'none') return [];
+  const spec = getPanel(panel);
+  if (!spec) return [];
+  const rows = safe(() => spec.render(ctx), []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none', links = null } = {}) {
   const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
   const R = clamp(Math.floor(num(rows)) || 30, MIN_ROWS, MAX_ROWS);
   const m = model && typeof model === 'object' ? model : {};
@@ -264,14 +314,14 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const ck = clock && typeof clock === 'object' ? clock : { t: 0, duration: 0, speed: 1, playing: false };
   const sess = m.session && typeof m.session === 'object' ? m.session : {};
   const selIdx = Number.isInteger(sel) ? sel : -1;
-  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess };
+  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links };
 
   const head = clip(headerRow(ctxo), C);
   const scrub = clip(scrubRow(ctxo), C);
   const metrics = metricsRow(ctxo);
   const foot = clip([[LEGEND, 'dim']], C);
   const track = trackRows(ctxo);
-  const panelRows = panel === 'inspector' ? inspectorRows(ctxo) : panel === 'ledger' ? ledgerRows(ctxo) : [];
+  const panelRows = resolvePanel(panel, ctxo);
 
   const budget = R - 4; // header, scrub, metrics, footer
   let panelBudget = 0;

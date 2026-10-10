@@ -2,7 +2,7 @@
 // Every printed value comes from a live response and goes through ctx.out (textContent).
 // Shapes verified against src/mailroom_reloaded/api/app.py.
 
-export const ACCEPT = '.txt,.md,.pdf,.docx,.rtf,.html,.htm';
+export const ACCEPT = '.txt,.md,.text,.pdf,.docx,.png,.jpg,.jpeg';
 const WATCH_LIMIT = 500;
 export const EMPTY_LS = "no documents — drop a file in the inbox or run 'upload'";
 
@@ -261,7 +261,7 @@ SYNOPSIS
     upload
 
 DESCRIPTION
-    Opens a file picker (.txt .md .pdf .docx .rtf .html .htm) and posts the file
+    Opens a file picker (.txt .md .text .pdf .docx .png .jpg .jpeg) and posts the file
     to /v1/documents. Prints the queued file and its doc_id.`,
   watch: `NAME
     watch — follow document status changes

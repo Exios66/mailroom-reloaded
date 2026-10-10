@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderFrame, truncate, bar, fmtTime } from '../../../src/mailroom_reloaded/api/tui/replay/grid.js';
+import { createModel } from '../../../src/mailroom_reloaded/api/tui/replay/model.js';
 
 const HOSTILE = '<img src=x onerror=alert(1)>';
 const flat = (rows) => rows.map((r) => r.map((s) => s[0]).join(''));
@@ -15,7 +16,8 @@ function fakeModel(over = {}) {
       { id: 'retry', label: 'Retry', kind: 'detour', color_token: 'warn' },
       { id: 'bay', label: 'Bay', kind: 'bay', color_token: 'weird' },
     ],
-    rollups: { first_pass_rate: 0.5 },
+    // First-pass comes from the time-gated firstPassAt, not from the whole-run rollups.
+    firstPassAt: () => 0.5,
     eventsBetween: () => [{ t: 10 }, { t: 50 }],
     eventsUpTo: () => [{ t: 5, doc_id: 'd1', kind: 'gate', station: 'intake' }],
     eventsForDoc: () => [{ t: 5, doc_id: 'd1', kind: 'gate', station: 'intake' }],
@@ -117,8 +119,14 @@ test('panel switch: inspector vs ledger vs none', () => {
   const insp = flat(renderFrame({ model: m, st, clock, sel: 0, cols: 100, rows: 30, panel: 'inspector' })).join('\n');
   assert.match(insp, /inspector/);
   assert.match(insp, /a\.pdf/);
-  assert.match(insp, /failure bad/);
-  assert.match(insp, /causes low_conf/);
+  // a.pdf is still in progress at t=12: its failure and causes must not show yet.
+  assert.match(insp, /final +in progress/);
+  assert.doesNotMatch(insp, /failure bad/);
+  assert.doesNotMatch(insp, /causes low_conf/);
+  const finished = flat(renderFrame({ model: m, st, clock, sel: 2, cols: 100, rows: 30, panel: 'inspector' })).join('\n');
+  assert.match(finished, /final +archived/);
+  assert.match(finished, /failure bad/);
+  assert.match(finished, /causes low_conf/);
   assert.match(insp, /extract\s+m-1/);
   assert.match(insp, /gate/);
   const nosel = flat(renderFrame({ model: m, st, clock, sel: -1, cols: 100, rows: 30, panel: 'inspector' })).join('\n');
@@ -195,4 +203,93 @@ test('inspector shows the selected document events and its latest generations', 
   assert.match(text, /only-for-me/);
   assert.match(text, /r5/);
   assert.ok(!/ r0 /.test(text));
+});
+
+// A small run for the time-gating checks below: real model, real rows.
+const LEAK_TL = {
+  version: 'replay/v1',
+  session: { id: 'run:leak', duration_s: 40 },
+  stations: [{ id: 'sorter', label: 'sorter', kind: 'main' }],
+  entities: [
+    { doc_id: 'p', filename: 'p.pdf', t_start: 0, t_end: 5, final_status: 'archived', final_stage: 'archive', verdict: 'CORRECT' },
+    { doc_id: 'q', filename: 'q.pdf', t_start: 0, t_end: 8, final_status: 'archived' },
+    { doc_id: 'r', filename: 'r.pdf', t_start: 0, t_end: 20, final_status: 'archived' },
+    { doc_id: 'late', filename: 'late.pdf', t_start: 30, t_end: 40, final_status: 'archived' },
+  ],
+  segments: [{ doc_id: 'q', node: 'extract', station: 'sorter', t0: 1, t1: 2, attempt: 2, retry_kind: 'llm', status: 'ok' }],
+  generations: [],
+  events: [],
+  scores: [{ doc_id: 'r', name: 'success_rate', value: 0, t: 15 }],
+  rollups: { first_pass_rate: 0.9 },
+};
+
+const metricsAt = (m, t) =>
+  flat(renderFrame({ model: m, st: m.stateAt(t), clock: { t, duration: 40, speed: 1, playing: false }, cols: 160, rows: 30 })).find((r) => /docs \d+ of \d+/.test(r));
+
+test('metrics count documents started by t, and first-pass waits for a finished document', () => {
+  const m = createModel(LEAK_TL);
+  const early = metricsAt(m, 4);
+  assert.match(early, /docs 3 of 4 +done 0/);
+  assert.match(early, /first-pass --/);
+  assert.doesNotMatch(early, /90%/, 'the whole-run rollup must not show');
+  const mid = metricsAt(m, 8);
+  assert.match(mid, /done 2/);
+  assert.match(mid, /first-pass 50%/);
+  assert.match(metricsAt(m, 20), /docs 3 of 4.*first-pass 33%/);
+  assert.match(metricsAt(m, 35), /docs 4 of 4/);
+});
+
+const INS_TL = {
+  version: 'replay/v1',
+  session: { id: 'run:ins', duration_s: 20 },
+  stations: [{ id: 'sorter', label: 'sorter', kind: 'main' }],
+  entities: [
+    { doc_id: 'd', filename: 'd.pdf', t_start: 0, t_end: 12, final_status: 'archived', final_stage: 'archive', verdict: 'CORRECT', failure_class: 'bad_parse', review_causes: ['low_conf'] },
+  ],
+  segments: [{ doc_id: 'd', node: 'sort', station: 'sorter', t0: 0, t1: 4, status: 'ok' }],
+  generations: [{ doc_id: 'd', span_id: 'g', role: 'extract', model: 'm-9', t0: 5, t1: 9, prompt_tokens: 7, completion_tokens: 3, cost_usd: 0.2 }],
+  events: [],
+  scores: [],
+  rollups: {},
+};
+const CTRL_OR_BIDI = /[\u0000-\u001f\u202a-\u202e]/;
+const inspectorAt = (m, t) =>
+  flat(renderFrame({ model: m, st: m.stateAt(t), clock: { t, duration: 20, speed: 1, playing: false }, sel: 0, cols: 160, rows: 40, panel: 'inspector' })).join('\n');
+
+test('inspector: outcome and in-flight calls show only from their end', () => {
+  const m = createModel(INS_TL);
+  const during = inspectorAt(m, 6);
+  assert.match(during, /final +in progress/);
+  for (const hidden of ['CORRECT', 'bad_parse', 'low_conf', 'archived', 'm-9']) {
+    assert.doesNotMatch(during, new RegExp(hidden), hidden);
+  }
+  const after = inspectorAt(m, 12);
+  assert.match(after, /final +archived\/archive/);
+  assert.match(after, /verdict +CORRECT/);
+  assert.match(after, /failure +bad_parse/);
+  assert.match(after, /causes +low_conf/);
+  assert.match(after, /m-9/);
+});
+
+test('hostile strings in the inspector stay literal text, and wait for the finish', () => {
+  const m = createModel({
+    ...INS_TL,
+    entities: [
+      {
+        doc_id: 'd',
+        filename: '<img src=x onerror=alert(1)>\u001b[2J.pdf',
+        t_start: 0,
+        t_end: 12,
+        final_status: 'archived',
+        verdict: '<b>x</b>\u0007',
+        failure_class: '<script>\u202eevil',
+        review_causes: ['<i>c</i>\u0000'],
+      },
+    ],
+  });
+  const during = inspectorAt(m, 6);
+  assert.doesNotMatch(during, /<b>x|<script>|<i>c/);
+  const after = inspectorAt(m, 12);
+  for (const lit of ['<img src=x onerror=alert(1)>', '<b>x</b>', '<script>', '<i>c</i>']) assert.ok(after.includes(lit), lit);
+  assert.doesNotMatch(after.replace(/\n/g, ' '), CTRL_OR_BIDI);
 });

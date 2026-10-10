@@ -11,6 +11,71 @@ import yaml
 from mailroom_reloaded.sandbox.content import CompatError, load_content, loader
 
 
+@pytest.mark.parametrize("metadata", ["content.json", "manifest.json"])
+@pytest.mark.parametrize("failure", ["json", "utf8", "read"])
+def test_metadata_failures_enter_report(tmp_path, monkeypatch, metadata, failure):
+    """Report metadata failures with their path, including in strict mode."""
+    path = tmp_path / metadata
+    path.write_bytes(b"\xff" if failure == "utf8" else b"{")
+    if failure == "read":
+        def unreadable(self, *args, **kwargs):
+            raise PermissionError("read denied")
+        monkeypatch.setattr(Path, "read_text", unreadable)
+    content = load_content(tmp_path)
+    assert not content.report.ok
+    assert len(content.report.errors) == 1
+    assert content.report.errors[0].startswith(f"{metadata}: ")
+    assert content.meta == content.scenarios == content.registry == {}
+    with pytest.raises(ValueError, match="content invalid") as exc:
+        load_content(tmp_path, strict=True)
+    assert content.report.errors[0] in str(exc.value)
+
+
+@pytest.mark.parametrize("failure", ["yaml", "utf8", "read"])
+def test_yaml_failures_are_collected_and_other_files_still_load(content_dir, monkeypatch, failure):
+    """Collect failures across document kinds while retaining a valid scenario."""
+    paths = [content_dir / rel for rel in (
+        "scenarios/A/broken.yaml", "personas/behavior/biller.yaml",
+        "gen/specs/vendor.yaml", "dist/registry.yaml",
+    )]
+    for path in paths:
+        path.write_bytes(b"\xff" if failure == "utf8" else b"[")
+    original = Path.read_text
+    if failure == "read":
+        def read(self, *args, **kwargs):
+            if self in paths:
+                raise PermissionError("read denied")
+            return original(self, *args, **kwargs)
+        monkeypatch.setattr(Path, "read_text", read)
+    content = load_content(content_dir)
+    assert set(content.scenarios) == {"A1_status_inquiry"}
+    assert content.personas == content.gen_specs == content.registry == {}
+    expected = {"yaml": "ParserError", "utf8": "UnicodeDecodeError", "read": "PermissionError"}
+    for path in paths:
+        label = f"{path.relative_to(content_dir)}: {expected[failure]}:"
+        assert any(error.startswith(label) for error in content.report.errors)
+    with pytest.raises(ValueError, match="content invalid"):
+        load_content(content_dir, strict=True)
+
+
+def test_manifest_file_read_failure_enters_report(tmp_path, monkeypatch):
+    """Report unreadable manifest-listed bytes without aborting other checks."""
+    shutil.copytree(loader.SMOKE_DIR, tmp_path / "smoke")
+    root = tmp_path / "smoke"
+    path = root / "templates/status_inquiry.j2"
+    original = Path.read_bytes
+
+    def read(self):
+        if self == path:
+            raise PermissionError("read denied")
+        return original(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    content = load_content(root)
+    assert "templates/status_inquiry.j2: PermissionError: read denied" in content.report.errors
+    assert len(content.scenarios) == 6
+
+
 def test_full_content_layout_loads_each_document_kind(content_dir):
     """Load and validate registry, scenario, persona, and generation specification examples."""
     content = load_content(str(content_dir), strict=True)

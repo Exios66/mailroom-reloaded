@@ -257,3 +257,51 @@ def test_cfg_loaded_from_taxonomy_when_none(monkeypatch):
     monkeypatch.setattr(bert, "load_taxonomy", lambda: types.SimpleNamespace(bert=cfg(enabled=False)))
     seen["v"] = classify_primary("x")
     assert seen["v"].reason == "flag_off"
+
+
+def test_legacy_classifier_receives_text_without_filename_keyword(monkeypatch):
+    seen = []
+
+    def legacy(text):
+        seen.append(text)
+        return {"doc_type": "correspondence", "agreement": 0.9, "n_windows": 1}
+
+    install_fake(monkeypatch, legacy)
+    monkeypatch.delattr(sys.modules["mailroom_ml.inference"], "classify_document_default")
+    result = classify_primary("letter text", cfg(), filename="letter.txt")
+    assert result.available
+    assert result.doc_type == "correspondence"
+    assert result.window_agreement == 0.9
+    assert seen == ["letter text"]
+
+
+@pytest.mark.parametrize("error,reason", [(FileNotFoundError("bundle"), "no_model"), (RuntimeError("failed"), "error")])
+def test_legacy_classifier_failure_falls_back_to_full_sort(monkeypatch, error, reason):
+    def legacy(text):
+        raise error
+
+    install_fake(monkeypatch, legacy)
+    monkeypatch.delattr(sys.modules["mailroom_ml.inference"], "classify_document_default")
+    result = classify_primary("letter", cfg(), filename="letter.txt")
+    assert result == BertVerdict(available=False, reason=reason)
+    assert decide_handoff(result, cfg()).mode is SortMode.FULL
+
+
+def test_installed_package_without_supported_entry_point_is_unavailable(monkeypatch):
+    install_fake(monkeypatch, None)
+    result = classify_primary("letter", cfg())
+    assert result == BertVerdict(available=False, reason="no_package")
+
+
+@pytest.mark.parametrize("failure", [{"status": "failure"}, {"reason": "bert_error"}])
+def test_failure_marker_overrides_plausible_prediction(monkeypatch, failure):
+    install_fake(monkeypatch, lambda *args, **kwargs: {
+        "doc_type": "correspondence", "route": "fast_path", "calibrated_confidence": 0.99,
+        **failure,
+    })
+    result = classify_primary("letter", cfg())
+    assert result == BertVerdict(available=False, reason="error")
+    handoff = decide_handoff(result, cfg())
+    assert handoff.mode is SortMode.FULL
+    assert handoff.locked_doc_type is None
+    assert handoff.prior == ""

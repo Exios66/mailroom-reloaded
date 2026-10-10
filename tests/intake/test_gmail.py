@@ -461,3 +461,101 @@ def test_state_saves_use_distinct_temporary_paths(tmp_path, monkeypatch):
     assert len(set(paths)) == 2
     assert intake.processed_message_ids() == {"outer"}
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_gmail_publish_is_claimable_only_after_complete_write(env, monkeypatch):
+    """A watcher that claims each visible inbox name on publish must read the full attachment."""
+    import hashlib
+    import os
+    from pathlib import Path
+
+    bins = Bins(env)
+    inbox = bins.inbox.resolve()
+    seen: list[bytes] = []
+
+    def on_publish(dest):
+        dest = Path(dest)
+        if dest.parent.resolve() == inbox and not dest.name.startswith("."):
+            seen.append(bins.claim(dest, "watcher").read_bytes())
+
+    real_open, real_link = os.open, os.link
+
+    def open_hook(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if flags & os.O_EXCL:
+            on_publish(path)
+        return fd
+
+    def link_hook(src, dst, *args, **kwargs):
+        real_link(src, dst, *args, **kwargs)
+        on_publish(dst)
+
+    monkeypatch.setattr(os, "open", open_hook)
+    monkeypatch.setattr(os, "link", link_hook)
+    intake = GmailIntake(_config(env), bins=bins)
+    assert intake._write_to_inbox(LETTER, "letter.txt") == hashlib.sha256(LETTER).hexdigest()[:16]
+    assert seen == [LETTER]
+
+
+def test_fetch_new_pages_past_processed_unread_messages(env):
+    from unittest.mock import Mock
+
+    service = Mock()
+    messages = service.users.return_value.messages.return_value
+    messages.list.return_value.execute.side_effect = [
+        {'messages': [{'id': 'done'}], 'nextPageToken': 'page2'},
+        {'messages': [{'id': 'fresh'}, {'id': 'fresh'}], 'nextPageToken': 'page3'},
+        {'messages': [{'id': 'next'}, {'id': 'beyond-limit'}]},
+    ]
+    intake = GmailIntake(_config(env), bins=Bins(env), service=service)
+    intake.mark_processed('done')
+    assert intake.fetch_new(limit=2) == [{'id': 'fresh'}, {'id': 'next'}]
+    assert messages.list.call_args_list[1].kwargs['pageToken'] == 'page2'
+
+
+def test_attachment_with_nul_in_name_is_skipped_without_aborting(tmp_path):
+    """Verify a NUL-bearing attachment name is skipped and the other attachments still ingest."""
+    service = FakeGmailService(["m1"], {"m1": None})
+    service.by_id["m1"] = _message(
+        "m1",
+        [
+            _part("bad\x00name.txt", "text/plain", data=LETTER),
+            _part("letter.txt", "text/plain", data=LETTER),
+        ],
+    )
+    bins = Bins(tmp_path)
+    intake = GmailIntake(_config(tmp_path), bins=bins, service=service)
+
+    doc_ids = intake.ingest_attachments(service.by_id["m1"])
+
+    assert [p.name for p in bins.inbox.iterdir()] == ["letter.txt"]
+    assert doc_ids == [doc_id_for(bins.inbox / "letter.txt")]
+
+
+def test_fetch_new_caps_pages_per_poll(env):
+    from unittest.mock import Mock
+
+    service = Mock()
+    messages = service.users.return_value.messages.return_value
+    def next_page():
+        # Stop after 100 pages so an uncapped loop ends and fails rather than hangs.
+        n = messages.list.call_count
+        return {"messages": [{"id": "done"}], "nextPageToken": f"page-{n + 1}" if n < 100 else None}
+
+    messages.list.return_value.execute.side_effect = next_page
+    intake = GmailIntake(_config(env), bins=Bins(env), service=service)
+    intake.mark_processed("done")
+    assert intake.fetch_new(limit=5) == []
+    assert gmail_intake.MAX_LIST_PAGES_PER_POLL < 100
+    assert messages.list.call_count == gmail_intake.MAX_LIST_PAGES_PER_POLL
+
+
+def test_fetch_new_with_non_positive_limit_lists_nothing(env):
+    from unittest.mock import Mock
+
+    service = Mock()
+    messages = service.users.return_value.messages.return_value
+    intake = GmailIntake(_config(env), bins=Bins(env), service=service)
+    assert intake.fetch_new(limit=0) == []
+    assert intake.fetch_new(limit=-3) == []
+    messages.list.assert_not_called()
