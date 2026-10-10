@@ -57,8 +57,15 @@ def resolve_review(
     """Resolve a parked document; ``None`` when no parked manifest matches."""
     if action not in ("approve", "correct", "reject"):
         raise ReviewRequestError(f"unknown review action: {action!r}")
-    if action == "correct" and doc_type not in load_taxonomy().classes:
-        raise ReviewRequestError("correct requires a valid doc_type")
+    if action == "correct":
+        taxonomy = load_taxonomy()
+        if doc_type and doc_type not in taxonomy.classes:
+            raise ReviewRequestError(f"correct requires a valid doc_type; {doc_type!r} not found")
+        # Validate doc_subclass if provided (must be non-empty string, no validation table exists)
+        if doc_subclass is not None and not isinstance(doc_subclass, str):
+            raise ReviewRequestError(f"doc_subclass must be a string, not {type(doc_subclass).__name__}")
+        if doc_subclass is not None and not doc_subclass.strip():
+            raise ReviewRequestError("doc_subclass cannot be empty or whitespace-only")
 
     bins = bins if bins is not None else Bins(get_settings().base_dir)
     manifest = load_manifest(bins, doc_id)
@@ -221,9 +228,17 @@ def _locate_parked(bins: Bins, manifest: Manifest) -> Path | None:
     )
     for candidate in candidates:
         try:
-            if candidate.is_file() and _sha256(candidate) == manifest.content_sha256:
+            if not candidate.is_file():
+                continue
+            # Verify file exists before hashing, recheck after (race-safe)
+            digest = _sha256(candidate)
+            if candidate.is_file() and digest == manifest.content_sha256:
                 return candidate
+        except FileNotFoundError:
+            # File was deleted between is_file() and _sha256() or after; skip
+            continue
         except OSError:
+            # Other I/O errors (permission, etc.); skip this candidate
             continue
     return None
 

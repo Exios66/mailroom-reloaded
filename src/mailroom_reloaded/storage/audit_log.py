@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Sequence
 
 from sqlalchemy import Engine, select
@@ -43,10 +44,15 @@ def append(
     returns the existing entry and stores nothing (resume-safe).
 
     Note: the chain detects edits, deletions in the middle and reordering, but
-    truncation of the tail is undetectable without an external anchor."""
+    truncation of the tail is undetectable without an external anchor.
+    
+    Retries up to 50 times on IntegrityError (concurrent seq collision) with
+    exponential backoff (capped at 1 second) to avoid CPU spin-lock.
+    """
     engine = engine or get_engine()
     payload = payload or {}
-    for _ in range(50):
+    max_retries = 50
+    for attempt in range(max_retries):
         try:
             with engine.connect() as conn:
                 # Take the write lock before reading so concurrent appenders serialize
@@ -88,8 +94,16 @@ def append(
                 conn.commit()
                 return entry
         except IntegrityError:
-            continue  # concurrent writer took this seq; retry
-    raise RuntimeError(f"audit append failed for {doc_id} after retries")
+            if attempt < max_retries - 1:
+                # Exponential backoff with jitter: 0-1ms, 0-2ms, ..., 0-512ms, capped at 1s
+                backoff_ms = min(2 ** attempt, 1000)
+                time.sleep(backoff_ms / 1000.0)
+                continue
+            # Last attempt failed; raise with context
+            raise RuntimeError(
+                f"audit append failed for {doc_id} after {max_retries} retries "
+                f"(concurrent seq collision; check for high contention or DB issues)"
+            ) from None
 
 
 def entries(doc_id: str, *, engine: Engine | None = None) -> list[AuditLogEntry]:

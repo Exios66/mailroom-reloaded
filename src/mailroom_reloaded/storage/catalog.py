@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 from sqlalchemy import Engine, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import OperationalError
 
 from mailroom_reloaded.schemas.audit import CatalogRecord
 from mailroom_reloaded.storage.db import catalog_table as t
@@ -19,11 +22,12 @@ def _to_record(r) -> CatalogRecord:
     return CatalogRecord(**r._mapping)
 
 
-def upsert(record: CatalogRecord, *, engine: Engine | None = None) -> None:
+def upsert(record: CatalogRecord, *, engine: Engine | None = None, retries: int = 3) -> None:
     """Insert a record or replace all stored fields for its ``doc_id``.
 
-    Use the default database when ``engine`` is omitted; database errors
-    propagate.
+    Use the default database when ``engine`` is omitted. Retries up to ``retries``
+    times on transient database errors (locked, busy) with exponential backoff.
+    Permanent errors (constraint, validation) still propagate immediately.
     """
     engine = engine or get_engine()
     values = record.model_dump(mode="json")
@@ -32,8 +36,20 @@ def upsert(record: CatalogRecord, *, engine: Engine | None = None) -> None:
         index_elements=[t.c.doc_id],
         set_={k: v for k, v in values.items() if k != "doc_id"},
     )
-    with engine.begin() as conn:
-        conn.execute(stmt)
+    for attempt in range(retries):
+        try:
+            with engine.begin() as conn:
+                conn.execute(stmt)
+            return  # success
+        except OperationalError as exc:
+            # Transient errors: database is locked, busy, or temporarily unavailable
+            if attempt < retries - 1 and any(msg in str(exc).lower() 
+                    for msg in ("locked", "busy", "disk", "ioerror")):
+                backoff_ms = min(2 ** attempt * 100, 1000)  # exponential backoff, capped at 1s
+                time.sleep(backoff_ms / 1000.0)
+                continue
+            # Permanent error or last retry; let it propagate
+            raise
 
 
 def get(doc_id: str, *, engine: Engine | None = None) -> CatalogRecord | None:

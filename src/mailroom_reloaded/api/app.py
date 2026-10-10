@@ -249,8 +249,33 @@ async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    dest = _bins().enqueue(content, filename)
+    # Compute doc_id from content before enqueue; validate it matches the stored file
     doc_id = hashlib.sha256(content).hexdigest()[:16]
+    dest = _bins().enqueue(content, filename)
+    # Verify that the enqueued file's content matches by re-hashing (defensive)
+    try:
+        stored_hash = hashlib.sha256()
+        with dest.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                stored_hash.update(chunk)
+        stored_id = stored_hash.hexdigest()[:16]
+        if stored_id != doc_id:
+            logger.error(
+                "upload_hash_mismatch",
+                doc_id=doc_id,
+                stored_id=stored_id,
+                file=dest.name,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Upload verification failed; file content mismatch",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("upload_verify_failed", file=dest.name, error=str(exc))
+        raise HTTPException(status_code=500, detail="Upload verification failed") from exc
+
     logger.info("document_uploaded", doc_id=doc_id, file=dest.name, size=len(content))
     return {"doc_id": doc_id, "file": dest.name, "status": "accepted"}
 
@@ -505,7 +530,11 @@ def _sse(event: str, data: dict) -> str:
 
 
 def _live_items(tl):
-    """``(event_name, item, seen_key)`` for one timeline snapshot, in a stable order."""
+    """``(event_name, item, seen_key)`` for one timeline snapshot, in a stable order.
+    
+    Safely accesses attributes with fallbacks to avoid AttributeError crashes
+    when timeline items lack expected fields.
+    """
     # An ``#n`` suffix counts repeats of the same base key within one snapshot, so two
     # events that share (t, doc, kind, station) are both delivered instead of collapsed.
     counts: dict[str, int] = {}
@@ -518,15 +547,27 @@ def _live_items(tl):
     # Entities go first so a document is known before its segments arrive. The key carries
     # the end time and outcome, so an entity is sent again when it finishes.
     for ent in getattr(tl, "entities", None) or []:
-        yield "entity", ent, keyed(f"entity:{ent.doc_id}:{ent.t_end}:{ent.final_status}")
-    for i, seg in enumerate(tl.segments):
-        yield "segment", seg, keyed(f"segment:{seg.span_id or i}")
-    for gen in tl.generations:
-        yield "generation", gen, keyed(f"generation:{gen.span_id}")
-    for ev in tl.events:
-        yield "event", ev, keyed(f"event:{ev.t}:{ev.doc_id}:{ev.kind}:{ev.station}")
-    for sc in tl.scores:
-        yield "score", sc, keyed(f"score:{sc.span_id}:{sc.name}:{sc.doc_id}")
+        doc_id = getattr(ent, "doc_id", "unknown")
+        t_end = getattr(ent, "t_end", None)
+        final_status = getattr(ent, "final_status", "unknown")
+        yield "entity", ent, keyed(f"entity:{doc_id}:{t_end}:{final_status}")
+    for i, seg in enumerate(getattr(tl, "segments", None) or []):
+        span_id = getattr(seg, "span_id", None)
+        yield "segment", seg, keyed(f"segment:{span_id or i}")
+    for gen in getattr(tl, "generations", None) or []:
+        span_id = getattr(gen, "span_id", None)
+        yield "generation", gen, keyed(f"generation:{span_id}")
+    for ev in getattr(tl, "events", None) or []:
+        t = getattr(ev, "t", None)
+        doc_id = getattr(ev, "doc_id", "unknown")
+        kind = getattr(ev, "kind", "unknown")
+        station = getattr(ev, "station", "unknown")
+        yield "event", ev, keyed(f"event:{t}:{doc_id}:{kind}:{station}")
+    for sc in getattr(tl, "scores", None) or []:
+        span_id = getattr(sc, "span_id", None)
+        name = getattr(sc, "name", "unknown")
+        doc_id = getattr(sc, "doc_id", "unknown")
+        yield "score", sc, keyed(f"score:{span_id}:{name}:{doc_id}")
 
 
 def _item_time_or_none(item) -> float | None:
@@ -538,10 +579,13 @@ def _item_time_or_none(item) -> float | None:
     return None
 
 
-def _item_time(item) -> float:
-    """The item's timeline instant: ``t0`` for segments/generations, else ``t``."""
-    t = _item_time_or_none(item)
-    return 0.0 if t is None else t
+def _item_time(item) -> float | None:
+    """The item's timeline instant: ``t0``, ``t``, or ``t_start``, or ``None`` if unknown.
+    
+    Returning None instead of 0.0 preserves timeless items and prevents incorrect
+    deduplication or replay issues caused by all timeless items collapsing to epoch.
+    """
+    return _item_time_or_none(item)
 
 
 def _live_trim(entries: list) -> list:
@@ -675,7 +719,9 @@ def replay_live_endpoint(
                     if item_key in seen:
                         continue
                     seen.add(item_key)
-                    if first and since is not None and _item_time(item) < since:
+                    # Skip items older than since time (None times are always kept)
+                    item_t = _item_time(item)
+                    if first and since is not None and item_t is not None and item_t < since:
                         continue
                     yield _sse(name, item.model_dump(mode="json"))
                     frames += 1
