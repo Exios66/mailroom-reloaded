@@ -66,9 +66,10 @@ packages = ["src/mailroom_reloaded"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--strict-markers -m 'not live'"
+addopts = "--strict-markers -m 'not live and not docker'"
 markers = [
     "live: end-to-end tests that need a running dev server or live provider (deselected by default)",
+    "docker: Docker daemon tests (deselected by default)",
 ]
 
 [tool.ruff]

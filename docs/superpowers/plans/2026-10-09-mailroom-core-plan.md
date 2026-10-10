@@ -122,7 +122,7 @@ and 135 of 136 planned test names existing (static only).
 
 | Task | State | Remaining (carried to Section 4) |
 | --- | --- | --- |
-| 22 Docker topology | PARTIAL | R-04: compose smoke never run; R-05: `mailroom.eval.*` gauges specified, never emitted |
+| 22 Docker topology | PARTIAL | R-04 done 2026-10-10 (compose smoke run, `docs/evidence/2026-10-10-docker-verification/`); R-05: `mailroom.eval.*` gauges specified, never emitted |
 | 24 Conformance suite | PARTIAL | R-06: live `mailroom conformance` run needs a provider |
 | 23 Modal deploy | code + tests only | R-07: real deploy/teardown/spend check never run |
 | 20 Dataset + runner | done, spec gap | R-08: `bert_manifest_overlap` (`eval/dataset.py:303`) never called by `run_eval` |
@@ -246,7 +246,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 ### Phase 3: finish partial plan scope
 
 #### Core pipeline
-- **R-04 Compose smoke.** Needs Docker. [ ] `scripts/smoke.sh` -> record `SMOKE OK`, Phoenix `:6006` 200, Grafana health, and `docker compose config -q` per profile (`tests/deploy/test_compose.py`). Evidence to `docs/evidence/<date>-compose-smoke/`.
+- **R-04 Compose smoke.** [x] 2026-10-10: `scripts/smoke.sh` -> `SMOKE OK` against the lean stack with `--profile mock` (document archived, Phoenix 200, Grafana health ok), also in `split-watcher` mode; `config -q` for every profile in `scripts/docker_smoke.sh`. Evidence: `docs/evidence/2026-10-10-docker-verification/`. Originally: `scripts/smoke.sh` -> record `SMOKE OK`, Phoenix `:6006` 200, Grafana health, and `docker compose config -q` per profile (`tests/deploy/test_compose.py`). Evidence to `docs/evidence/<date>-compose-smoke/`.
 - **R-05 `mailroom.eval.*` gauges.** [ ] Either emit them from `eval/runner.py` (`obs/metrics.py` namespace `M`) and point `deploy/grafana/dashboards/quality.json` at them, or amend `docs/OPERATIONS.md` to state the dashboard reads app counters. Test in `tests/obs/` and `tests/deploy/test_grafana_links.py`. Owner picks; default recommendation: amend the doc (cheaper, matches shipped behaviour).
 - **R-06 Live conformance.** Needs a provider. [ ] `uv run mailroom conformance --provider llamafile|vllm`, commit the card under `docs/evidence/`, summarise pass rates in `docs/EVALUATION.md`.
 - **R-07 Modal.** [ ] Deploy, run, `modal app stop mailroom-vllm`, record spend in `deploy/README.md`. Owner credentials required.
@@ -285,11 +285,11 @@ Source: a first-scan audit of the repo plus a worker-run check of the Dockerfile
 - [x] **Compose env passthrough:** documented variables were dropped (`MOCK_BASE_URL`, `MAILROOM_TRACE_KEEP`, `MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `JEV_API_KEY`, `TYPESAFE_API_KEY`); now null-valued passthroughs, checked with `docker compose config`. Header notes on `.env` location (compose reads `.env` next to the `-f` file; use `--env-file .env`) and `deploy/README.md` "Compose notes".
 - [x] **Collector** stays `user: "0:0"`: non-root works only with the Docker socket gid as `group_add` (permission denied otherwise); recipe documented, change reverted as a regression risk.
 - [x] CodeRabbit's four threads on #80 fixed, replied to and resolved. The docstring-coverage warning (77.78% vs 80%) was not acted on (see D4).
-- [ ] **NOT VERIFIED (blocked: the egress proxy returns 403 for `ghcr.io/astral-sh/uv:0.8.22`, so no image can be built here; Docker Hub pulls work and dockerd runs):** both app image builds (lean, ML), importing the package from `/opt/venv`, uid 10001, `/data` writes, `HEALTHCHECK`, the in-container bind-guard refusal, `compose up`, the sandbox image. The mock-provider/`MOCK_BASE_URL` requirement is from reading `llm/client.py:113-116` only.
-- [ ] Issue #81: build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
-- [ ] Issue #82: launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
-- [ ] Issue #83: sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
-- [ ] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
+- [x] **Verified 2026-10-10 on a Docker host** (`docs/evidence/2026-10-10-docker-verification/`; ModernBERT build, llamafile and `gpu` skipped by owner directive). Was NOT VERIFIED (blocked: the egress proxy returns 403 for `ghcr.io/astral-sh/uv:0.8.22`, so no image can be built here; Docker Hub pulls work and dockerd runs):** both app image builds (lean, ML), importing the package from `/opt/venv`, uid 10001, `/data` writes, `HEALTHCHECK`, the in-container bind-guard refusal, `compose up`, the sandbox image. The mock-provider/`MOCK_BASE_URL` requirement is from reading `llm/client.py:113-116` only.
+- [x] Issue #81 (lean; ML build skipped): build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
+- [x] Issue #82 (`mock` profile added; collector kept root): launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
+- [x] Issue #83 (favicon 404 fixed): sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
+- [x] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
 - [ ] **Audit items deliberately not fixed (all low severity, unrequested):** upload size cap enforced after spooling; ledger thread start/close race; `metrics._merge`; anchor retry blocking; `audit_log.append` chain read and dead retry; `jev_config` ValueError; `_jev_api_key` fallback for the `local` provider. Open one `follow-up` issue per item when the owner wants them.
 
 #### Deferred follow-ups from PRs #54-#57
@@ -455,5 +455,5 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
-- [ ] Docker images build and the compose stack launches with evidence under `docs/evidence/` (issues #81-#84, P6-D4); until then every Docker claim in this plan is static-only.
+- [x] Docker images build and the compose stack launches with evidence under `docs/evidence/2026-10-10-docker-verification/` (issues #81-#84). P6-D4 still needs `/ready` (P6-A4).
 - [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).
