@@ -125,7 +125,7 @@ and 135 of 136 planned test names existing (static only).
 | 22 Docker topology | PARTIAL | R-04: compose smoke never run; R-05: `mailroom.eval.*` gauges specified, never emitted |
 | 24 Conformance suite | PARTIAL | R-06: live `mailroom conformance` run needs a provider |
 | 23 Modal deploy | code + tests only | R-07: real deploy/teardown/spend check never run |
-| 20 Dataset + runner | done, spec gap | R-08: `bert_manifest_overlap` (`eval/dataset.py:303`) never called by `run_eval` |
+| 20 Dataset + runner | done | R-08 closed 2026-10-10: `run_eval` calls `bert_manifest_overlap` (record-and-warn) |
 
 Accepted divergences from the original plan (record, do not "fix"): prompts live
 in `src/mailroom_reloaded/prompts/`; flow uses `do_extract`/`do_verify`/`do_boss`
@@ -250,8 +250,8 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 - **R-05 `mailroom.eval.*` gauges.** [ ] Either emit them from `eval/runner.py` (`obs/metrics.py` namespace `M`) and point `deploy/grafana/dashboards/quality.json` at them, or amend `docs/OPERATIONS.md` to state the dashboard reads app counters. Test in `tests/obs/` and `tests/deploy/test_grafana_links.py`. Owner picks; default recommendation: amend the doc (cheaper, matches shipped behaviour).
 - **R-06 Live conformance.** Needs a provider. [ ] `uv run mailroom conformance --provider llamafile|vllm`, commit the card under `docs/evidence/`, summarise pass rates in `docs/EVALUATION.md`.
 - **R-07 Modal.** [ ] Deploy, run, `modal app stop mailroom-vllm`, record spend in `deploy/README.md`. Owner credentials required.
-- **R-08 Leakage check.** [ ] Call `bert_manifest_overlap` from `run_eval` (or amend spec section 5) + test in `tests/eval/test_dataset_runner.py`.
-- **R-09 chromadb alerts.** [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
+- **R-08 Leakage check.** [x] 2026-10-10 (issue #71): code path, not a spec amendment. `run_eval` calls `bert_manifest_overlap` on the sample and stores the result in `eval_runs.overlap_check`; rule is record-and-warn (owner did not choose hard-fail), documented in `docs/EVALUATION.md`. Manifest via `--bert-manifest` or `<base_dir>/models/bert_manifest.jsonl`. Tests: `tests/eval/test_dataset_runner.py -k overlap` (fires, clean, absent, base-dir fallback).
+- **R-09 chromadb alerts.** 2026-10-10: `gh api repos/Exios66/mailroom-reloaded/dependabot/alerts?state=open` returns no open alerts; owner to confirm in the Security tab before ticking. [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
 
 #### `/tui`
 - **R-10 Live checklist.** PARTLY DONE 2026-10-10 (evidence: `docs/evidence/2026-10-10-tui-live-check/README.md`, screenshots `docs/demo/`). [x] Ran `scripts/tui_replay_check.mjs` (default run, seeded run, token variant: all checks passed) and the nine-point checklist by script against `scripts/tui_dev.sh`; points 1-5, 7, 8, 9 passed. [x] Committed screenshots/output to `docs/evidence/2026-10-10-tui-live-check/` and `docs/demo/`. [x] Point 6 only partly evidenced: mid-session kill passes, but "reload shows `mailroom closed`" needs a served page with a dead API, so it was simulated by blocking `/v1`; the `docs/TUI.md` item is reworded (PR #80). Tracked by issue #73. [ ] Walk was headless and scripted, not done by hand on a physical keyboard or in a headed browser; leave Task 8 Step 3 unticked until a person has done that once.
@@ -452,7 +452,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 - [x] `v0.5.0` published. [ ] `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [x] PR #80 merged (`b5f09f9`).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
-- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
+- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-07, R-09, R-10, R-17 (owner); R-08 closed 2026-10-10.
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
 - [ ] Docker images build and the compose stack launches with evidence under `docs/evidence/` (issues #81-#84, P6-D4); until then every Docker claim in this plan is static-only.
