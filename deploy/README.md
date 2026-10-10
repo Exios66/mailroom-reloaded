@@ -60,7 +60,12 @@ Containers also scale to zero after `MODAL_SCALEDOWN_WINDOW` idle seconds, but s
 ## Compose notes
 
 - Compose reads `.env` from the directory of the `-f` file (`deploy/`), not the repo root. With a root-level `.env`, run `docker compose --env-file .env -f deploy/docker-compose.yml ...`.
-- `DEFAULT_PROVIDER` defaults to `mock`, which needs `MOCK_BASE_URL` (see `docker-compose.dev.yml` for a bundled fake); use `vllm`, `llamafile` or `openrouter` for real runs.
+- `DEFAULT_PROVIDER` defaults to `mock`, which needs `MOCK_BASE_URL`. Use `--profile mock` to run the bundled fake (`deploy/mock_openai.py`):
+  ```bash
+  MAILROOM_API_TOKEN=x GRAFANA_ADMIN_PASSWORD=g MOCK_BASE_URL=http://mock:8000/v1 \
+    docker compose -f deploy/docker-compose.yml --profile mock up -d --build
+  ```
+  Alternatively, set `DEFAULT_PROVIDER=vllm`, `llamafile` or `openrouter` for real deployments.
 - Optional app variables (`MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `MAILROOM_TRACE_KEEP`, ...) are forwarded only when set.
 - The OTel collector runs as root so `docker_stats` can read the Docker socket on any host. It also works non-root (`user: "10001:10001"` plus `group_add` with the socket's gid, `stat -c %g /var/run/docker.sock`); without the group it fails with `permission denied`.
 - `uvicorn mailroom_reloaded.api.app:app --host 0.0.0.0` without `MAILROOM_API_TOKEN` now refuses to start, like `mailroom serve`.
