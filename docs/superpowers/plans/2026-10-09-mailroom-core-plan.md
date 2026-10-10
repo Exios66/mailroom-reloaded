@@ -291,7 +291,7 @@ Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, 
 Added 2026-10-09 after a fault-injection and integration audit. Design, evidence and
 rejected options: [`../specs/2026-10-09-content-pack-hardening-design.md`](../specs/2026-10-09-content-pack-hardening-design.md).
 Every number below was measured on content `f650cfd` / reloaded `df249e2` unless it says "reported".
-Order: K-00 first; K-01 gates X-01 (do it before publishing `v0.5.0`); K-02..K-06 in any order, each its own PR; K-08 rides with R-03.
+Order: K-00 first; K-01 still matters for rebuilding other tags (`v0.5.0` is already published); K-02..K-06 in any order, each its own PR; K-08 rides with R-03.
 K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh` must pass; paste the result line in the PR). K-08 is reloaded-side.
 
 #### K-00: Reconcile with work already in flight. Do this first.
@@ -308,7 +308,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 - [x] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) to a separate `BUILD_INFO` release asset with the `zstandard` version, so reproducibility can be checked across compressor versions. `SHA256SUMS` stays two lines (an extra line would break `sha256sum -c`). Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras). Done in content `840e4e8` (pinned `zstandard==0.25.0` in `tools/requirements.txt`; `--release` refuses other versions).
 - [ ] Test: build twice, same bytes; build with a wrong zstandard version, expect a refusal (unittest with the version string patched).
 - [ ] Doc: state that the **published asset's bytes** are the verification authority for a download; rebuilds are an audit.
-- [ ] After merge, X-01 publishes `v0.5.0` from `f650cfd` **using the pinned version**; confirm the asset sha256 equals `7a32e86e...` before touching the lock.
+- [x] `v0.5.0` is already published from `f650cfd` and its asset sha256 equals the lock's `7a32e86e...`; any rebuild must use the pinned `zstandard` version and be compared against that sha256 before touching the lock.
 
 #### K-02: Content tooling must never crash or silently accept bad data
 **Why (measured):** 28 faults injected into a copy of the repo, `tools/validate.py --strict-coverage` run on each: 21 fail cleanly, **4 crash with a traceback**, **2 corrupt data are accepted**, and **1 oversized scenario is accepted** (informational: no size cap), totaling 28 faults. The harness also includes a valid CRLF control: 29 cases = 21 CLEAN-FAIL + 4 CRASH + 4 MISSED (the two corrupt inputs, oversized scenario and CRLF control):

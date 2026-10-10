@@ -153,15 +153,16 @@ def _enforce_bind_policy() -> None:
 
 def _requested_hosts() -> list[str]:
     """Hosts the process was asked to bind: env plus a literal uvicorn ``--host``."""
-    hosts = [
-        (os.environ.get(name) or "").strip() for name in ("MAILROOM_API_HOST", "UVICORN_HOST")
-    ]
+    hosts = [(os.environ.get("MAILROOM_API_HOST") or "").strip()]
     argv = sys.argv
+    literal: list[str] = []
     for i, arg in enumerate(argv):
         if arg == "--host" and i + 1 < len(argv):
-            hosts.append(argv[i + 1].strip())
+            literal.append(argv[i + 1].strip())
         elif arg.startswith("--host="):
-            hosts.append(arg.split("=", 1)[1].strip())
+            literal.append(arg.split("=", 1)[1].strip())
+    # uvicorn: a literal --host beats UVICORN_HOST, so the env value only counts without one.
+    hosts += literal or [(os.environ.get("UVICORN_HOST") or "").strip()]
     return [h for h in hosts if h] or ["127.0.0.1"]
 
 

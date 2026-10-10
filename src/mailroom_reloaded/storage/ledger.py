@@ -259,15 +259,16 @@ class Ledger:
             self._cond.notify_all()
             return self._cond.wait_for(lambda: self._done >= target, timeout=timeout)
 
-    def close(self, timeout: float = 10.0) -> None:
-        """Flush, then stop the writer thread."""
-        self.flush(timeout)
+    def close(self, timeout: float = 10.0) -> bool:
+        """Flush, then stop the writer thread. True when drained and the writer has stopped."""
+        drained = self.flush(timeout)
         with self._cond:
             self._stop = True
             self._cond.notify_all()
         thread = self._thread
         if thread is not None:
             thread.join(timeout)
+        return drained and (thread is None or not thread.is_alive())
 
     # ------------------------------------------------------------------ writer thread
     def _run(self) -> None:
@@ -737,10 +738,16 @@ def get_ledger(*, anchor: bool = True) -> Ledger:
         return _default
 
 
-def reset_ledger() -> None:
-    """Flush and drop the process-wide ledger (tests, and after the default engine changes)."""
+def reset_ledger() -> bool:
+    """Flush and drop the process-wide ledger (tests, and after the default engine changes).
+
+    Returns False, and keeps the ledger bound, when it could not drain and stop its writer in
+    time; callers about to delete the database must not proceed then.
+    """
     global _default
     with _default_lock:
         if _default is not None:
-            _default.close()
+            if not _default.close():
+                return False
             _default = None
+        return True

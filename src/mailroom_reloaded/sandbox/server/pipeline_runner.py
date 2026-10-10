@@ -46,7 +46,9 @@ class PipelineRunner:
         from mailroom_reloaded.storage import db
         from mailroom_reloaded.storage.ledger import reset_ledger
 
-        reset_ledger()  # flush and drop the singleton still bound to the old engine
+        # Flush and drop the singleton still bound to the old engine; never dispose a live one.
+        if not reset_ledger():
+            raise RuntimeError("ledger writer did not stop; refusing to dispose the database")
         settings_mod.get_settings.cache_clear()
         if db._default_engine is not None:
             db._default_engine.dispose()

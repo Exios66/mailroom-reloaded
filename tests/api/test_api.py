@@ -510,6 +510,25 @@ def test_bind_policy_sees_uvicorn_host_argument(env, monkeypatch, argv):
     app_mod._enforce_bind_policy()
 
 
+def test_bind_policy_literal_host_beats_uvicorn_host_env(env, monkeypatch):
+    """A literal ``--host 127.0.0.1`` wins over UVICORN_HOST, as in uvicorn itself."""
+    import importlib
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    from mailroom_reloaded import settings
+
+    monkeypatch.delenv("MAILROOM_API_HOST", raising=False)
+    monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", raising=False)
+    settings.get_settings.cache_clear()
+    monkeypatch.setenv("UVICORN_HOST", "0.0.0.0")
+    monkeypatch.setattr("sys.argv", ["uvicorn", "x:app", "--host", "127.0.0.1"])
+    app_mod._enforce_bind_policy()  # the effective host is loopback
+    monkeypatch.setattr("sys.argv", ["uvicorn", "x:app"])
+    with pytest.raises(SystemExit):  # no literal host: the env value is the effective one
+        app_mod._enforce_bind_policy()
+
+
 def test_bind_policy_enforced_at_startup_without_cli(env, monkeypatch):
     """Direct uvicorn start must apply the same bind guard as ``mailroom serve``."""
     import importlib

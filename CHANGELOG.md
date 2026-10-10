@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Sandbox `PipelineRunner.reset()` no longer causes `ledger_write_failed` tracebacks: `_repoint()` now calls `reset_ledger()` (flushing queued writes before the database is deleted) and `reset()` repoints again after recreating the directory; test in `tests/sandbox/test_server_pipeline_runner.py`.
+- Sandbox `PipelineRunner.reset()` no longer causes `ledger_write_failed` tracebacks: `_repoint()` now calls `reset_ledger()` (flushing queued writes before the database is deleted); `Ledger.close()` and `reset_ledger()` now report whether the writer stopped and `reset()` refuses to delete the database otherwise; tests in `tests/sandbox/test_server_pipeline_runner.py`.
 - Sandbox UI: the stagger input no longer uses an inline `style` attribute (blocked by the CSP; now the `.num` class), and `#tab-body`/`#trace` scroll horizontally so wide tables do not overflow; test in `tests/sandbox/test_server_api.py`.
 - Sandbox UI: the `deciding` "press the same button to resume" hint only shows when the decision entry is committed and a decision button exists; otherwise the card says "decision in progress". Test in `tests/sandbox/js/boot.test.mjs`.
 - Run links in the `/ui` table cells are styled like the header links (`src/mailroom_reloaded/api/ui/index.html`); string assertion in `tests/api/test_api.py::test_ui_served`.
@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reporting as diagnostics, with zero official held-out scenarios and no freeze provenance.
 
 - Deploy (docker/compose) fixes. `deploy/Dockerfile`: the builder now copies `schemas/` (force-included by `pyproject.toml`; without it `uv sync` fails with "Forced include not found") and installs the project with `--no-editable`, so the runtime stage's `/opt/venv` no longer depends on `/build/src`; `deploy/Dockerfile.dev` copies `schemas/` too. `deploy/docker-compose.yml`: the app now forwards the documented `MOCK_BASE_URL`, `MAILROOM_TRACE_KEEP`, `MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `JEV_API_KEY` and `TYPESAFE_API_KEY` (unset stays unset); the OTel collector stays root (the non-root recipe, uid 10001 plus `group_add` with the socket gid, is documented in `deploy/README.md`); header notes that `.env` is read from `deploy/` (use `--env-file .env`) and that `mock` needs `MOCK_BASE_URL`.
-- The off-loopback bind guard now also sees a literal `uvicorn --host 0.0.0.0` (argv, `UVICORN_HOST`), and `mailroom serve` exports the resolved host so the lifespan check agrees (`src/mailroom_reloaded/api/app.py`, `cli.py`); test in `tests/api/test_api.py`.
+- The off-loopback bind guard now also sees a literal `uvicorn --host 0.0.0.0` (argv, `UVICORN_HOST`), (a literal `--host` outranks `UVICORN_HOST`, as in uvicorn), and `mailroom serve` exports the resolved host so the lifespan check agrees (`src/mailroom_reloaded/api/app.py`, `cli.py`); test in `tests/api/test_api.py`.
 
 ### Added
 
