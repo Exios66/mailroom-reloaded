@@ -68,6 +68,11 @@ OUTPUT_SCHEMA = {
 
 
 def _check_loopback(base_url: str) -> None:
+    """Require ``localhost`` or a literal loopback IP as the URL hostname.
+
+    Raise ``ValueError`` for any other host; no DNS lookup or connectivity
+    check is performed.
+    """
     host = urlparse(base_url).hostname or ""
     if host == "localhost":
         return
@@ -123,6 +128,12 @@ class LLMCorrespondent(StandInCorrespondent):
         timeout: float = 10.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        """Configure optional triage at a loopback OpenAI-compatible base URL.
+
+        ``timeout`` is the HTTP client timeout in seconds; ``transport`` can supply
+        an in-process mock. A non-loopback hostname raises ``ValueError`` before
+        any request is made.
+        """
         _check_loopback(base_url)
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -134,6 +145,12 @@ class LLMCorrespondent(StandInCorrespondent):
 
     # -------------------------------------------------------------- model call
     def _ask(self, msg: WireMessage, tools: CorrespondentTools) -> dict | None:
+        """Return schema-validated triage, or ``None`` on request/response failure.
+
+        Count each attempted request. Any failure during the request, response
+        parsing, or schema validation is recorded as a fallback. Errors obtaining delegation data or building
+        the prompt occur before that fallback boundary and propagate.
+        """
         get = getattr(tools, "delegation", None)
         delegation = get() if callable(get) else {}
         body = {
@@ -191,6 +208,17 @@ class LLMCorrespondent(StandInCorrespondent):
     def handle(
         self, msg: WireMessage, tools: CorrespondentTools
     ) -> CorrespondentResult:
+        """Classify with a rules-only pass, then a model-assisted pass for clean mail.
+
+        The first pass runs the rule-based Correspondent with the model disabled.
+        Only if it yields no hostile or suspicious trust and no ``possible_attack``
+        signal is the Correspondent run again with model triage, which can add
+        escalations but never downgrade a rules flag (rule-assigned disclosure, spam
+        and legal-notice intents still skip the model). Drafts are cleared for
+        hostile or suspicious senders and possible attacks. Model request and
+        response errors fall back to rules and are noted in the reasons; errors
+        from the tools propagate.
+        """
         self._calls, self._fallbacks = 0, []
         # 1. rules only: the model never sees mail the safety screen or rules already flag
         self._rules_only = True

@@ -18,7 +18,7 @@ the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `9c7f22a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups). Only #23 remains open (owner decision, D1) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `9c7f22a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in a docstring-only PR), so no PR is open |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -211,11 +211,11 @@ operating points in `eval/jev_calibration.py`; `--dataset-repo/--config` flags; 
 #### R-03: Decide and resolve the two Correspondent/Boss mailbox PRs. Needs: D1
 PR #44 and PR #23 implement near-identical mailbox code (`sandbox/server/mailbox.py`, `ui/mailbox.js`, `tests/sandbox/js/mailbox.test.mjs`).
 PR #23 is CONFLICTING (CHANGELOG.md, `agents/judge.py`, `ingest/clerk.py`, `llm/retry.py`), its 3-dot diff touches 61 files despite saying "no pipeline changes", and it still carries the Correspondent-v2 triage (53/88 scenarios pass alone; author calls the LOFO numbers optimistic).
-**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). Nothing below is ticked.
+**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). **Closed 2026-10-10** (owner decision D1): its content was already re-cut into #44 (`5c1bb7f`, `92e1fef`, `19b81dc`, `cdcec60`); the leftover sandbox docstrings were ported in a docstring-only PR and #23 was closed with an explanatory comment. The 88-scenario baselines were not carried over (not reproducible against the unpublished `v0.5.0` pack and older than `main`'s fixes).
 Recommended:
 - [x] Land #44 (fresh from `main`, mailbox + held-out harness + `AGENTS.md` + `docs/HELD_OUT_SCENARIOS.md`).
-- [ ] Re-cut #23's triage v2 as a new PR on top of #44 (rebase, then diff against `main` to separate real changes from formatting; no pipeline files unless justified).
-- [ ] Close #23 with a link to the replacement. Port #44's recorded follow-up: make committed Boss decisions authoritative on recovery.
+- [x] Re-cut #23's triage v2 as a new PR on top of #44 (already on `main` through #44; only docstrings were left, ported separately) (rebase, then diff against `main` to separate real changes from formatting; no pipeline files unless justified).
+- [x] Close #23 with a link to the replacement. [ ] Port #44's recorded follow-up: make committed Boss decisions authoritative on recovery (tracked in K-08).
 
 ### Phase 2: salvage stranded work
 
@@ -371,11 +371,11 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 - [ ] Do K-05. Reloaded's root `schemas/` remains the contract owner (content-plan CD8).
 
 #### X-02: Retire merged and dead branches (destructive; needs owner approval, D4)
-_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`, `feat/sandbox-correspondent-tuning` (#23)._
+_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`. `feat/sandbox-correspondent-tuning` (#23, now closed, not merged) is deletable too; same 403 block._
 - [ ] Safe (fully merged): reloaded `docs/mailroom-reloaded-design`, `feat/mailroom-reloaded-completion`, `feat/tui-brand-theme`, all 12 `claude/trace-replay-*`.
 - [ ] After R-18 is done: `claude/mailroom-reloaded-build`, `coderabbit/*` (all four).
 - [ ] After D5: `revert-26-claude/mailroom-trace-replay-plan-5nj1nk` (reverts rev 4 of the old plan; conflicts with main, which built on it; no PR).
-- [ ] After R-03: `feat/sandbox-correspondent-tuning`. After X-01 merges: reloaded `feat/heldout-boss-mailbox-agents`, content `feat/heldout-h-series`. After R-02: `fix/jev-integration-issue-14`.
+- [ ] After R-03 (done): `feat/sandbox-correspondent-tuning`. After X-01 merges: reloaded `feat/heldout-boss-mailbox-agents`, content `feat/heldout-h-series`. After R-02: `fix/jev-integration-issue-14`.
 - [x] Local only: reloaded local `main` fast-forwarded to `502995a`; stray `wt/*` worktree branches removed.
 
 #### X-04: Issue tracker and housekeeping
@@ -415,7 +415,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 
 - [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [x] Re-run on `main` plus #44/#59 changes 2026-10-10: reloaded `ruff` clean, `pytest --ignore=tests/sandbox` 1520 passed, `node --test tests/tui/js` 235 pass, `tests/sandbox` 745 passed with 6 root-user `test_startup_bind_policy` failures (environmental). Content repo not re-run.
 - [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
-- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [ ] #23 resolved (owner); no open PR without an owner.
+- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10); no open PR without an owner.
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.

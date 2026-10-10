@@ -35,6 +35,7 @@ I = re.IGNORECASE
 
 
 def _rx(p: str, flags: int = I) -> re.Pattern[str]:
+    """Compile a lexicon pattern, using case-insensitive matching by default."""
     return re.compile(p, flags)
 
 
@@ -449,6 +450,10 @@ class Features:
 
 
 def _non_english(text: str) -> bool:
+    """Flag text with at least eight tokens and under 12% English stop words.
+
+    This is a language heuristic; shorter text always returns ``False``.
+    """
     toks = re.findall(r"[a-zA-ZÀ-ɏ']+", text.lower())
     if len(toks) < 8:
         return False
@@ -458,6 +463,12 @@ def _non_english(text: str) -> bool:
 def extract_features(
     msg, trust: str, match: dict | None, catalog_ids: set[str]
 ) -> Features:
+    """Derive triage features from wire data and previously resolved trust.
+
+    ``match`` is the registry match, and ``catalog_ids`` contains archived or
+    parked document IDs used to flag duplicate attachments. Attachment bytes
+    are not read.
+    """
     body = msg.body or ""
     letters = [c for c in msg.subject + body if c.isalpha()]
     vals = [msg.auth.get(k, "none") for k in ("spf", "dkim", "dmarc")]
@@ -494,6 +505,14 @@ class Triage:
 
 
 def score_intents(text: str, f: Features, subject: str = "") -> Triage:
+    """Return deterministic intent scores, confidence, evidence, and review flags.
+
+    ``text`` includes subject and body; matching ``subject`` cues get a 50%
+    weight bonus. Confidence is the best score's share of all scores, rounded
+    to three decimals. A best score below 2.0 abstains to ``general_question``
+    with review; otherwise confidence below 0.4 flags review. This scoring
+    step does not replace the Correspondent's safety screen.
+    """
     scores: dict[str, float] = {k: 0.0 for k in LEXICON}
     for k in ("legal_notice", "payment_or_identity_change"):
         scores.setdefault(k, 0.0)
@@ -584,6 +603,10 @@ def lexicon_score(text: str, intent: str) -> float:
 
 
 def LEXICON_HIT(text: str, intent: str) -> bool:
+    """Return whether either of an intent's first two lexicon patterns matches.
+
+    Raise ``KeyError`` for an intent absent from ``LEXICON``.
+    """
     return any(rx.search(text) for rx, _ in LEXICON[intent][:2])
 
 

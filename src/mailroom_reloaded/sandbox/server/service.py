@@ -81,6 +81,7 @@ class _Tools:
         return self.svc.content.registry_clients
 
     def delegation(self) -> dict[str, dict]:
+        """Expose the loaded policy matrix to Correspondent triage and drafting."""
         return self.svc.content.policy.delegation
 
     def lookup_catalog(self) -> list[dict]:
