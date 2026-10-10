@@ -48,7 +48,10 @@ text is rendered with `textContent`; bidi and control characters are replaced.
 Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
 jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
 demand, with a chain-verify line), `p` cycles insight panels (metrics, tokens,
-decisions, latency, fields — pluggable via `registerPanel` in `replay/panels.js`),
+decisions, latency, fields — pluggable via `registerPanel` in `replay/panels.js`: a panel is
+`{ id, title, render }`; the id is 1-32 letters, digits, `_` or `-` and may not be `none`,
+`inspector`, `ledger` or a built-in id; the title is cleaned and clamped to 40 characters;
+the grid sanitises the rows `render` returns; there is no per-panel key, `p` cycles them),
 `e` next event, `f` follow the live stream, `o` opens the run's Phoenix project and `g` the Grafana quality
 dashboard in a new tab, `q`/Esc quit. Ctrl+C always
 releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
@@ -59,11 +62,17 @@ The viewer needs a physical keyboard (the input stays read-only while it is open
 
 `--follow` (or the `f` key) starts a live Server-Sent Events reader on
 `GET /v1/replay/live?session=<id>` (`replay/live.js`): it appends each new
-`segment`/`generation`/`event`/`score` frame to the timeline, rebuilds the model and
-pins the playhead to `now - 2s`. A backward scrub (Left, Home, a digit jump) leaves
+`entity`/`segment`/`generation`/`event`/`score` frame to the timeline (a new document
+is added, a finished one replaces its entry), rebuilds the model and pins the playhead
+to the server's `now - 2s` (from the `heartbeat` clock, not the browser's). A backward scrub (Left, Home, a digit jump) leaves
 follow, and `f` re-enters; the reader pauses while the tab is hidden and stops on
 `q`/Esc. The route is token-gated like the rest of `/v1` and emits `ready`, item,
-`heartbeat` and `error` frames. The dev server bounds it with
+`heartbeat` and `error` frames. When the span read hits its 100,000-row cap the
+route sends an `error` frame with `code: "row_cap"` and ends; the viewer stops
+following and shows a notice in the header. The server remembers only the items within
+2 h / 20,000 of the newest, so an unlimited stream does not grow without bound. The
+footer legend drops the least important keys on a narrow terminal and always keeps
+`q quit`. The dev server bounds it with
 `MAILROOM_REPLAY_LIVE_POLL_S` (default 1.0), `MAILROOM_REPLAY_LIVE_HEARTBEAT_S`
 (default 15) and `MAILROOM_REPLAY_LIVE_MAX_FRAMES` (default 0 = unlimited).
 

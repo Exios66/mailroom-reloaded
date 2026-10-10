@@ -90,15 +90,44 @@ def resolve_review(
             reviewer, worker_id,
         )
     except BaseException:
-        # Keep the doc parked: put the file back and restore the parked manifest.
-        # Once the flow has re-claimed the file it owns the manifest, so leave it.
+        # Keep the doc parked: put the file back and restore the parked manifest,
+        # also when the flow had re-claimed the file and died mid-run.
         try:
             if claimed.is_file():
                 os.replace(claimed, path)
                 save_manifest(bins, manifest)
-        except OSError:
+            else:
+                _reopen_after_flow_failure(bins, manifest, worker_id, path)
+        except Exception:  # never mask the flow's own error
             logger.exception("review_restore_failed", doc_id=doc_id)
         raise
+
+
+def _reopen_after_flow_failure(
+    bins: Bins, manifest: Manifest, worker_id: str, parked_path: Path
+) -> bool:
+    """Put a document back in ``review/`` when the resumed flow died mid-run.
+
+    The flow re-claims the file into ``processing/<worker_id>/`` and flips the
+    manifest to ``processing``; if it then raises, a retried resolve would find no
+    parked manifest and 404. When the on-disk manifest is still ``processing`` and
+    the content-verified file sits in the worker directory, move it back to
+    ``parked_path`` and rewrite ``manifest`` (the prior parked snapshot, which
+    carries no run error). Return whether the document was reopened; a manifest
+    the flow already finished (archived, failed, parked again) is left alone.
+    """
+    current = load_manifest(bins, manifest.doc_id)
+    if current is None or current.status != "processing":
+        return False
+    for candidate in sorted(bins.processing(worker_id).glob(f"*_{glob.escape(manifest.filename)}")):
+        try:
+            if candidate.is_file() and _sha256(candidate) == manifest.content_sha256:
+                os.replace(candidate, parked_path)
+                save_manifest(bins, manifest)
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _resolve_claimed(

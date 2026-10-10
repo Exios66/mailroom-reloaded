@@ -476,3 +476,52 @@ def test_approve_updates_catalog_to_archived(env, mock_provider, monkeypatch):
     rec = catalog.get(parked.doc_id)
     assert rec is not None and rec.status == "archived"
     assert catalog.list(status="parked") == []
+
+
+def test_flow_crash_during_resolve_reopens_parked_and_retry_succeeds(
+    env, mock_provider, monkeypatch
+):
+    """A flow crash after it re-claimed the file leaves the doc parked, not 404."""
+
+    bins, parked = _park(env, mock_provider, monkeypatch)
+    doc_id = parked.doc_id
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("extract exploded")
+
+    monkeypatch.setattr(flow_mod, "_extract", boom)
+    with pytest.raises(RuntimeError):
+        resolve_review(doc_id, "approve")
+
+    manifest = load_manifest(bins, doc_id)
+    assert manifest is not None and manifest.status == "parked"
+    assert list(bins.review.glob("*.txt"))
+
+    def fake_extract(text, doc_type, doc_subclass, **kwargs):
+        return ExtractResult(
+            doc_type, {"field": "value"}, True, None, 0.99, None, 1,
+            Usage(prompt_tokens=5, completion_tokens=5, calls=1),
+        )
+
+    monkeypatch.setattr(flow_mod, "_extract", fake_extract)
+    state = resolve_review(doc_id, "approve")
+    assert state is not None and state.status == "archived"
+
+
+def test_review_approved_cleared_after_reextraction(env, mock_provider, monkeypatch):
+    """The approval flag does not outlive the re-extraction it authorised."""
+
+    bins, parked = _park(env, mock_provider, monkeypatch)
+
+    def fake_extract(text, doc_type, doc_subclass, **kwargs):
+        return ExtractResult(
+            doc_type, {"field": "value"}, True, None, 0.99, None, 1,
+            Usage(prompt_tokens=5, completion_tokens=5, calls=1),
+        )
+
+    monkeypatch.setattr(flow_mod, "_extract", fake_extract)
+    state = resolve_review(parked.doc_id, "approve")
+    assert state is not None and state.status == "archived"
+    assert state.review_approved is False
+    manifest = load_manifest(bins, parked.doc_id)
+    assert manifest is not None and manifest.state["review_approved"] is False

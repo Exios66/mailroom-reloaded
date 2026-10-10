@@ -67,6 +67,21 @@ test('frame has header, track, scrub, metrics and footer within bounds', () => {
   rows.forEach((r) => assert.ok(len(r) <= 100, r));
 });
 
+test('the footer keeps q quit at 80 and 60 columns and the full legend at 100', () => {
+  for (const cols of [60, 80, 99, 100, 160]) {
+    const foot = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols, rows: 30 })).at(-1);
+    assert.match(foot, /q quit/, `cols ${cols}`);
+    assert.ok(len(foot) <= cols, `cols ${cols}`);
+  }
+  const wide = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 100, rows: 30 })).at(-1);
+  for (const k of ['spc play', '</> seek', '[ ] speed', '0-9 jump', 'j/k select', 'i inspect', 'l ledger', 'p panels', 'e event']) {
+    assert.ok(wide.includes(k), k);
+  }
+  const narrow = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 80, rows: 30 })).at(-1);
+  assert.match(narrow, /spc play/);
+  assert.match(narrow, /p panels/);
+});
+
 test('markers: failed, finished, selection class', () => {
   const rows = renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 100, rows: 30 });
   const text = flat(rows).join('\n');

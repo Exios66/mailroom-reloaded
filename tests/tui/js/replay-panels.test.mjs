@@ -33,22 +33,22 @@ const clock = { t: 12, playing: false, speed: 1, duration: 60, ended: false };
 afterEach(() => resetPanels());
 
 test('registerPanel adds a panel, listPanels orders it, duplicates throw', () => {
-  const spec = registerPanel({ id: 'custom', title: 'Custom', key: 'c', render: () => [] });
+  const spec = registerPanel({ id: 'custom', title: 'Custom', render: () => [] });
   assert.equal(spec.id, 'custom');
   assert.equal(getPanel('custom').title, 'Custom');
   const ids = listPanels().map((p) => p.id);
   assert.ok(ids.includes('custom'));
   assert.deepEqual(ids.slice(0, 5), ['metrics', 'tokens', 'decisions', 'latency', 'fields']);
-  assert.deepEqual(listPanels().find((p) => p.id === 'custom'), { id: 'custom', title: 'Custom', key: 'c' });
+  assert.deepEqual(listPanels().find((p) => p.id === 'custom'), { id: 'custom', title: 'Custom' });
   assert.equal(getPanel('missing'), null);
   assert.throws(() => registerPanel({ id: 'custom', render: () => [] }), /already registered/);
-  assert.throws(() => registerPanel({ id: '  ', render: () => [] }), /non-empty/);
+  assert.throws(() => registerPanel({ id: '  ', render: () => [] }), /panel id must be/);
   assert.throws(() => registerPanel({ id: 'x', render: 1 }), /render must be a function/);
-  assert.throws(() => registerPanel(null), /non-empty/);
+  assert.throws(() => registerPanel(null), /panel id must be/);
 });
 
 test('renderFrame resolves a registered id; unknown id yields no panel rows', () => {
-  registerPanel({ id: 'hello', title: 'Hello', key: 'h', render: () => [[[' hello panel ', 'info']]] });
+  registerPanel({ id: 'hello', title: 'Hello', render: () => [[[' hello panel ', 'info']]] });
   const withPanel = textOf(renderFrame({ model: {}, st: {}, clock: {}, cols: 80, rows: 30, panel: 'hello' }));
   assert.ok(withPanel.includes('hello panel'));
   const unknown = textOf(renderFrame({ model: {}, st: {}, clock: {}, cols: 80, rows: 30, panel: 'nope' }));
@@ -82,9 +82,43 @@ test('every built-in panel renders on a minimal model and a hostile timeline', (
   assert.ok(!CTRL.test(fieldsOut), 'control/bidi characters are neutralised');
 });
 
+test('registerPanel rejects reserved ids and bad ids, and cleans the title', () => {
+  for (const id of ['none', 'inspector', 'ledger', 'metrics', 'tokens', 'decisions', 'latency', 'fields']) {
+    assert.throws(() => registerPanel({ id, render: () => [] }), /reserved/, id);
+  }
+  for (const id of ['', 'a b', 'x'.repeat(33), 'a\u202eb', '<x>', 7]) {
+    assert.throws(() => registerPanel({ id, render: () => [] }), /panel id must be/, String(id));
+  }
+  const spec = registerPanel({ id: 'tidy', title: `T\u202e\u0007${'z'.repeat(80)}`, render: () => [] });
+  assert.ok(!CTRL.test(spec.title) && !/\u0007/.test(spec.title));
+  assert.equal(Array.from(spec.title).length, 40);
+  assert.equal(registerPanel({ id: 'plain', render: () => [] }).title, 'plain');
+  assert.ok(!('key' in spec), 'no per-panel key in the contract');
+  assert.deepEqual(listPanels().find((p) => p.id === 'tidy'), { id: 'tidy', title: spec.title });
+});
+
+test('custom panel rows are sanitised by the grid', () => {
+  registerPanel({
+    id: 'dirty',
+    render: () => [
+      [[`a\u202eb\u0000c${'y'.repeat(900)}`, 'nonsense'], [42, 'ok'], ['ok text', 'warn'], 'junk', [null]],
+      'not a row',
+      [[HOSTILE, 'info']],
+    ],
+  });
+  const rows = renderFrame({ model: {}, st: {}, clock: {}, cols: 80, rows: 30, panel: 'dirty' });
+  const out = textOf(rows);
+  assert.ok(!CTRL.test(out) && !out.includes('\u0000'));
+  assert.ok(out.includes('a b c'));
+  rows.forEach((r) => assert.ok(r.map((s) => s[0]).join('').length <= 80));
+  const classes = rows.flat().map((s) => s[1]);
+  assert.ok(!classes.includes('nonsense'));
+  assert.ok(out.includes('<img src=x onerror=alert(1)>'), 'markup stays literal text');
+});
+
 test('resetPanels restores exactly the built-in set', () => {
   const builtin = listPanels().map((p) => p.id);
-  registerPanel({ id: 'temp', title: 'Temp', key: 'x', render: () => [] });
+  registerPanel({ id: 'temp', title: 'Temp', render: () => [] });
   assert.ok(listPanels().some((p) => p.id === 'temp'));
   resetPanels();
   assert.deepEqual(listPanels().map((p) => p.id), builtin);

@@ -275,6 +275,9 @@ class Settings(BaseSettings):
     public_url: _LinkUrl = "http://localhost:8000"
     phoenix_url: _LinkUrl = "http://localhost:6006"
     grafana_url: _LinkUrl = "http://localhost:3000"
+    #: Phoenix project name echoed by ``GET /links`` (``MAILROOM_PHOENIX_PROJECT``); the tracing
+    #: resource attribute ``openinference.project.name`` reads the same variable.
+    phoenix_project: str = "mailroom-live"
 
 
 @lru_cache(maxsize=1)
