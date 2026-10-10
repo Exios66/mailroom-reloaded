@@ -1,5 +1,7 @@
 .git
 .venv
+.devcontainer
+.vscode
 .env
 .env.*
 !.env.example

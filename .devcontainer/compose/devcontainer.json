@@ -1,0 +1,58 @@
+{
+  // mailroom-reloaded — VS Code Dev Containers (Docker Compose, full stack).
+  //
+  // Brings up the whole deploy/docker-compose.dev.yml topology (app, watcher,
+  // mock, OTel collector, Phoenix, Prometheus, Grafana) and attaches VS Code to
+  // the `app` service. VS Code does not auto-mount the workspace for Compose, so
+  // deploy/docker-compose.devcontainer.yml adds the repository at /app.
+  //
+  // Open with: Command Palette -> "Dev Containers: Open Folder in Container..."
+  // and pick this configuration (or set it as the default by moving this file to
+  // .devcontainer/devcontainer.json).
+  "name": "mailroom-reloaded (full stack)",
+  "dockerComposeFile": [
+    "../deploy/docker-compose.dev.yml",
+    "../deploy/docker-compose.devcontainer.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/app",
+  "remoteUser": "app",
+  "updateRemoteUserUID": false,
+  "shutdownAction": "stopCompose",
+  "runServices": [
+    "data-init",
+    "mock",
+    "otel-collector",
+    "otel-targets",
+    "phoenix",
+    "prometheus",
+    "grafana",
+    "app",
+    "watcher"
+  ],
+  "forwardPorts": [8000, 6006, 9090, 3000],
+  "portsAttributes": {
+    "8000": { "label": "mailroom API /ui" },
+    "6006": { "label": "Phoenix traces" },
+    "9090": { "label": "Prometheus" },
+    "3000": { "label": "Grafana" }
+  },
+  "postCreateCommand": "python -c \"import mailroom_reloaded, fastapi, uvicorn\"",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode-remote.remote-containers",
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "ruff.nativeServer": true
+      }
+    }
+  }
+}

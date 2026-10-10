@@ -1,0 +1,48 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev: restart (container)",
+      "type": "shell",
+      "command": "bash .devcontainer/start-dev.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: tail app log (container)",
+      "type": "shell",
+      "command": "tail -f /tmp/app.log",
+      "problemMatcher": []
+    },
+    {
+      "label": "tests: pytest",
+      "type": "shell",
+      "command": "uv run pytest -q",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "lint: ruff",
+      "type": "shell",
+      "command": "uv run ruff check .",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: dev up (host)",
+      "type": "shell",
+      "command": "scripts/dev.sh up",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: dev down (host)",
+      "type": "shell",
+      "command": "scripts/dev.sh down",
+      "problemMatcher": []
+    },
+    {
+      "label": "docker: dev smoke (host)",
+      "type": "shell",
+      "command": "scripts/dev.sh smoke",
+      "problemMatcher": []
+    }
+  ]
+}
