@@ -2,6 +2,8 @@
 // A row is an array of [text, cls] segments. No DOM, no clock; every untrusted
 // string is only sanitised (control chars -> space) and truncated, never interpreted.
 
+import { getPanel } from './panels.js';
+
 const CLASSES = new Set(['dim', 'ok', 'warn', 'err', 'info', 'hot', 'sel']);
 const MIN_COLS = 60;
 const MAX_COLS = 160;
@@ -53,8 +55,8 @@ export function fmtTime(sec) {
   return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${rest % 10}`;
 }
 
-/** Clip a segment list to `cols` characters (code points). */
-function clip(segs, cols) {
+/** Clip a segment list to `cols` characters (code points). Shared with panels.js. */
+export function clip(segs, cols) {
   const out = [];
   let left = cols;
   for (const [t, cls] of segs) {
@@ -171,10 +173,29 @@ function metricsRow({ model, st, cols }) {
   return clip(segs, cols);
 }
 
-function inspectorRows({ model, st, clock, sel, cols }) {
+/** The run's outbound observability URLs, one text row each (links may be null). */
+function externalLinkRows({ sess, links, cols }) {
+  const cfg = links && typeof links === 'object' ? links : {};
+  const phoenix = typeof cfg.phoenix_url === 'string' ? cfg.phoenix_url : '';
+  const grafana = typeof cfg.grafana_url === 'string' ? cfg.grafana_url : '';
+  const id = sess && typeof sess.id === 'string' ? sess.id : '';
+  const run = id.startsWith('run:') ? id.slice(4) : null;
+  const out = [];
+  if (phoenix) {
+    out.push(clip([[' phoenix  ', 'dim'], [truncate(phoenix, cols - 10), 'info']], cols));
+  }
+  if (grafana && run) {
+    const url = `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}`;
+    out.push(clip([[' grafana  ', 'dim'], [truncate(url, cols - 10), 'info']], cols));
+  }
+  return out;
+}
+
+function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
   const docs = Array.isArray(st.docs) ? st.docs : [];
   const d = sel >= 0 && sel < docs.length ? docs[sel] : null;
   const out = [clip([[' ─ inspector ' + '─'.repeat(cols), 'dim']], cols)];
+  out.push(...externalLinkRows({ sess, links, cols }));
   if (!d) {
     out.push(clip([[' no document selected (j/k)', 'dim']], cols));
     return out;
@@ -254,9 +275,25 @@ function ledgerRows({ ledger, cols }) {
 }
 
 const LEGEND =
-  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  e event  q quit';
+  ' spc play  </> seek  [ ] speed  0-9 jump  j/k select  i inspect  l ledger  p panels  e event  q quit';
 
-export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none' } = {}) {
+/**
+ * Resolve the `panel` selector to rows. Inspector and ledger keep their dedicated
+ * renderers; any other non-'none' string is looked up in the panel registry and its
+ * render(ctx) is called. An unknown id, a throwing renderer or a non-array result
+ * degrades to no panel rows (the frame never throws on a bad panel).
+ */
+function resolvePanel(panel, ctx) {
+  if (panel === 'inspector') return inspectorRows(ctx);
+  if (panel === 'ledger') return ledgerRows(ctx);
+  if (typeof panel !== 'string' || panel === 'none') return [];
+  const spec = getPanel(panel);
+  if (!spec) return [];
+  const rows = safe(() => spec.render(ctx), []);
+  return Array.isArray(rows) ? rows : [];
+}
+
+export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = null, panel = 'none', links = null } = {}) {
   const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
   const R = clamp(Math.floor(num(rows)) || 30, MIN_ROWS, MAX_ROWS);
   const m = model && typeof model === 'object' ? model : {};
@@ -264,14 +301,14 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const ck = clock && typeof clock === 'object' ? clock : { t: 0, duration: 0, speed: 1, playing: false };
   const sess = m.session && typeof m.session === 'object' ? m.session : {};
   const selIdx = Number.isInteger(sel) ? sel : -1;
-  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess };
+  const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links };
 
   const head = clip(headerRow(ctxo), C);
   const scrub = clip(scrubRow(ctxo), C);
   const metrics = metricsRow(ctxo);
   const foot = clip([[LEGEND, 'dim']], C);
   const track = trackRows(ctxo);
-  const panelRows = panel === 'inspector' ? inspectorRows(ctxo) : panel === 'ledger' ? ledgerRows(ctxo) : [];
+  const panelRows = resolvePanel(panel, ctxo);
 
   const budget = R - 4; // header, scrub, metrics, footer
   let panelBudget = 0;

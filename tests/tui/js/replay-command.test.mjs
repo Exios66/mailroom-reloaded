@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegistry, dispatch } from '../../../src/mailroom_reloaded/api/tui/engine.js';
 import { ApiError } from '../../../src/mailroom_reloaded/api/tui/api.js';
-import { registerReplay, normalizeSessionId } from '../../../src/mailroom_reloaded/api/tui/commands/replay.js';
+import { registerReplay, normalizeSessionId, boundLiveTimeline, LIVE_MAX_ITEMS } from '../../../src/mailroom_reloaded/api/tui/commands/replay.js';
+import { createModel } from '../../../src/mailroom_reloaded/api/tui/replay/model.js';
 
 const TL = {
   version: 'replay/v1',
@@ -22,6 +23,13 @@ const TL = {
   rollups: {},
 };
 
+const LINKS = {
+  public_url: 'http://localhost:8000',
+  phoenix_url: 'http://localhost:6006',
+  grafana_url: 'http://localhost:3000',
+  phoenix_project: 'mailroom-live',
+};
+
 function fakeTimers() {
   const t = { fns: [], cleared: 0 };
   t.setInterval = (fn, ms) => {
@@ -35,7 +43,7 @@ function fakeTimers() {
   return t;
 }
 
-function makeCtx({ routes = {}, takeover = 'ok', clockMs = { v: 0 } } = {}) {
+function makeCtx({ routes = {}, takeover = 'ok', clockMs = { v: 0 }, open = null, fetchFn = null } = {}) {
   const calls = [];
   const out = [];
   const controller = new AbortController();
@@ -66,11 +74,13 @@ function makeCtx({ routes = {}, takeover = 'ok', clockMs = { v: 0 } } = {}) {
       kv: () => {},
       man: () => {},
     },
-    api: { get: handler, post: handler },
+    api: { get: handler, post: handler, authHeaders: () => ({}) },
+    fetch: fetchFn ?? undefined,
     signal: () => controller.signal,
     now: () => clockMs.v,
     timers,
     gridSize: () => ({ cols: 100, rows: 30 }),
+    open: open ?? undefined,
     takeover: (opts) => {
       tk.calls += 1;
       tk.opts = opts;
@@ -91,11 +101,38 @@ const key = (k, extra = {}) => ({ key: k, ctrlKey: false, shiftKey: false, altKe
 const nextTick = () => new Promise((r) => setImmediate(r));
 const lastText = (view) => view.frames.at(-1).map((r) => r.map((s) => s[0]).join('')).join('\n');
 
-async function open(args, h = makeCtx({ routes: { '/v1/replay/sessions/run%3Ar1/timeline': TL } })) {
+async function open(args, h = makeCtx({ routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL } })) {
   const p = dispatch(setup(), h.ctx, `replay ${args}`);
   await nextTick();
   return { h, p };
 }
+
+const encoder = new TextEncoder();
+
+/** A controllable SSE body: `push(name, obj)` a frame, `close()` ends the stream. */
+function sseBody() {
+  let controller;
+  const stream = new ReadableStream({
+    start(c) {
+      controller = c;
+    },
+  });
+  return {
+    stream,
+    push: (name, obj) => controller.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(obj)}\n\n`)),
+    close: () => controller.close(),
+  };
+}
+
+/** A fake ctx.fetch that records calls and exposes each stream for the test to drive. */
+async function fakeLiveFetch(url, { headers, signal } = {}) {
+  const sse = sseBody();
+  const rec = { url, headers, sse, aborted: false };
+  fakeLiveFetch.calls.push(rec);
+  if (signal) signal.addEventListener('abort', () => { rec.aborted = true; });
+  return { ok: true, status: 200, body: sse.stream };
+}
+fakeLiveFetch.calls = [];
 
 test('registered with man page', () => {
   const spec = setup().get('replay');
@@ -150,6 +187,7 @@ test('validation errors send no request', async () => {
     'replay r1 --at abc',
     'replay r1 --limit 5',
     'replay r1 --nope',
+    'replay r1 --follow 1',
   ]) {
     const h = makeCtx();
     await dispatch(setup(), h.ctx, line);
@@ -238,12 +276,14 @@ test('--at starts paused at t and --speed applies', async () => {
 
 test('ledger is fetched lazily, once, on l', async () => {
   const routes = {
+    '/links': LINKS,
     '/v1/replay/sessions/run%3Ar1/timeline': TL,
     '/v1/ledger': { entries: [{ seq: 4, kind: 'doc_closed', entry_hash: 'abcdef0123456789' }] },
     '/v1/ledger/verify': { ok: true, count: 4 },
   };
   const { h, p } = await open('r1', makeCtx({ routes }));
-  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls.length, 2); // timeline + /links
+  assert.equal(h.calls[0].path, '/v1/replay/sessions/run%3Ar1/timeline');
   h.tk.opts.onKey(key('l'));
   assert.match(lastText(h.view), /loading…/);
   await nextTick();
@@ -387,6 +427,231 @@ test('e seeks to the next event even with a huge event list', async () => {
   const { h, p } = await open('r1 --at 0', makeCtx({ routes: { '/v1/replay/sessions/run%3Ar1/timeline': big } }));
   h.tk.opts.onKey(key('e'));
   assert.match(lastText(h.view), /00:10\.0/);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('the inspector shows the Phoenix and Grafana links for the run', async () => {
+  const { h, p } = await open('r1');
+  assert.equal(h.calls[1].path, '/links');
+  h.tk.opts.onKey(key('i'));
+  const t = lastText(h.view);
+  assert.match(t, /phoenix\s+http:\/\/localhost:6006/);
+  assert.match(t, /grafana\s+http:\/\/localhost:3000\/d\/mailroom-quality\?var-run_id=r1/);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('o and g open Phoenix and Grafana with the injected opener', async () => {
+  const opened = [];
+  const h = makeCtx({
+    routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+    open: (url, target, features) => opened.push({ url, target, features }),
+  });
+  const p = dispatch(setup(), h.ctx, 'replay r1');
+  await nextTick();
+  h.tk.opts.onKey(key('o'));
+  h.tk.opts.onKey(key('g'));
+  assert.deepEqual(opened, [
+    { url: 'http://localhost:6006', target: '_blank', features: 'noopener' },
+    { url: 'http://localhost:3000/d/mailroom-quality?var-run_id=r1', target: '_blank', features: 'noopener' },
+  ]);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('o and g refuse non-http(s) or credential-bearing link config', async () => {
+  const opened = [];
+  const bad = { phoenix_url: 'javascript:alert(1)', grafana_url: 'https://u:p@g.example' };
+  const h = makeCtx({
+    routes: { '/links': bad, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+    open: (url) => opened.push(url),
+  });
+  const p = dispatch(setup(), h.ctx, 'replay r1');
+  await nextTick();
+  h.tk.opts.onKey(key('o'));
+  h.tk.opts.onKey(key('g'));
+  assert.deepEqual(opened, []);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('o and g are a no-op without an opener or link config', async () => {
+  const { h, p } = await open('r1', makeCtx({ routes: { '/v1/replay/sessions/run%3Ar1/timeline': TL } }));
+  assert.doesNotThrow(() => {
+    h.tk.opts.onKey(key('o'));
+    h.tk.opts.onKey(key('g'));
+  });
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('a hostile run id stays literal text in the link line', async () => {
+  const hostile = { ...TL, session: { ...TL.session, id: 'run:<img src=x onerror=alert(1)>' } };
+  const h = makeCtx({
+    routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': hostile },
+  });
+  const p = dispatch(setup(), h.ctx, 'replay r1');
+  await nextTick();
+  h.tk.opts.onKey(key('i'));
+  const t = lastText(h.view);
+  assert.ok(t.includes('<img src=x')); // rendered as text, never markup
+  assert.match(t, /var-run_id=%3Cimg%20src%3Dx/); // encoded in the URL
+  assert.ok(!/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e]/.test(t));
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('the man page documents --follow and the f key', () => {
+  const spec = setup().get('replay');
+  assert.match(spec.man, /--follow/);
+  assert.match(spec.man, /f\s+follow/);
+});
+
+test('--follow grows the model and pins the clock to now-2s', async () => {
+  const realNow = Date.now;
+  const F = 1_700_000_000_000;
+  Date.now = () => F;
+  fakeLiveFetch.calls = [];
+  try {
+    const tl = { ...TL, session: { ...TL.session, t0_iso: new Date(F - 5000).toISOString() } };
+    const { h, p } = await open(
+      'r1 --follow',
+      makeCtx({
+        routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': tl },
+        fetchFn: fakeLiveFetch,
+      }),
+    );
+    assert.equal(fakeLiveFetch.calls.length, 1);
+    assert.equal(fakeLiveFetch.calls[0].url, '/v1/replay/live?session=run%3Ar1');
+    // a new segment for d1 must enter the model (the inspector shows its station)
+    fakeLiveFetch.calls[0].sse.push('segment', { doc_id: 'd1', node: 'gate', station: 'gate', t0: 1, t1: 2, attempt: 1, status: 'ok' });
+    await nextTick();
+    await nextTick();
+    h.timers.tick();
+    assert.match(lastText(h.view), /00:03\.0/); // pinned to now-2s
+    h.tk.opts.onKey(key('j'));
+    h.tk.opts.onKey(key('i'));
+    assert.match(lastText(h.view), /station gate/);
+    // A later segment grows the run: the clock total follows the fresh model duration.
+    fakeLiveFetch.calls[0].sse.push('segment', { doc_id: 'd2', node: 'gate', station: 'gate', t0: 100, t1: 130, attempt: 1, status: 'ok' });
+    await nextTick();
+    await nextTick();
+    h.timers.tick();
+    assert.match(lastText(h.view), /00:03\.0 \/ 02:10\.0/, 'header total grows to 130s');
+    // f toggles follow off (aborts the reader) and back on (a fresh reader)
+    h.tk.opts.onKey(key('f'));
+    assert.ok(fakeLiveFetch.calls[0].aborted, 'f off aborts the reader');
+    h.tk.opts.onKey(key('f'));
+    await nextTick();
+    assert.equal(fakeLiveFetch.calls.length, 2);
+    h.tk.opts.onKey(key('q'));
+    await p;
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('--follow does not duplicate items the stream replays from the loaded timeline', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  const sse = fakeLiveFetch.calls[0].sse;
+  const settle = async () => {
+    await nextTick();
+    await nextTick();
+  };
+  const ev = { t: 30, doc_id: 'd1', kind: 'gate', station: 'intake', payload: {} };
+  // A replayed loaded segment and event are skipped: an accepted item forces a redraw, a skipped one does not.
+  let n = h.view.frames.length;
+  sse.push('segment', TL.segments[0]);
+  sse.push('event', ev);
+  await settle();
+  assert.equal(h.view.frames.length, n, 'replayed loaded items cause no redraw');
+  // A genuinely new item is accepted.
+  sse.push('event', { ...ev, t: 31 });
+  await settle();
+  assert.equal(h.view.frames.length, n + 1, 'a new event redraws once');
+  // A second identical event on the same connection is distinct (count-based), not collapsed.
+  n = h.view.frames.length;
+  sse.push('event', { ...ev, t: 31 });
+  await settle();
+  assert.equal(h.view.frames.length, n + 1, 'a repeated identical event is still accepted');
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('an error frame stops following instead of reconnecting', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  fakeLiveFetch.calls[0].sse.push('error', { detail: 'no timeline' });
+  await nextTick();
+  await nextTick();
+  assert.ok(fakeLiveFetch.calls[0].aborted, 'the reader is stopped');
+  assert.equal(fakeLiveFetch.calls.length, 1, 'no reconnect');
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
+test('boundLiveTimeline caps each list at 5000 and drops items older than 2h', () => {
+  assert.equal(LIVE_MAX_ITEMS, 5000);
+  const seq = (n, make) => Array.from({ length: n }, (_, i) => make(i));
+  const stale = { doc_id: 'd1', station: 'intake', t0: -100000, t1: -99999 };
+  const tl = {
+    session: { id: 'run:r1' },
+    stations: [{ id: 'intake' }],
+    entities: [{ doc_id: 'd1' }],
+    rollups: { first_pass_rate: 0.5 },
+    segments: [stale, ...seq(5001, (i) => ({ doc_id: 'd1', station: 'intake', t0: i, t1: i + 1 }))],
+    generations: seq(5001, (i) => ({ doc_id: 'd1', t0: i, t1: i + 1 })),
+    events: seq(5001, (i) => ({ t: i, doc_id: 'd1', kind: 'k' })),
+    scores: seq(5001, (i) => ({ t: i, doc_id: 'd1' })),
+  };
+  const out = boundLiveTimeline(tl);
+  assert.equal(out, tl, 'bounded in place');
+  for (const list of ['segments', 'generations', 'events', 'scores']) {
+    assert.equal(out[list].length, 5000, list);
+  }
+  // newest item is t0=5000, so the 2h floor is -2200 and the stale segment is gone.
+  assert.ok(!out.segments.includes(stale));
+  assert.equal(out.segments[0].t0, 1);
+  assert.equal(out.segments.at(-1).t0, 5000);
+  assert.equal(out.events.at(-1).t, 5000);
+  // session/stations/entities/rollups are never trimmed.
+  assert.equal(out.session, tl.session);
+  assert.equal(out.stations, tl.stations);
+  assert.equal(out.entities, tl.entities);
+  assert.equal(out.rollups, tl.rollups);
+  // The model still builds from the bounded buffer.
+  assert.equal(createModel(out).duration, 5001);
+});
+
+test('a backward scrub leaves follow and f re-enters', async () => {
+  fakeLiveFetch.calls = [];
+  const { h, p } = await open(
+    'r1 --follow',
+    makeCtx({
+      routes: { '/links': LINKS, '/v1/replay/sessions/run%3Ar1/timeline': TL },
+      fetchFn: fakeLiveFetch,
+    }),
+  );
+  assert.equal(fakeLiveFetch.calls.length, 1);
+  h.tk.opts.onKey(key('ArrowLeft'));
+  assert.ok(fakeLiveFetch.calls[0].aborted, 'a backward step stops the reader');
+  h.tk.opts.onKey(key('f'));
+  await nextTick();
+  assert.equal(fakeLiveFetch.calls.length, 2);
   h.tk.opts.onKey(key('q'));
   await p;
 });

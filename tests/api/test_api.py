@@ -269,6 +269,69 @@ def test_ui_served(client):
     assert "3000" in text  # Grafana link
     assert '"/tui#replay=run:" + encodeURIComponent(r.run_id)' in text  # per-run replay link
     assert "ev.stopPropagation()" in text  # the link must not also open the cards
+    assert "/d/mailroom-quality?var-run_id=" in text  # per-run Grafana link expression
+    assert "phoenix ↗" in text  # per-run Phoenix link
+    assert "/links" in text  # the header links are refreshed from the public config
+
+
+def test_links_public(client, monkeypatch):
+    """Verify /links returns the observability base URLs from the settings."""
+    monkeypatch.setenv("MAILROOM_PUBLIC_URL", "https://mailroom.example")
+    monkeypatch.setenv("MAILROOM_PHOENIX_URL", "https://phoenix.example")
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://grafana.example")
+    monkeypatch.setenv("MAILROOM_PHOENIX_PROJECT", "proj-x")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    resp = client.get("/links")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "public_url": "https://mailroom.example",
+        "phoenix_url": "https://phoenix.example",
+        "grafana_url": "https://grafana.example",
+        "phoenix_project": "proj-x",
+    }
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "javascript:alert(1)//",
+        "data:text/html,x",
+        "ftp://host",
+        "https://svc:hunter2@phoenix.internal:6006",
+        "https://phoenix.example/?token=abc",
+        "https://phoenix.example/#frag",
+        "not a url",
+    ],
+)
+def test_link_settings_reject_unsafe_values(monkeypatch, bad):
+    """Verify the public link settings accept only credential-free http(s) URLs."""
+    from pydantic import ValidationError
+
+    from mailroom_reloaded.settings import Settings
+
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", bad)
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_link_settings_strip_trailing_slash(monkeypatch):
+    """Verify a trailing slash is dropped so joined paths never double the slash."""
+    from mailroom_reloaded.settings import Settings
+
+    monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://g.example/")
+    assert Settings().grafana_url == "https://g.example"
+
+
+def test_links_public_without_token(client, monkeypatch):
+    """Verify /links stays public while every /v1 route requires the token."""
+    monkeypatch.setenv("MAILROOM_API_TOKEN", "s3cret")
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    assert client.get("/v1/documents").status_code == 401
+    assert client.get("/links").status_code == 200
 
 
 def test_runs_shape(client):
@@ -484,8 +547,13 @@ def test_push_route_unconfigured_oidc_rejects_non_static_token(env, monkeypatch)
 
 
 def test_jev_status_off_by_default(env, monkeypatch, client):
-    for key in ("MAILROOM_JEV_PROVIDER", "JEV_PROVIDER"):
-        monkeypatch.delenv(key, raising=False)
+    # Force "off" explicitly rather than deleting the keys: a developer's local
+    # ``.env`` may set MAILROOM_JEV_PROVIDER, and environment variables take
+    # precedence over ``.env`` in pydantic-settings, so a delete would be
+    # refilled from the file. Setting the knob to ``off`` is the default state
+    # this test asserts and is robust in any checkout.
+    monkeypatch.setenv("MAILROOM_JEV_PROVIDER", "off")
+    monkeypatch.delenv("JEV_PROVIDER", raising=False)
     body = client.get("/v1/jev").json()
     assert body["enabled"] is False
     assert body["provider"] == "off"

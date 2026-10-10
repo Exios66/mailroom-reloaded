@@ -27,7 +27,7 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
 | `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
 | `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
-| `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
+| `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N] [--follow]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
 | `health` | `health` | Checks the API. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
@@ -47,9 +47,25 @@ a scrub bar with event ticks, run metrics, and an inspector or ledger panel. All
 text is rendered with `textContent`; bidi and control characters are replaced.
 Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
 jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
-demand, with a chain-verify line), `e` next event, `q`/Esc quit. Ctrl+C always
+demand, with a chain-verify line), `p` cycles insight panels (metrics, tokens,
+decisions, latency, fields — pluggable via `registerPanel` in `replay/panels.js`),
+`e` next event, `f` follow the live stream, `o` opens the run's Phoenix project and `g` the Grafana quality
+dashboard in a new tab, `q`/Esc quit. Ctrl+C always
 releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
+The viewer fetches `GET /links` once on open for the Phoenix and Grafana base URLs;
+the inspector lists both URLs for the run (the Grafana one carries `var-run_id`), and
+`o`/`g` are a no-op when the config or a browser opener is unavailable.
 The viewer needs a physical keyboard (the input stays read-only while it is open).
+
+`--follow` (or the `f` key) starts a live Server-Sent Events reader on
+`GET /v1/replay/live?session=<id>` (`replay/live.js`): it appends each new
+`segment`/`generation`/`event`/`score` frame to the timeline, rebuilds the model and
+pins the playhead to `now - 2s`. A backward scrub (Left, Home, a digit jump) leaves
+follow, and `f` re-enters; the reader pauses while the tab is hidden and stops on
+`q`/Esc. The route is token-gated like the rest of `/v1` and emits `ready`, item,
+`heartbeat` and `error` frames. The dev server bounds it with
+`MAILROOM_REPLAY_LIVE_POLL_S` (default 1.0), `MAILROOM_REPLAY_LIVE_HEARTBEAT_S`
+(default 15) and `MAILROOM_REPLAY_LIVE_MAX_FRAMES` (default 0 = unlimited).
 
 ### `jev` and gate decisions
 
@@ -84,7 +100,9 @@ runs table links each eval run this way. Only ids that `replay` itself accepts b
 anything else prints `replay: invalid deep link`. The fragment stays in the browser, and the API
 token is still taken from this tab's session storage, never from the URL: when a token is
 configured, type `auth <token>` first and re-run the replay command, since `/ui` does not
-pass its token on.
+pass its token on. The same `/ui` row also carries outbound `grafana ↗` and `phoenix ↗`
+links (built from `GET /links`), and inside the viewer `o`/`g` open the run's Phoenix /
+Grafana URLs directly.
 
 ## Themes
 
@@ -186,7 +204,9 @@ light scheme beyond a selectable theme.
 | `.../tui/api.js` | Fetch wrapper and token storage. |
 | `.../tui/boot.js` | Boot sequence. |
 | `.../tui/ambient.js` | Themes, skyline, CRT, sparks. |
-| `.../tui/commands/shell.js`, `pipeline.js` | Commands. |
+| `.../tui/commands/shell.js`, `pipeline.js`, `ledger.js`, `replay.js` | Commands (each carries its man page). |
+| `.../tui/replay/` (`clock.js`, `model.js`, `grid.js`, `stations.js`, `panels.js`, `live.js`) | Pure viewer core: playback clock, timeline model, character-grid renderer, station table, the pluggable panel registry and the follow-live SSE reader. |
+| `.../tui/deeplink.js` | `#replay=` deep-link parsing. |
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |
 | `scripts/tui_replay_check.mjs` | Headless-Chromium check of the replay viewer. |

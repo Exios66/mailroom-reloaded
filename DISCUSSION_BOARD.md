@@ -5,7 +5,7 @@ built, the files, the evidence, and the commit SHA. Newest first. No ceremony â€
 this is a ledger, not a governance board.
 
 **Branch:** `feat/mailroom-reloaded-completion` (from `main` @ `ce1c1ff`)
-**Plan:** `docs/superpowers/plans/2026-10-07-mailroom-reloaded.md`
+**Plan:** `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`
 **Spec:** `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`
 
 ---

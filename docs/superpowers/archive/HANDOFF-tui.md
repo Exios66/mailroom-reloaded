@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-09** by [the core plan](../plans/2026-10-09-mailroom-core-plan.md). Kept for history only; do not edit or add tasks here.
+
 # Handoff: browser TUI (`/tui`)
 
 Status as of 2026-10-08: **built, merged and hardened.** All 8 tasks were implemented and live-verified in a real browser, merged to `feat/mailroom-reloaded-completion` via PR #13, then hardened on `feat/jev-tui-hardening` (`jev` command, gate audit display, review fixes, docs). Remaining: PR review/merge of the hardening branch and the live-browser checklist re-run with committed screenshots. See docs/TUI.md for the checklist and commands and the Status section of the plan for per-task evidence.

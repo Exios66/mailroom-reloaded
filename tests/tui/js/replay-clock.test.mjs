@@ -90,6 +90,56 @@ test('backwards time never moves t backwards', () => {
   assert.equal(c.tick(6500), 1.5);
 });
 
+test('setDuration grows the total without moving t and unblocks seek', () => {
+  const c = createClock({ duration: 10 });
+  c.seek(10);
+  assert.deepEqual(c.state(), { t: 10, playing: false, speed: 1, duration: 10, ended: true });
+  assert.equal(c.setDuration(30), 30);
+  // t is untouched by the grow; ended clears because the total moved past it.
+  assert.deepEqual(c.state(), { t: 10, playing: false, speed: 1, duration: 30, ended: false });
+  assert.equal(c.seek(25), 25);
+  assert.equal(c.state().duration, 30);
+  assert.equal(c.seek(99), 30);
+});
+
+test('setDuration keeps a playing clock playing and lets it pass the old end', () => {
+  const c = createClock({ duration: 10 });
+  c.play(0);
+  assert.equal(c.setDuration(20), 20);
+  assert.equal(c.state().playing, true);
+  assert.equal(c.tick(5000), 5);
+  assert.equal(c.state().playing, true);
+  assert.equal(c.tick(15000), 15); // past the old 10s end, still running
+  assert.equal(c.state().playing, true);
+  assert.equal(c.tick(25000), 20);
+  assert.deepEqual(c.state(), { t: 20, playing: false, speed: 1, duration: 20, ended: true });
+});
+
+test('setDuration shrink leaves t and clamps on the next seek', () => {
+  const c = createClock({ duration: 100 });
+  c.seek(80);
+  assert.equal(c.setDuration(20), 20);
+  assert.equal(c.state().t, 80); // untouched until the next seek/tick
+  assert.equal(c.state().duration, 20);
+  assert.equal(c.state().ended, true);
+  assert.equal(c.seek(80), 20); // clamped on seek
+  assert.equal(c.state().t, 20);
+});
+
+test('setDuration cleans bad input and fixed durations are unchanged', () => {
+  const c = createClock({ duration: 10 });
+  for (const d of [NaN, Infinity, -4, undefined, 'x']) {
+    assert.equal(c.setDuration(d), 0);
+    assert.equal(c.state().duration, 0);
+  }
+  c.setDuration(10);
+  assert.equal(c.state().duration, 10);
+  c.play(0);
+  assert.equal(c.tick(1000), 1);
+  assert.equal(c.step(5), 6);
+  assert.equal(c.seek(99), 10);
+});
+
 test('bad durations become zero', () => {
   for (const d of [NaN, Infinity, -4, undefined, 'x']) {
     const c = createClock({ duration: d });

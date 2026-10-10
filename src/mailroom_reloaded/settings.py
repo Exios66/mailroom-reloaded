@@ -46,6 +46,29 @@ def normalize_trace_keep(value: Any) -> str:
 
 
 # Optional Jev knobs: a blank ``.env`` line must mean "unset", not a parse error.
+def _public_link(value: Any) -> Any:
+    """Normalise a configured link base: plain http(s) host, no userinfo/query/fragment.
+
+    ``/links`` is unauthenticated, so a credential-bearing or non-http(s) value must fail
+    at startup rather than be served to every caller. A trailing slash is stripped so
+    ``f"{base}/path"`` never produces ``//``.
+    """
+    if not isinstance(value, str):
+        return value
+    from urllib.parse import urlsplit
+
+    raw = value.strip()
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("must be an http(s) URL with a host")
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        raise ValueError("must not contain credentials")
+    if parts.query or parts.fragment:
+        raise ValueError("must not contain a query string or fragment")
+    return raw.rstrip("/")
+
+
+_LinkUrl = Annotated[str, BeforeValidator(_public_link)]
 _JevStr = Annotated[str | None, BeforeValidator(_empty_to_none)]
 _JevFloat = Annotated[float | None, BeforeValidator(_empty_to_none)]
 _JevInt = Annotated[int | None, BeforeValidator(_empty_to_none)]
@@ -224,6 +247,12 @@ class Settings(BaseSettings):
     anchor_key: _JevStr = Field(default=None, repr=False)
     anchor_key_file: _OptPath = None
     gpu_usd_per_hour: float = 0.80
+    # Public base URLs for the UI's outbound observability links (GET /links). With the
+    # ``MAILROOM_`` env prefix these read ``MAILROOM_PUBLIC_URL`` / ``MAILROOM_PHOENIX_URL``
+    # / ``MAILROOM_GRAFANA_URL``. No secret is stored here: each must be a plain http(s) URL without credentials.
+    public_url: _LinkUrl = "http://localhost:8000"
+    phoenix_url: _LinkUrl = "http://localhost:6006"
+    grafana_url: _LinkUrl = "http://localhost:3000"
 
 
 @lru_cache(maxsize=1)
