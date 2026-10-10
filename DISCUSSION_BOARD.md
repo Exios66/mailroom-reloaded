@@ -23,6 +23,22 @@ this is a ledger, not a governance board.
 
 ---
 
+### [P6-A / #63] TUI plugin boundary, tui/lib helpers, api/routes, GET /ready — Claude Code
+- **Status:** done (PR open)
+- **Files:** `src/mailroom_reloaded/api/tui/{plugins.js,main.js,lib/http.js,lib/table.js,lib/poll.js,lib/fmt.js}`,
+  `src/mailroom_reloaded/api/routes/{__init__,ready}.py`, `src/mailroom_reloaded/api/app.py` (one import, one include),
+  `tests/tui/js/{plugins,lib-http,lib-table,lib-poll,lib-fmt}.test.mjs`, `tests/api/test_ready_route.py`,
+  `docs/TUI.md`, `CHANGELOG.md`, both plans.
+- **Evidence:** `node --test tests/tui/js/*.test.mjs` → 301 pass, 0 fail (baseline 264);
+  `PYTHONPATH=src uv run pytest -p no:cacheprovider tests -q --ignore=tests/sandbox` → 1597 passed, 3 skipped
+  (baseline 1582); `uv run ruff check src tests` → All checks passed; `scripts/tui_replay_check.mjs` against
+  `scripts/tui_dev.sh up` → all checks passed (playwright-core + system Chrome).
+- **Commit:** see the PR for #63.
+- **Notes:** collector/Phoenix/Prometheus/Grafana/provider probes are `unconfigured` placeholders for #67/#66/#70;
+  no 5 s probe cache yet; a timed-out probe's worker thread finishes in the background.
+
+---
+
 ### [Sandbox review hardening] Payment, prompt and Boss safeguards — CodeRabbit Agent
 - **Status:** done
 - **Files:** `sandbox/server/{correspondent,llm_correspondent,service}.py`, their sandbox
