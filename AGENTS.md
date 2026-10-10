@@ -211,7 +211,7 @@ API (see §7.5).
 | `mailroom serve [--host] [--port] [--watch/--no-watch]` | FastAPI app + `/ui`, optionally with the embedded watcher. |
 | `mailroom watch [--worker-id] [--concurrency 1..32]` | Standalone inbox watcher. |
 | `mailroom run <file> [--worker-id]` | One document through the pipeline; prints `doc_id`/`status`/`doc_type`/`route_trail`. |
-| `mailroom eval [flags]` | Evaluation posture; prints its `run_id`. Flags: `--revision`, `--per-class`, `--seed`, `--classes`, `--concurrency`, `--posture-label`, `--gpu`, `--gpus`, `--prompt-set`, `--merger-mode`, `--mode pipeline\|specialist_cell`, `--judge-sample-rate`, `--split`, `--local-dir`, `--gpu-usd-per-hour`. |
+| `mailroom eval [flags]` | Evaluation posture; prints its `run_id`. Flags: `--revision`, `--per-class`, `--seed`, `--classes`, `--concurrency`, `--posture-label`, `--gpu`, `--gpus`, `--prompt-set`, `--merger-mode`, `--mode pipeline\|specialist_cell`, `--judge-sample-rate`, `--split`, `--local-dir`, `--gpu-usd-per-hour`, `--bert-manifest`. |
 | `mailroom train-gate --rows R [--out] [--calibration]` | Fit the route gate or sorter temperature calibration from JSONL. |
 | `mailroom card --run-id ID [--doc-type T] [--master] [--out]` | Write SAND-37 cards (repeat `--run-id` for the master). |
 | `mailroom conformance [--provider] [--per-class] [--revision] [--split] [--local-dir] [--out]` | Behavioural conformance suite + card. |
@@ -252,7 +252,8 @@ API (see §7.5).
 
 `pytest` (auto async mode) + `ruff`. Config lives in `pyproject.toml`:
 `testpaths = ["tests"]`, `asyncio_mode = "auto"`,
-`addopts = "--strict-markers -m 'not live'"`, and one registered marker `live`.
+`addopts = "--strict-markers -m 'not live and not docker'"`, and two registered
+markers, `live` and `docker`.
 
 | Tier | Directory | Covers |
 | --- | --- | --- |
@@ -285,6 +286,9 @@ uv run pytest tests/test_dependency_fence.py -q
 
 - **`live` marker.** Tests that hit a real provider are `@pytest.mark.live` and
   are deselected by default; `-m live` (with `MAILROOM_LIVE=1`) selects them.
+- **`docker` marker.** `tests/deploy/test_docker_smoke.py::test_docker_smoke_script`
+  runs `scripts/docker_smoke.sh` (builds images); deselected by default, `-m docker`
+  selects it and it skips when the daemon or registry is unavailable.
 - **`parity` extra.** The scoring-parity test skips unless
   `llm-dojo-scoring` v0.21.0 is installed (`uv sync --extra parity`).
 - **Dependency fence.** No `langgraph`, `langchain*`, `langfuse`, `braintrust`
@@ -461,6 +465,10 @@ AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
   full 40-character `expectedHeadSha`. A PR is mergeable only when its gates
   pass locally, the `[Unreleased]` entry exists, and every CodeRabbit finding is
   either applied or answered (below).
+- **Merge state.** Verify per branch, never from a summary: after
+  `git fetch --all --prune`, run `git merge-base --is-ancestor origin/<branch>
+  origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`. A note,
+  plan or PR list is not evidence.
 - **CodeRabbit.** Do not wait for it to finish when it is overloaded. Apply each
   finding unless it is flawed; verify against current code first (trace a real
   caller to the failure). Reply on a thread only to explain why a finding is not
@@ -505,13 +513,18 @@ parse an issue by heading. Field ids are stable; do not rename them.
   `pass|fail|skipped`), `coderabbit`, `not_verified`, `follow_ups`. Keep the exact
   shape, fill every key (`null` or `[]` when empty), and never mark a gate
   `pass` you did not run. The content repo uses the same block shape with its own
-  gate keys.
+  gate keys. A PR that changes root `schemas/` must state the content-repo mirror
+  follow-up (K-05) and the merge order (**this repo first, then the content
+  mirror**), so `tools/check_schema_drift.py` in the content repo clears.
 - **Gates for this repo:** `ruff check src tests`;
   `PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox`;
   `pytest tests/sandbox -q` for sandbox changes;
   `node --test tests/tui/js/*.test.mjs` (and `tests/sandbox/js/*.test.mjs`);
-  `scripts/tui_replay_check.mjs` for TUI changes. There is no hosted CI: paste
-  the result lines into the PR.
+  `scripts/tui_replay_check.mjs` for TUI changes; `scripts/docker_smoke.sh`
+  (optional, only when `deploy/**` or a Dockerfile input changes; prune the build
+  cache afterwards on a small disk). There are no GitHub Actions workflows (the
+  owner's account cannot run them; `docker-smoke.yml` was removed 2026-10-10), so
+  there is no hosted CI: paste the result lines into the PR.
 
 ## 9. Evidence contract
 

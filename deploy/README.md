@@ -60,7 +60,30 @@ Containers also scale to zero after `MODAL_SCALEDOWN_WINDOW` idle seconds, but s
 ## Compose notes
 
 - Compose reads `.env` from the directory of the `-f` file (`deploy/`), not the repo root. With a root-level `.env`, run `docker compose --env-file .env -f deploy/docker-compose.yml ...`.
-- `DEFAULT_PROVIDER` defaults to `mock`, which needs `MOCK_BASE_URL` (see `docker-compose.dev.yml` for a bundled fake); use `vllm`, `llamafile` or `openrouter` for real runs.
+- `DEFAULT_PROVIDER` defaults to `mock`, which needs `MOCK_BASE_URL`. Use `--profile mock` to run the bundled fake (`deploy/mock_openai.py`):
+  ```bash
+  MAILROOM_API_TOKEN=x GRAFANA_ADMIN_PASSWORD=g MOCK_BASE_URL=http://mock:8000/v1 \
+    docker compose -f deploy/docker-compose.yml --profile mock up -d --build
+  ```
+  Alternatively, set `DEFAULT_PROVIDER=vllm`, `llamafile` or `openrouter` for real deployments.
 - Optional app variables (`MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `MAILROOM_TRACE_KEEP`, ...) are forwarded only when set.
 - The OTel collector runs as root so `docker_stats` can read the Docker socket on any host. It also works non-root (`user: "10001:10001"` plus `group_add` with the socket's gid, `stat -c %g /var/run/docker.sock`); without the group it fails with `permission denied`.
 - `uvicorn mailroom_reloaded.api.app:app --host 0.0.0.0` without `MAILROOM_API_TOKEN` now refuses to start, like `mailroom serve`.
+
+## Docker smoke test
+
+`scripts/docker_smoke.sh` builds the lean app image and the sandbox image, runs them, and checks the compose files statically; it prints `DOCKER SMOKE OK`.
+
+```bash
+scripts/docker_smoke.sh                  # all three parts (about 4 min with a cold cache)
+scripts/docker_smoke.sh --only compose   # static compose checks only, no build
+uv run pytest -m docker tests/deploy/test_docker_smoke.py   # same, as a pytest test
+```
+
+- **app**: `deploy/Dockerfile` lean (`ML_BUILD_NONE=1 UV_EXTRAS=`); the package resolves under `/opt/venv`, uid 10001, `/data` writable on a fresh volume, the image's own `HEALTHCHECK` reaches `healthy`, and both `mailroom serve` and `uvicorn --host 0.0.0.0` refuse to start without `MAILROOM_API_TOKEN`.
+- **sandbox**: `deploy/Dockerfile.sandbox` with the compose hardening (`--cap-drop ALL`, `no-new-privileges`, tmpfs `/tmp`); `/health`, `/ui`, `/ui/route.js` return 200, the CSP equals the documented value and there is no CORS header.
+- **compose**: `config -q` for every file and profile; a set `MOCK_BASE_URL`/`MAILROOM_ANCHOR` is forwarded to `app` and an unset one is absent.
+- Exit codes: `0` ok, `1` a check failed (the failing step and the last 50 container log lines are printed), `2` a prerequisite is missing (no docker CLI, daemon or registry), so a restricted host reports "skipped", not a pass.
+- Everything is named `mrl-smoke*` and removed on exit, images included (`--keep` keeps them; `--no-build` reuses existing `mrl-smoke:*` images and leaves them). The build cache is not pruned; run `docker builder prune` yourself on a small disk.
+- It runs locally only; there is no GitHub Actions workflow (removed 2026-10-10). Set `DOCKER_SMOKE_LOG_DIR` to keep container logs from a failed run.
+- The always-on static guards in `tests/deploy/test_docker_smoke.py` (every project Dockerfile copies `schemas/`; the runtime install is `--no-editable`) run in the normal pytest invocation.

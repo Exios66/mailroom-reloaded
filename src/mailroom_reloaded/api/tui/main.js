@@ -9,6 +9,7 @@ import { registerLedger } from './commands/ledger.js';
 import { registerReplay } from './commands/replay.js';
 import { registerSandbox } from './commands/sandbox.js';
 import { registerShell } from './commands/shell.js';
+import { createModuleHost } from './plugins.js';
 import { deepLinkCommand, deepLinkKind } from './deeplink.js';
 
 async function loadText(name) {
@@ -20,12 +21,24 @@ async function loadText(name) {
   }
 }
 
-export function registerAll(registry, { ambient }) {
-  registerPipeline(registry);
-  registerLedger(registry);
-  registerReplay(registry);
-  registerSandbox(registry);
-  registerShell(registry, { ambient });
+/** The built-in modules, in registration order. New modules are added here (plugins.js). */
+export const MODULES = [
+  { id: 'pipeline', commands: registerPipeline },
+  { id: 'ledger', commands: registerLedger },
+  { id: 'replay', commands: registerReplay },
+  { id: 'sandbox', commands: registerSandbox },
+  { id: 'shell', commands: registerShell },
+];
+
+/**
+ * Register every module through the plugin boundary. A module that fails to register is
+ * skipped (and logged) so the TUI still boots. Returns the module host; `host.initAll(ctx)`
+ * runs each module's onInit once the terminal exists.
+ */
+export function registerAll(registry, { ambient }, modules = MODULES) {
+  const host = createModuleHost(registry);
+  host.registerAll(modules, { ambient });
+  return host;
 }
 
 export async function start() {
@@ -36,7 +49,7 @@ export async function start() {
   const history = createHistory();
   const api = createApi();
   const ambient = createAmbient(document, { reducedMotion });
-  registerAll(registry, { ambient });
+  const host = registerAll(registry, { ambient });
   document.body.classList.add('powering-on');
   setTimeout(() => document.body.classList.remove('powering-on'), 650);
   const term = createTerminal({ root: document, registry, history, api });
@@ -46,6 +59,8 @@ export async function start() {
     loadText('banner-compact.txt'),
   ]);
   term.ctx.banner = banner;
+  // Module init never blocks boot: failures are logged and isolated per module.
+  host.initAll(term.ctx).catch(() => {});
   const st = ambient.state();
   term.ctx.setStatus('theme', st.label);
   term.ctx.setStatus('crt', st.crt ? 'on' : 'off');
