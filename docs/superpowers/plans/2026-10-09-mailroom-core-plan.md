@@ -260,17 +260,17 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 #### Deferred follow-ups from PRs #54-#57
 
 Found in review of the merged work; none blocks it. Each is its own small PR (add an ID when one is picked up).
-- [ ] `review_approved` is never cleared after a re-extraction consumes it.
-- [ ] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
-- [ ] Follow mode never adds entities that start after the first snapshot.
-- [ ] The server's `seen` set and the `MAX_FRAMES=0` (unlimited) stream grow without bound.
-- [ ] The 100k-row read cap is not surfaced to the client as an error frame.
-- [ ] `followSeek` uses the client clock, not the server's.
-- [ ] The footer legend clips `q quit` below about 100 columns.
-- [ ] Panel `key` metadata is accepted by `registerPanel` but unused.
-- [ ] Reserved panel ids are not rejected by `registerPanel`.
-- [ ] Custom panel rows are not sanitised.
-- [ ] `phoenix_project` in `GET /links` is read from `os.environ` rather than `settings.py`.
+- [x] `review_approved` is never cleared after a re-extraction consumes it.
+- [x] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
+- [x] Follow mode never adds entities that start after the first snapshot.
+- [x] The server's `seen` set and the `MAX_FRAMES=0` (unlimited) stream grow without bound.
+- [x] The 100k-row read cap is not surfaced to the client as an error frame.
+- [x] `followSeek` uses the client clock, not the server's.
+- [x] The footer legend clips `q quit` below about 100 columns.
+- [x] Panel `key` metadata is accepted by `registerPanel` but unused.
+- [x] Reserved panel ids are not rejected by `registerPanel`.
+- [x] Custom panel rows are not sanitised.
+- [x] `phoenix_project` in `GET /links` is read from `os.environ` rather than `settings.py`.
 
 #### Governance (landed with the governance PR; content repo PR #15)
 

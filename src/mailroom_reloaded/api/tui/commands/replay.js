@@ -211,6 +211,7 @@ async function openViewer(ctx, arg, flags) {
   const liveArr = (v) => (Array.isArray(v) ? v.slice() : []);
   let liveTimeline = {
     ...(timeline && typeof timeline === 'object' ? timeline : {}),
+    entities: liveArr(timeline?.entities),
     segments: liveArr(timeline?.segments),
     generations: liveArr(timeline?.generations),
     events: liveArr(timeline?.events),
@@ -232,6 +233,7 @@ async function openViewer(ctx, arg, flags) {
   let closed = false;
   let follow = Boolean(opts.follow);
   let reader = null;
+  let notice = null; // a one-line viewer notice (e.g. the server's row-cap error), shown in the header
   const doc = ctx.document ?? (typeof globalThis.document !== 'undefined' ? globalThis.document : null);
 
   if (opts.at !== undefined) clock.seek(opts.at);
@@ -248,12 +250,12 @@ async function openViewer(ctx, arg, flags) {
     if (closed || !view) return;
     const ck = clock.state();
     const st = model.stateAt(ck.t);
-    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}|${linksVersion}`;
+    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}|${linksVersion}|${notice}`;
     if (!force && key === lastKey) return;
     lastKey = key;
     const size = ctx.gridSize?.() ?? { cols: 100, rows: 30 };
     try {
-      view.draw(renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel, links }));
+      view.draw(renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel, links, notice }));
     } catch {
       // A frame that cannot be drawn ends the viewer rather than leaving it blank and wedged.
       close();
@@ -306,19 +308,33 @@ async function openViewer(ctx, arg, flags) {
     }
   };
 
+  // The server's wall clock (epoch seconds) from its latest heartbeat, with the local monotonic
+  // reading at arrival; follow pins to server time so a skewed browser clock cannot move the playhead.
+  let serverSync = null;
+
+  /** Pin target in session seconds: server now minus the session start, else the newest item time. */
+  const followElapsed = () => {
+    const t0 = Date.parse(model.session?.t0_iso ?? '');
+    if (serverSync && Number.isFinite(t0)) {
+      const serverNow = serverSync.server + (nowFn() - serverSync.at) / 1000;
+      return serverNow - t0 / 1000;
+    }
+    return model.duration;
+  };
+
   const followSeek = () => {
     // The total may have grown since the last frame; refresh it before clamping the pin.
     clock.setDuration(model.duration);
-    const t0 = Date.parse(model.session?.t0_iso ?? '');
-    const elapsed = Number.isFinite(t0) ? (Date.now() - t0) / 1000 : model.duration;
-    clock.seek(Math.max(0, elapsed - 2));
+    clock.seek(Math.max(0, followElapsed() - 2));
   };
 
   // The live stream replays the whole timeline on every connect (first, `f` off/on, reconnect), so
   // each item is matched against what the model already holds: `have` counts items per key ever
   // accepted, `streamSeen` counts them on the current connection, and only the surplus is appended.
-  const LIVE_NAMES = { segment: 'segments', generation: 'generations', event: 'events', score: 'scores' };
+  const LIVE_NAMES = { entity: 'entities', segment: 'segments', generation: 'generations', event: 'events', score: 'scores' };
   const liveKey = (name, o) => {
+    // An entity is keyed by its end and outcome, so the finished version of a known document is new.
+    if (name === 'entity') return `entity:${o.doc_id}:${o.t_end}:${o.final_status}`;
     if (name === 'event') return `event:${o.t}:${o.doc_id}:${o.kind}:${o.station}`;
     if (name === 'score') return `score:${o.span_id}:${o.name}:${o.doc_id}`;
     if (o.span_id) return `${name}:${o.span_id}`;
@@ -341,6 +357,15 @@ async function openViewer(ctx, arg, flags) {
     if (name === 'error') {
       follow = false;
       stopFollow();
+      if (obj && typeof obj === 'object' && obj.code === 'row_cap') {
+        notice = 'live stopped: read cap reached, timeline truncated';
+        redraw(true);
+      }
+      return;
+    }
+    if (name === 'heartbeat') {
+      const server = obj && typeof obj === 'object' ? obj.t : undefined;
+      if (typeof server === 'number' && Number.isFinite(server)) serverSync = { server, at: nowFn() };
       return;
     }
     const list = LIVE_NAMES[name];
@@ -350,7 +375,12 @@ async function openViewer(ctx, arg, flags) {
     streamSeen.set(key, nth);
     if (nth <= (have.get(key) ?? 0)) return;
     have.set(key, nth);
-    liveTimeline[list].push(obj);
+    if (name === 'entity') {
+      // Entities are upserted by document id: a new document is appended, a finished one replaces its entry.
+      const at = liveTimeline.entities.findIndex((e) => e && e.doc_id === obj.doc_id);
+      if (at >= 0) liveTimeline.entities[at] = obj;
+      else liveTimeline.entities.push(obj);
+    } else liveTimeline[list].push(obj);
     boundLiveTimeline(liveTimeline);
     model = createModel(liveTimeline);
     clock.setDuration(model.duration);

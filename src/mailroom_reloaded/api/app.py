@@ -451,6 +451,11 @@ def replay_export_endpoint(session_id: str) -> Response:
 _LIVE_POLL_DEFAULT_S = 1.0
 _LIVE_HEARTBEAT_DEFAULT_S = 15.0
 _LIVE_MAX_FRAMES_DEFAULT = 0
+#: Dedup memory bound for one live stream: only items within this many seconds of the
+#: newest item, and at most ``_LIVE_MAX_TRACKED`` of them, are tracked or sent. Older items
+#: are already in the client's REST snapshot and fall outside its own follow window.
+_LIVE_WINDOW_S = 7200.0
+_LIVE_MAX_TRACKED = 20_000
 
 
 def _live_float(name: str, default: float) -> float:
@@ -493,6 +498,10 @@ def _live_items(tl):
         counts[base] = n + 1
         return f"{base}#{n}"
 
+    # Entities go first so a document is known before its segments arrive. The key carries
+    # the end time and outcome, so an entity is sent again when it finishes.
+    for ent in getattr(tl, "entities", None) or []:
+        yield "entity", ent, keyed(f"entity:{ent.doc_id}:{ent.t_end}:{ent.final_status}")
     for i, seg in enumerate(tl.segments):
         yield "segment", seg, keyed(f"segment:{seg.span_id or i}")
     for gen in tl.generations:
@@ -503,12 +512,63 @@ def _live_items(tl):
         yield "score", sc, keyed(f"score:{sc.span_id}:{sc.name}:{sc.doc_id}")
 
 
+def _item_time_or_none(item) -> float | None:
+    """The item's timeline instant (``t0``, else ``t``, else ``t_start``), or ``None``."""
+    for attr in ("t0", "t", "t_start"):
+        t = getattr(item, attr, None)
+        if isinstance(t, (int, float)) and not isinstance(t, bool):
+            return float(t)
+    return None
+
+
 def _item_time(item) -> float:
     """The item's timeline instant: ``t0`` for segments/generations, else ``t``."""
-    t = getattr(item, "t0", None)
-    if t is None:
-        t = getattr(item, "t", None)
-    return float(t) if isinstance(t, (int, float)) else 0.0
+    t = _item_time_or_none(item)
+    return 0.0 if t is None else t
+
+
+def _live_trim(entries: list) -> list:
+    """Bound one snapshot's ``(name, item, key)`` entries to the live dedup window.
+
+    Drops items more than ``_LIVE_WINDOW_S`` older than the newest, then keeps only the
+    newest ``_LIVE_MAX_TRACKED``. Items with no time and entities still in progress are
+    always kept. Order is preserved. Because trimmed items are never sent, forgetting
+    their keys cannot cause a resend.
+    """
+    def when(name, item) -> float | None:
+        # A finished entity is timed by its end so it is not dropped after a long run.
+        t = _item_time_or_none(item)
+        end = getattr(item, "t_end", None) if name == "entity" else None
+        if isinstance(end, (int, float)) and not isinstance(end, bool):
+            return float(end) if t is None else max(t, float(end))
+        return t
+
+    times = [when(name, item) for name, item, _ in entries]
+    known = [t for t in times if t is not None]
+    if not known:
+        return entries
+    floor = max(known) - _LIVE_WINDOW_S
+
+    def pinned(name, item, t) -> bool:
+        return t is None or (name == "entity" and getattr(item, "t_end", None) is None)
+
+    keep = [
+        e for e, t in zip(entries, times, strict=True) if pinned(e[0], e[1], t) or t >= floor
+    ]
+    if len(keep) > _LIVE_MAX_TRACKED:
+        ranked = sorted(
+            range(len(keep)),
+            key=lambda i: (
+                float("inf")
+                if (t := when(keep[i][0], keep[i][1])) is None
+                or pinned(keep[i][0], keep[i][1], t)
+                else t
+            ),
+            reverse=True,
+        )[:_LIVE_MAX_TRACKED]
+        chosen = set(ranked)
+        keep = [e for i, e in enumerate(keep) if i in chosen]
+    return keep
 
 
 @api.get("/replay/live")
@@ -521,8 +581,11 @@ def replay_live_endpoint(
 
     Resolves ``session`` (a bad id is 400), else the newest session; with none it
     streams a single ``error`` frame. Otherwise: ``ready`` once, then one
-    ``segment``/``generation``/``event``/``score`` frame per item not seen before,
-    a ``heartbeat`` keepalive, and an ``error`` when the timeline disappears. The
+    ``entity``/``segment``/``generation``/``event``/``score`` frame per item not seen
+    before (an entity again when it finishes), a ``heartbeat`` keepalive, and an
+    ``error`` when the timeline disappears or the read cap truncated it (``code``
+    ``row_cap``; the stream then ends). Dedup memory is bounded to a 2 h / 20,000
+    item window. The
     client bounds the stream with ``MAILROOM_REPLAY_LIVE_MAX_FRAMES``.
     """
     from mailroom_reloaded.obs.replay.sessions import list_sessions, parse_session_id
@@ -588,7 +651,10 @@ def replay_live_endpoint(
                 if tl is None:
                     yield _sse("error", {"detail": "no timeline"})
                     return
-                for name, item, item_key in _live_items(tl):
+                entries = _live_trim(list(_live_items(tl)))
+                # Forget keys that left the snapshot or window: ``seen`` stays bounded.
+                seen.intersection_update(k for _, _, k in entries)
+                for name, item, item_key in entries:
                     if item_key in seen:
                         continue
                     seen.add(item_key)
@@ -599,6 +665,13 @@ def replay_live_endpoint(
                     if max_frames and frames >= max_frames:
                         return
                 first = False
+                if not tl.session.window.complete:
+                    # The span read hit its row cap: later rows never arrive, so say so and end.
+                    yield _sse(
+                        "error",
+                        {"detail": "timeline truncated at the read cap", "code": "row_cap"},
+                    )
+                    return
                 if await request.is_disconnected():
                     return
                 await asyncio.sleep(poll)
@@ -990,7 +1063,7 @@ def create_app() -> FastAPI:
             "public_url": settings.public_url,
             "phoenix_url": settings.phoenix_url,
             "grafana_url": settings.grafana_url,
-            "phoenix_project": os.environ.get("MAILROOM_PHOENIX_PROJECT", "mailroom-live"),
+            "phoenix_project": settings.phoenix_project or "mailroom-live",
         }
 
     @application.get("/")
