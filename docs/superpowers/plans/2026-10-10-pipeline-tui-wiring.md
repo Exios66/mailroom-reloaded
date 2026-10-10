@@ -65,10 +65,10 @@ Each command is read-only unless marked (control).
 - [ ] **D1 healthchecks** for phoenix (`/healthz`), prometheus (`/-/healthy`), grafana (`/api/health`), otel-collector (health_check extension), with `depends_on: condition: service_healthy` for app → collector.
 - [ ] **D2 profiles audit**: documented matrix of `default`, `split-watcher`, `local-llm`, `gpu`; `docker compose config` run for each profile in CI (no daemon needed).
 - [ ] **D3 `deploy/docker-compose.override.example.yml`** for the TUI-first local flow, and `scripts/stack_up.sh` / `stack_down.sh` wrappers that refuse to start without `MAILROOM_API_TOKEN` and `GRAFANA_ADMIN_PASSWORD`.
-- Groundwork already in PR #80 (static only, not yet run): Dockerfile `schemas/` copy and `--no-editable`, compose passthrough of documented env vars, `.env` location notes. Build and launch verification: issues #81-#84.
 - [ ] **D4 compose smoke (R-04)**: run on a host with Docker: bring the stack up, hit `/ready`, run one sample document through, confirm a trace in Phoenix and a series in Prometheus, capture `docs/evidence/<date>-compose-smoke/` (command log, `docker compose ps`, `/ready` JSON, screenshots of the TUI, Phoenix and Grafana). **Needs an owner or CI runner with Docker.**
 - [ ] **D5 CI job** `compose-smoke` (workflow_dispatch + nightly) running D4 headlessly; uploads evidence as an artifact.
 - [ ] **D6 `docs/OPERATIONS.md`**: one runbook for ports, volumes, backups, upgrade, reset, and how each `ready` state maps to a fix.
+- Groundwork already in PR #80 (static only, not yet run): Dockerfile `schemas/` copy and `--no-editable`, compose passthrough of documented env vars, `.env` location notes. Build and launch verification: issues #81-#84.
 
 ### P6-E: Modal infrastructure
 - [ ] **E1 `deploy/modal_vllm.py` hardening**: pin image tags, health route used by the app, `MODAL_*` knobs documented in one table, scaledown and max-containers defaults chosen for cost.
