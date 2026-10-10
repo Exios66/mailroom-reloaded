@@ -44,7 +44,9 @@ class PipelineRunner:
         """Clear cached settings and dispose the default database engine."""
         from mailroom_reloaded import settings as settings_mod
         from mailroom_reloaded.storage import db
+        from mailroom_reloaded.storage.ledger import reset_ledger
 
+        reset_ledger()  # flush and drop the singleton still bound to the old engine
         settings_mod.get_settings.cache_clear()
         if db._default_engine is not None:
             db._default_engine.dispose()

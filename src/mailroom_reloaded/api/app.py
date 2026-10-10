@@ -31,6 +31,7 @@ import hmac
 import json
 import os
 import re
+import sys
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -135,7 +136,8 @@ def _enforce_bind_policy() -> None:
     """Apply the bind guard when the app is started without ``mailroom serve``.
 
     ``uvicorn mailroom_reloaded.api.app:app --host 0.0.0.0`` never runs the CLI
-    check, so the lifespan re-checks ``MAILROOM_API_HOST``. Deployments whose
+    check, so the lifespan re-checks ``MAILROOM_API_HOST``, ``UVICORN_HOST`` and a
+    literal ``--host`` argument. Deployments whose
     published port is already loopback-only (the dev compose file) opt out with
     ``MAILROOM_ALLOW_UNAUTHENTICATED_BIND=1``.
     """
@@ -145,8 +147,22 @@ def _enforce_bind_policy() -> None:
         "yes",
     }:
         return
-    host = (os.environ.get("MAILROOM_API_HOST") or "127.0.0.1").strip() or "127.0.0.1"
-    assert_bind_allowed(host)
+    for host in _requested_hosts():
+        assert_bind_allowed(host)
+
+
+def _requested_hosts() -> list[str]:
+    """Hosts the process was asked to bind: env plus a literal uvicorn ``--host``."""
+    hosts = [
+        (os.environ.get(name) or "").strip() for name in ("MAILROOM_API_HOST", "UVICORN_HOST")
+    ]
+    argv = sys.argv
+    for i, arg in enumerate(argv):
+        if arg == "--host" and i + 1 < len(argv):
+            hosts.append(argv[i + 1].strip())
+        elif arg.startswith("--host="):
+            hosts.append(arg.split("=", 1)[1].strip())
+    return [h for h in hosts if h] or ["127.0.0.1"]
 
 
 # --------------------------------------------------------------------------- schemas

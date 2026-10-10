@@ -127,9 +127,3 @@ test('inbox is registered once with help, usage and a man page', () => {
   assert.match(spec.man, /polls every 2 s/);
 });
 
-test('--tab values complete from the allow-list', () => {
-  const spec = registry().get('inbox');
-  assert.deepEqual(spec.complete({}, ['--tab', '']), ['ingress', 'boss', 'outbox', 'events']);
-  assert.deepEqual(spec.complete({}, ['--tab', 'o']), ['outbox']);
-  assert.deepEqual(spec.complete({}, ['--scenario', 'o']), []);
-});

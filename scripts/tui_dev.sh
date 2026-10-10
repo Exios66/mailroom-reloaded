@@ -71,6 +71,8 @@ up() {
 
   # default-on: every up re-seeds and re-pins the dev replay run before the API's startup prune
   MAILROOM_BASE_DIR="$BASE" uv run python scripts/tui_seed_replay/seed_replay.py
+  # also give /ui and the eval views an eval run (idempotent)
+  MAILROOM_BASE_DIR="$BASE" uv run python scripts/demo_seed_eval_runs.py
 
   env ${jev_env[@]+"${jev_env[@]}"} \
   MOCK_BASE_URL="http://127.0.0.1:${MOCK_PORT}/v1" \

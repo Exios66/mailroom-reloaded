@@ -149,7 +149,7 @@ function reviewCard(c, withButtons) {
     el("div", {}, chip(c.state, c.state === "pending" ? "warn" : c.state === "released" ? "ok" : "bad"), " ", c.message_id, " ",
       c.attack_classes.map((a) => chip(a + "/" + c.priority, "bad")), " ", chip(c.category)),
     el("div", { class: "muted" }, "held attachments: " + (c.attachments.join(", ") || "none") + " | signal channel: possible_attack"),
-    c.state === "deciding" ? el("div", { class: "muted" }, `decision ${c.decision} was recorded but not finished: press the same button to resume`) : null,
+    c.state === "deciding" ? el("div", { class: "muted" }, c.decision_entry_id && withButtons ? `decision ${c.decision} was recorded but not finished: press the same button to resume` : "decision in progress") : null,
     c.decision ? el("div", {}, `decision: ${c.decision} by ${c.decided_by}: ${c.reason || ""}`) : null,
     withButtons ? el("div", {}, reason, " ", el("button", { ...decisionAttrs, class: "small primary", onclick: () => onDecide("legitimate") }, "Release (legitimate)"), " ",
       el("button", { ...decisionAttrs, class: "small danger", onclick: () => onDecide("quarantine") }, "Quarantine")) : null);
@@ -184,6 +184,7 @@ function clearMailboxFilter() { mbx.role = mbx.thread = null; writeRoute(); poll
 // the view. It never carries the API token. history/location are guarded for non-browser harnesses.
 const hasLocation = () => typeof location !== "undefined" && location !== null;
 const hasRoute = () => typeof window !== "undefined" && !!window.sbxRoute;
+if (!hasRoute()) console.warn("route.js is missing: deep links and URL state are disabled");
 /** Apply a fragment to the view state and dock; absent keys reset to their defaults. Does not fetch. */
 function applyRoute(hash) {
   if (!hasRoute()) return;

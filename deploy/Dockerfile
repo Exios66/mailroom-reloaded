@@ -26,8 +26,11 @@ ARG UV_EXTRAS
 # Dependencies first (cache-friendly), then the project itself.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project ${UV_EXTRAS}
+# schemas/ is force-included into the wheel (pyproject.toml); --no-editable installs the
+# project into /opt/venv itself, so the runtime stage needs nothing from /build.
 COPY src ./src
-RUN uv sync --frozen --no-dev ${UV_EXTRAS}
+COPY schemas ./schemas
+RUN uv sync --frozen --no-dev --no-editable ${UV_EXTRAS}
 
 
 # --- Model stage: ModernBERT bundle at ML_MODEL_REVISION; ML_BUILD_NONE=1 stages an empty dir.

@@ -130,7 +130,7 @@ The hash keys the sandbox UI accepts are `tab` (`messages|boss|outbox|events|con
 `--no-mailbox` sets `mailbox=closed`. The API token is never put in the link: if the sandbox asks
 for one, paste it into its API token field. Without a valid `sandbox_url` the command prints
 `inbox: sandbox URL not configured (set MAILROOM_SANDBOX_URL)`. In the replay viewer's inspector a
-`sandbox` row shows the same link when `/links` carries `sandbox_url` (there is no key for it).
+`sandbox` row shows the same link when `/links` carries `sandbox_url` (there is no key for it). `sandbox_url` is the configured `MAILROOM_SANDBOX_URL` (default `http://localhost:8100`), so the `sandbox` row and the `inbox` target appear even when no sandbox is running.
 
 ## Themes
 
@@ -173,6 +173,7 @@ Everything binds to 127.0.0.1. State lives in `data/tui-dev/` (gitignored):
 classifies every one as correspondence/email and the watcher archives them. One
 fixture is named `<b>hostile<b>.txt` to check that filenames render as text.
 (`/` cannot appear in a filename, so a closing `</b>` is impossible.)
+`up` also runs `scripts/demo_seed_eval_runs.py`, so `/ui` and the eval views list one eval run.
 Open http://127.0.0.1:8000/tui.
 
 The four showcase runs (`run:showcase-clean`, `-escalation`, `-judge-arbiter`,
@@ -220,7 +221,7 @@ restart (`down`, `up`) after editing them.
 3. `ls`, `inspect <id>`, `audit <id>` show live data; the hostile filename is literal text (`document.querySelectorAll('#output img').length === 0`).
 4. Tab ghost completion, Up history, Ctrl+L, Ctrl+C during `watch`.
 5. `theme green`, `cyan`, `light`, `hc`; reload keeps the choice; `crt off`, `skyline off`.
-6. Kill the server mid-session: the next command prints the offline message; reload shows `mailroom closed — no api connection` with no data.
+6. Kill the server mid-session: the next command prints the offline message; the API serves `/tui`, so a reload cannot fetch a fresh page (the browser shows its own connection error; a cached copy that loads shows `mailroom closed — no api connection` because the health, auth or catalog check fails at boot, see Boot checks).
 7. Restart with `MAILROOM_API_TOKEN` set: boot says `api token required`; `auth wrong` is rejected; the right token is accepted and absent from scrollback.
 8. Mobile preset (375px): only essential status items, 12px base, no horizontal scroll; `createAmbient(..., {reducedMotion: true})` spawns no spark nodes.
 9. Console has no errors.

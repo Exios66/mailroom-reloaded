@@ -69,6 +69,7 @@ def serve(
     resolved_port = port if port is not None else listen_port()
     assert_bind_allowed(resolved_host)
     os.environ["MAILROOM_EMBED_WATCHER"] = "1" if watch else "0"
+    os.environ["MAILROOM_API_HOST"] = resolved_host  # keep the lifespan guard in step
     uvicorn.run(fastapi_app, host=resolved_host, port=resolved_port)
 
 

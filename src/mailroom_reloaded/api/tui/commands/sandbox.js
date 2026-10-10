@@ -59,10 +59,6 @@ export function registerSandbox(registry) {
     summary: 'open the sandbox Correspondent inbox',
     usage: 'inbox [--tab ingress|boss|outbox|events] [--scenario ID] [--message ID] [--thread ID] [--no-mailbox] [--print]',
     man: manPage,
-    complete(_ctx, args) {
-      const last = args[args.length - 1];
-      return args.length >= 2 && args[args.length - 2] === '--tab' ? Object.keys(INBOX_TABS).filter((t) => t.startsWith(last ?? '')) : [];
-    },
     async run(ctx, args, flags) {
       const parsed = parseFlags(args, flags);
       if (parsed.error) {

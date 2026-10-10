@@ -168,7 +168,7 @@ DONE: phases 1.1-1.7, 2.1-2.5, CD19 (no GitHub Actions; local `tools/ci.sh`).
 Verified: `bash tools/ci.sh` exit 0 on `f650cfd`. 88 scenarios (A17 B8 C11 D6 E13 F5 G12 S10 T6);
 30 `review`, 57 `draft`, 1 deprecated, **0 frozen**. Smoke set matches reloaded's
 `sandbox/fixtures/smoke/manifest.json` (A1, A3, B1, D1, E1, F1).
-Open: 1.8 and 2.6 (no tag or release exists, but `content.lock` already pins `v0.5.0`), phase 3.
+Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
 
 ---
 
@@ -192,9 +192,9 @@ Steps are checkboxes; tick them in this file as part of the PR that completes th
 #### X-01: Release and H-series sequence (both repos). Needs: D2
 Content `feat/heldout-h-series` (PR #5) adds scenarios H1-H28 (116 total), 27 templates, changes the name
 pattern to `^[A-HST]...`; reloaded PR #44 changes the same pattern and adds `mailroom sandbox conformance --heldout`.
-`content.lock` pins `v0.5.0` at `f650cfd`, which is **not published**, so `mailroom sandbox content pull` fails today.
-Recommended order (so `v0.5.0` still means `f650cfd`):
-- [ ] Content: **K-01 first** (the sha256 changes with the `zstandard` version; only 0.25.0 reproduces the lock). Then on clean `main` run `tools/release.sh --push` to publish `v0.5.0` + bundle; confirm the sha256 equals the lock's `7a32e86e...`.
+`content.lock` pins `v0.5.0` at `f650cfd`, which is published (asset sha256 `7a32e86e...` matches the lock).
+Recommended order:
+- [x] Content: `v0.5.0` published from `f650cfd`; the asset sha256 equals the lock's `7a32e86e...`. (K-01 still matters for rebuilding other tags: the sha256 changes with the `zstandard` version; only 0.25.0 reproduces the lock.)
 - [ ] Content: merge PR #5 (H-series); in its own PR bump `content.json` version to `0.6.0`, run `tools/release.sh --push`.
 - [x] Reloaded: merge PR #44 (done, `8e8522a`); then `mailroom sandbox content bump --tag v0.6.0` in its own PR (updates `sandbox/content.lock`).
 - [ ] Verify: `mailroom sandbox content pull && mailroom sandbox content validate && mailroom sandbox conformance --content smoke` all pass.
@@ -211,7 +211,7 @@ operating points in `eval/jev_calibration.py`; `--dataset-repo/--config` flags; 
 #### R-03: Decide and resolve the two Correspondent/Boss mailbox PRs. Needs: D1
 PR #44 and PR #23 implement near-identical mailbox code (`sandbox/server/mailbox.py`, `ui/mailbox.js`, `tests/sandbox/js/mailbox.test.mjs`).
 PR #23 is CONFLICTING (CHANGELOG.md, `agents/judge.py`, `ingest/clerk.py`, `llm/retry.py`), its 3-dot diff touches 61 files despite saying "no pipeline changes", and it still carries the Correspondent-v2 triage (53/88 scenarios pass alone; author calls the LOFO numbers optimistic).
-**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). **Closed 2026-10-10** (owner decision D1): its content was already re-cut into #44 (`5c1bb7f`, `92e1fef`, `19b81dc`, `cdcec60`); the leftover sandbox docstrings were ported in a docstring-only PR and #23 was closed with an explanatory comment. The 88-scenario baselines were not carried over (not reproducible against the unpublished `v0.5.0` pack and older than `main`'s fixes).
+**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). **Closed 2026-10-10** (owner decision D1): its content was already re-cut into #44 (`5c1bb7f`, `92e1fef`, `19b81dc`, `cdcec60`); the leftover sandbox docstrings were ported in a docstring-only PR and #23 was closed with an explanatory comment. The 88-scenario baselines were not carried over (not reproducible against the smoke fixture, as the `v0.5.0` pack was not yet published then and older than `main`'s fixes).
 Recommended:
 - [x] Land #44 (fresh from `main`, mailbox + held-out harness + `AGENTS.md` + `docs/HELD_OUT_SCENARIOS.md`).
 - [x] Re-cut #23's triage v2 as a new PR on top of #44 (already on `main` through #44; only docstrings were left, ported separately) (rebase, then diff against `main` to separate real changes from formatting; no pipeline files unless justified).
@@ -302,7 +302,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 - [ ] Re-run `git fetch --all --prune` in both repos; update this block if PR state changed.
 
 #### K-01: Make the bundle sha256 reproducible. Blocks X-01.
-**Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the lock's own comment says the pin is of a *local* build that is not published.
+**Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the pin was first taken from a local build (the pack has since been published with the same sha256).
 **Where:** content `tools/build_bundle.py`, `tools/release.sh`, new `tools/requirements.txt`, `CONTENT_SPEC.md` section on releases.
 - [ ] Pin `zstandard==0.25.0` in `tools/requirements.txt`; `build_bundle.py` always prints the version and, under `--release` (passed by `release.sh` only; unit tests build without it), refuses any other version with a clear message.
 - [x] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) to a separate `BUILD_INFO` release asset with the `zstandard` version, so reproducibility can be checked across compressor versions. `SHA256SUMS` stays two lines (an extra line would break `sha256sum -c`). Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras). Done in content `840e4e8` (pinned `zstandard==0.25.0` in `tools/requirements.txt`; `--release` refuses other versions).
@@ -414,7 +414,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 ## 6. Definition of done for this plan
 
 - [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [x] Re-run on `main` plus #44/#59 changes 2026-10-10: reloaded `ruff` clean, `pytest --ignore=tests/sandbox` 1520 passed, `node --test tests/tui/js` 235 pass, `tests/sandbox` 745 passed with 6 root-user `test_startup_bind_policy` failures (environmental). Content repo not re-run.
-- [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
+- [x] `v0.5.0` published. [ ] `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10); no open PR without an owner.
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
