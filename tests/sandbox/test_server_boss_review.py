@@ -572,3 +572,151 @@ def test_mailbox_list_filters_latest_status_and_limits_in_sql(tmp_path, monkeypa
         assert mb.list(limit=0) == []
     finally:
         mb.close()
+
+
+def test_mailbox_latest_returns_newest_page_in_sequence_order(tmp_path):
+    """Verify ``latest`` selects the newest matches while keeping sequence order."""
+    from mailroom_reloaded.sandbox.server.mailbox import BossMailbox
+
+    mb = BossMailbox(tmp_path / "mailbox.sqlite")
+    try:
+        ids = [
+            mb.post(
+                sender="correspondent",
+                recipient="boss",
+                kind="question",
+                thread_id="t",
+                message_id=f"m{i}",
+                payload={},
+            )["id"]
+            for i in range(5)
+        ]
+        assert [e["id"] for e in mb.list(limit=2)] == ids[:2]
+        assert [e["id"] for e in mb.list(limit=2, latest=True)] == ids[3:]
+        assert [e["id"] for e in mb.list(limit=2, latest=True, since=3)] == ids[3:]
+        assert mb.list(limit=0, latest=True) == []
+        assert len(mb.list(limit=99, latest=True)) == 5
+    finally:
+        mb.close()
+
+
+def test_boss_mailbox_endpoint_latest_param(make_client):
+    """Verify the API returns the newest page with ``latest=true``."""
+    client, _svc = make_client()
+    allrows = _mailbox(client)
+    assert len(allrows) >= 1
+    newest = _mailbox(client, limit=1, latest="true")
+    assert [e["id"] for e in newest] == [allrows[-1]["id"]]
+    assert _mailbox(client, limit=1)[0]["id"] == allrows[0]["id"]
+
+
+def test_pending_review_is_persisted_before_processing_continues(make_client):
+    """Verify the pending case is already in state.json while the pending event fires."""
+    import json
+
+    _client, svc = make_client()
+    state = json.loads((svc.state_dir / "state.json").read_text())
+    assert any(c["state"] == "pending" for c in state["reviews"].values())
+
+
+def test_boss_decide_reopens_case_when_decision_never_committed(
+    make_client, monkeypatch
+):
+    """Verify a failure before the decision entry commits leaves the case pending."""
+    _client, svc = make_client()
+    mid = svc.pending_reviews()[0]["message_id"]
+
+    def boom(**_kw):
+        raise RuntimeError("disk")
+
+    monkeypatch.setattr(svc.mailbox, "post", boom)
+    with pytest.raises(RuntimeError):
+        svc.boss_decide(mid, "quarantine", "x")
+    assert [c["message_id"] for c in svc.pending_reviews()] == [mid]
+    monkeypatch.undo()
+    assert svc.boss_decide(mid, "quarantine", "x")["state"] == "quarantined"
+
+
+def test_boss_decide_resumes_after_committed_decision_failed_midway(
+    make_client, monkeypatch
+):
+    """Verify a retry finishes a committed decision once, without a second entry."""
+    client, svc = make_client()
+    mid = svc.pending_reviews()[0]["message_id"]
+    orig = svc._correspondent_acts
+
+    def boom(*_a):
+        raise RuntimeError("mid-way")
+
+    monkeypatch.setattr(svc, "_correspondent_acts", boom)
+    with pytest.raises(RuntimeError):
+        svc.boss_decide(mid, "quarantine", "first")
+    assert svc.reviews[mid]["state"] == "deciding"
+    assert svc.reviews[mid]["decision_entry_id"]
+    assert [c["message_id"] for c in svc.pending_reviews()] == [mid]  # resumable
+    with pytest.raises(ValueError, match="already quarantine"):
+        svc.boss_decide(mid, "legitimate", "other")
+    monkeypatch.setattr(svc, "_correspondent_acts", orig)
+    out = svc.boss_decide(mid, "quarantine", "ignored")  # same decision resumes
+    assert out["state"] == "quarantined" and out["decision"] == "quarantine"
+    assert len(_mailbox(client, kind="decision")) == 1
+    assert out["reason"] == "first"
+    assert svc.pending_reviews() == []
+
+
+def test_resume_after_draft_failure_does_not_repeat_finished_steps(make_client):
+    """Verify a retry after a drafting failure emits one release and one draft set."""
+    _client, svc = make_client()
+    mid = svc.pending_reviews()[0]["message_id"]
+    orig = svc._queue_drafts
+    calls = []
+
+    def flaky(msg, drafts):
+        """Queue the drafts, then fail once to simulate a late error."""
+        calls.append(len(drafts))
+        orig(msg, drafts)
+        if len(calls) == 1:
+            raise RuntimeError("late failure")
+
+    svc._queue_drafts = flaky
+    with pytest.raises(RuntimeError):
+        svc.boss_decide(mid, "legitimate", "ok")
+    queued = list(svc.messages[mid]["outbox_ids"])
+    assert queued and calls == [len(queued)]
+    out = svc.boss_decide(mid, "legitimate", "ok")
+    assert out["state"] == "released"
+    events = [e["kind"] for e in svc.events if e["ref_id"] == mid]
+    assert events.count("boss.review.released") == 1
+    actions = [a["action"] for a in svc.messages[mid]["bossdesk"]]
+    assert actions.count("release_attachments") == 1
+    assert calls == [len(queued), 0]
+    assert svc.messages[mid]["outbox_ids"] == queued
+
+
+def test_load_reopens_deciding_case_without_decision_entry(make_client):
+    """Verify a restart normalises a decision that never committed back to pending."""
+    _client, svc = make_client()
+    mid = svc.pending_reviews()[0]["message_id"]
+    svc.reviews[mid]["state"] = "deciding"
+    svc._save()
+    svc.reviews = {}
+    svc._load()
+    assert svc.reviews[mid]["state"] == "pending"
+
+
+def test_lookup_failure_after_post_failure_still_reopens_case(make_client, monkeypatch):
+    """Verify the case is reopened even if the committed-entry lookup also fails."""
+    _client, svc = make_client()
+    mid = svc.pending_reviews()[0]["message_id"]
+
+    def boom(**_kw):
+        raise RuntimeError("post")
+
+    def boom_list(**_kw):
+        raise RuntimeError("list")
+
+    monkeypatch.setattr(svc.mailbox, "post", boom)
+    monkeypatch.setattr(svc.mailbox, "list", boom_list)
+    with pytest.raises(RuntimeError):
+        svc.boss_decide(mid, "quarantine", "x")
+    assert svc.reviews[mid]["state"] == "pending"

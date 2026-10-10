@@ -160,7 +160,7 @@ def conformance(
     ``--heldout`` selects the scenarios tagged ``heldout`` instead of the
     ``index % 3`` positional split, so a frozen H batch measures held-out
     performance on its own. Explicit ``--only`` IDs override tag selection;
-    unknown IDs raise ``KeyError`` after resetting state. Content loading/validation
+    unknown IDs raise ``KeyError`` before any scenario runs. Content loading/validation
     failures exit with code 1. Scenario failures are reported without setting a
     failing exit code.
     Single-family runs report no training rate; output I/O errors propagate.
@@ -195,11 +195,15 @@ def conformance(
         raise typer.Exit(code=1)
     silence_exporters()
     guard = NetworkGuard().install()
-    svc = SandboxService(loaded, data_dir.resolve(), guard=guard).start(worker=False)
+    svc = None
     try:
+        svc = SandboxService(loaded, data_dir.resolve(), guard=guard).start(
+            worker=False
+        )
         result = run_conformance(svc, only or None, heldout=heldout)
     finally:
-        svc.stop()
+        if svc is not None:
+            svc.stop()
         guard.uninstall()
     typer.echo(format_table(result))
     rep = lofo(result["scenarios"])

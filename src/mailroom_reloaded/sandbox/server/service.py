@@ -250,6 +250,9 @@ class SandboxService:
             self._sim_next = blob.get("sim_next", 0.0)
             self.autonomy = blob.get("autonomy", self.autonomy)
             self.outbox.load(blob.get("outbox", {}))
+            for c in self.reviews.values():  # no committed decision: still pending
+                if c.get("state") == "deciding" and not c.get("decision_entry_id"):
+                    c["state"] = "pending"
             for m in self.messages.values():  # interrupted work resumes as pending
                 if m["state"] == "processing":
                     m["state"] = "admitted"
@@ -789,6 +792,7 @@ class SandboxService:
             return
         with self._lock:
             self.reviews[msg["id"]] = case
+        self._save()  # the pending case must survive a restart before processing continues
         self.emit(
             "boss.review.pending",
             msg["id"],
@@ -807,12 +811,17 @@ class SandboxService:
             )
 
     def pending_reviews(self) -> list[dict]:
-        """Return independent copies of pending review cases."""
+        """Return independent copies of cases awaiting a decision or its completion.
+
+        A ``deciding`` case with a committed decision entry is included so it can
+        be resumed by repeating the same decision.
+        """
         with self._lock:
             return [
                 copy.deepcopy(c)
                 for c in self.reviews.values()
                 if c["state"] == "pending"
+                or (c["state"] == "deciding" and c.get("decision_entry_id"))
             ]
 
     def list_reviews(self) -> list[dict]:
@@ -839,7 +848,9 @@ class SandboxService:
         Raise ``KeyError`` for a missing message/review, or ``ValueError`` for an
         invalid decision/category or a non-pending review. Attachment pipeline
         failures are recorded per attachment; mailbox, drafting, and persistence
-        errors propagate and may leave partial effects.
+        errors propagate. After the decision entry is committed the case stays
+        ``deciding`` and calling again resumes the remaining steps with the stored
+        decision; a failure before commit reopens the case as ``pending``.
         """
         if decision not in {"legitimate", "quarantine"}:
             raise ValueError("decision must be 'legitimate' or 'quarantine'")
@@ -851,45 +862,108 @@ class SandboxService:
                 case = self.reviews.get(mid)
                 if case is None:
                     raise KeyError(mid)
-                if case["state"] != "pending":
-                    raise ValueError(f"review is already {case['state']}")
-                case["state"] = "deciding"
-                final_cat = category or case["category"]
-            ent = self.mailbox.post(
-                sender=BOSS,
-                recipient=CORRESPONDENT,
-                kind="decision",
-                thread_id=case["thread_id"],
-                message_id=mid,
-                payload={
-                    "decision": decision,
-                    "reason": reason,
-                    "category": final_cat,
-                    "by": by,
-                },
-                in_reply_to=case["forward_entry_id"],
-            )
-            self.mailbox.set_status(case["forward_entry_id"], "acted", BOSS, decision)
-            with self._lock:
-                case.update(
-                    decision=decision,
-                    reason=reason or case["reason"],
-                    decided_by=by,
-                    category=final_cat,
-                    decision_entry_id=ent["id"],
-                    state="released" if decision == "legitimate" else "quarantined",
+                resume = case["state"] == "deciding" and bool(
+                    case.get("decision_entry_id")
                 )
-            self._correspondent_acts(msg, ent)
+                if case["state"] != "pending" and not resume:
+                    raise ValueError(f"review is already {case['state']}")
+                if resume:  # a committed decision is final: only the same one resumes
+                    if decision != case["decision"]:
+                        raise ValueError(
+                            f"review is already {case['decision']} (decision committed, "
+                            "finishing); repeat that decision to resume"
+                        )
+                    decision, reason = case["decision"], case["reason"]
+                    final_cat, by = case["category"], case["decided_by"]
+                else:
+                    case["state"] = "deciding"
+                    final_cat = category or case["category"]
+            if resume:
+                ent = self.mailbox.get(case["decision_entry_id"])
+                if ent is None:
+                    raise KeyError(case["decision_entry_id"])
+            else:
+                try:
+                    ent = self.mailbox.post(
+                        sender=BOSS,
+                        recipient=CORRESPONDENT,
+                        kind="decision",
+                        thread_id=case["thread_id"],
+                        message_id=mid,
+                        payload={
+                            "decision": decision,
+                            "reason": reason,
+                            "category": final_cat,
+                            "by": by,
+                        },
+                        in_reply_to=case["forward_entry_id"],
+                    )
+                except BaseException:
+                    # post() can fail after committing (event callback), so only
+                    # reopen the case when no decision entry exists for it.
+                    committed: list[dict] = []
+                    try:
+                        committed = [
+                            e
+                            for e in self.mailbox.list(message_id=mid, kind="decision")
+                            if e["in_reply_to"] == case["forward_entry_id"]
+                        ]
+                    finally:
+                        with self._lock:
+                            if committed:
+                                self._record_decision(
+                                    case, committed[0], decision, reason, by, final_cat
+                                )
+                            else:
+                                case["state"] = "pending"
+                    raise
+                with self._lock:
+                    self._record_decision(case, ent, decision, reason, by, final_cat)
+            # Status writes are no-ops when repeated and _correspondent_acts keeps
+            # per-step progress flags on the case, so a retry after a failure
+            # resumes the committed decision without repeating finished steps.
+            self._save()
+            self.mailbox.set_status(case["forward_entry_id"], "acted", BOSS, decision)
+            self._correspondent_acts(msg, ent, case)
+            with self._lock:
+                case["state"] = (
+                    "released" if decision == "legitimate" else "quarantined"
+                )
             self._save()
         return copy.deepcopy(case)
 
-    def _correspondent_acts(self, msg: dict, ent: dict) -> None:
-        """The Correspondent reads the Boss's decision entry and acts on it."""
+    @staticmethod
+    def _record_decision(
+        case: dict, ent: dict, decision: str, reason: str, by: str, category: str
+    ) -> None:
+        """Store a committed decision entry on the case (caller holds the state lock)."""
+        case.update(
+            decision=decision,
+            reason=reason or case["reason"],
+            decided_by=by,
+            category=category,
+            decision_entry_id=ent["id"],
+        )
+
+    def _correspondent_acts(
+        self, msg: dict, ent: dict, case: dict | None = None
+    ) -> None:
+        """The Correspondent reads the Boss's decision entry and acts on it.
+
+        ``case`` carries per-step progress flags (``outcome_done``,
+        ``release_done``, ``drafts_done``) so a repeated call skips finished steps.
+        """
+        case = {} if case is None else case
         mid = msg["id"]
         self.mailbox.set_status(ent["id"], "read", CORRESPONDENT)
         pl = ent["payload"]
         by = pl.get("by", "boss")
         if pl["decision"] == "quarantine":
+            if case.get("outcome_done"):
+                self.mailbox.set_status(
+                    ent["id"], "acted", CORRESPONDENT, pl["decision"]
+                )
+                return
             self.emit(
                 "boss.review.quarantined",
                 mid,
@@ -907,21 +981,30 @@ class SandboxService:
                             "opened": False,
                         },
                     )
+            self._progress(case, "outcome_done")
         else:
-            self.emit("boss.review.released", mid, {"by": by, "reason": pl["reason"]})
-            self._release_after_review(msg, by)
+            if not case.get("outcome_done"):
+                self.emit(
+                    "boss.review.released", mid, {"by": by, "reason": pl["reason"]}
+                )
+                self._progress(case, "outcome_done")
+            self._release_after_review(msg, by, case)
         self.mailbox.set_status(ent["id"], "acted", CORRESPONDENT, pl["decision"])
 
-    def _release_after_review(self, msg: dict, by: str) -> None:
+    def _release_after_review(
+        self, msg: dict, by: str, case: dict | None = None
+    ) -> None:
         """Release held/quarantined handoffs and queue a reply after a legitimate decision.
 
         Run resolved bytes only when the message selected the pipeline. Pipeline
         exceptions become ``pipeline_error`` attachment status; reply-drafting and
-        outbox/mailbox errors propagate.
+        outbox/mailbox errors propagate. Steps already recorded in ``case`` are
+        skipped; drafts queued before a failure are not queued again.
         """
+        case = {} if case is None else case
         mid = msg["id"]
         atts = {a["name"]: a for a in msg["wire"]["attachments"]}
-        for entry in msg["handoffs"]:
+        for entry in [] if case.get("release_done") else msg["handoffs"]:
             if entry["status"] not in {"quarantined", "held"}:
                 continue
             a = atts.get(entry["name"])
@@ -946,22 +1029,37 @@ class SandboxService:
                 except Exception as exc:  # noqa: BLE001 - a bad file must not break the decision
                     entry["status"] = "pipeline_error"
                     self.emit("run.error", mid, {"error": str(exc)})
-        with self._lock:
-            msg["bossdesk"].append(
-                {
-                    "action": "release_attachments",
-                    "params": None,
-                    "state": "done",
-                    "autonomy": "boss",
-                    "source": "boss_mailbox decision",
-                    "why": "Boss judged the message legitimate",
-                }
-            )
+        if not case.get("release_done"):
+            with self._lock:
+                msg["bossdesk"].append(
+                    {
+                        "action": "release_attachments",
+                        "params": None,
+                        "state": "done",
+                        "autonomy": "boss",
+                        "source": "boss_mailbox decision",
+                        "why": "Boss judged the message legitimate",
+                    }
+                )
+            self._progress(case, "release_done")
+        if case.get("drafts_done"):
+            return
+        if "drafts_base" not in case:
+            self._progress(case, "drafts_base", len(msg["outbox_ids"]))
         paths = {n: a.get("path", "") for n, a in atts.items()}
         drafts = self.agent.reply_after_release(
             self._wire(msg), _Tools(self, paths, set())
         )
-        self._queue_drafts(msg, drafts)
+        queued = len(msg["outbox_ids"]) - case["drafts_base"]
+        self._queue_drafts(msg, drafts[queued:])
+        self._progress(case, "drafts_done")
+
+    def _progress(self, case: dict, key: str, value: object = True) -> None:
+        """Record and persist a completed recovery step on a review case."""
+        if case is not None:
+            with self._lock:
+                case[key] = value
+            self._save()
 
     def _apply_lane(self, msg: dict, entry: dict, att: dict | None) -> None:
         """Apply a handoff lane by recording quarantine, copying a hold, or deferring work."""

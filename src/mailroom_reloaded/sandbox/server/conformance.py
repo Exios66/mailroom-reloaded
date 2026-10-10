@@ -99,7 +99,7 @@ def run_conformance(
     tagged ``heldout``. An explicit ``only`` list overrides selection; with
     ``heldout`` each row is labelled ``heldout`` when tagged, else ``tuned``.
     Without ``heldout``, split labels always come from the full pack. Unknown
-    IDs raise ``KeyError`` after a reset. Other service errors propagate without
+    IDs raise ``KeyError`` before any scenario runs. Other service errors propagate without
     a final reset.
     """
     ids = svc.content.scenario_ids()
@@ -111,6 +111,9 @@ def run_conformance(
     else:
         selected = sorted(ids)
     positional = split_of(ids)
+    unknown = sorted(set(only or []) - set(ids))
+    if unknown:
+        raise KeyError(f"unknown scenario ids: {', '.join(unknown)}")
     rows = []
     for name in selected:
         r = _row(svc, name)

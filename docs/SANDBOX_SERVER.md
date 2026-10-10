@@ -198,6 +198,13 @@ and could not be pulled. They are **not** the 88-scenario pack figures quoted be
 macro of 1.000 on six tuning scenarios is not a generalisation measure. Regenerate both files with
 `scripts/sandbox_lofo.sh <real pack dir>` once v0.5.0 is published.
 
+The committed `conformance_baseline.json` is not the raw `--slim` output: its two
+positional-split scenarios are relabelled under a hand-added `positional_smoke_fixture` key
+(not part of the CLI schema; `summarise()` is unchanged) so they are not read as official
+held-out results. A fresh `scripts/sandbox_lofo.sh` run writes the raw form (`tuned` and
+`heldout` counts only) and will differ in that key; reapply the relabel by hand if you
+regenerate the smoke-fixture baseline.
+
 ### Correspondent stand-in v2 (`rule-based-standin/v2`)
 
 Triage is a scored, feature-based classifier (`sandbox/server/triage.py`), still

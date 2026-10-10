@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/sandbox_lofo.sh` uses a private temporary state directory removed on exit (no `exec`), so concurrent runs no longer share SQLite state; `mailroom sandbox conformance` always uninstalls the network guard even when service startup fails; `--only` with an unknown scenario ID now fails before any scenario runs.
+- Sandbox Boss review: a pending case is persisted before processing continues, and `boss_decide` is resumable. A failure before the decision entry commits reopens the case as `pending` (also after a restart, and if the committed-entry lookup itself fails); after commit the case stays `deciding`, is still listed by `GET /boss/pending`, and repeating the same decision finishes only the unfinished steps (one release event, one `release_attachments` action, one draft set; progress flags are persisted on the case). Repeating a different decision is rejected with HTTP 409.
+- Sandbox UI mailbox dock loads the newest 5,000 entries (`GET /boss/mailbox?latest=true`) so new hostile forwards still appear and count as unread in large mailboxes.
+- Document that `conformance_baseline.json` carries a hand-added `positional_smoke_fixture` relabel that `scripts/sandbox_lofo.sh` does not reproduce.
 - Sandbox review hardening: payment intents from triage share the safety-screen fraud/hold
   handling; attack drafts wait for a legitimate Boss decision before entering the outbox;
   inbound LLM prompt fields are individually tagged and escaped as untrusted data.

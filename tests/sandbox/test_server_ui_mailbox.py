@@ -41,3 +41,11 @@ def test_ui_is_offline_and_serves_the_panel(tmp_path):
         assert js.status_code == 200 and "javascript" in js.headers["content-type"]
         for text in (html, js.text, c.get("/ui/app.js").text):
             assert 'src="http' not in text and 'fetch("http' not in text
+
+
+def test_dock_polls_the_newest_mailbox_page() -> None:
+    """Verify the dock asks for the newest page so new entries survive large mailboxes."""
+    src = (ROOT / "src/mailroom_reloaded/sandbox/server/ui/app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "/boss/mailbox?limit=5000&latest=true" in src

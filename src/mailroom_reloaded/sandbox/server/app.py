@@ -334,8 +334,11 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
         kind: str | None = None,
         since: int = Query(default=0, ge=0),
         limit: int = Query(default=500, ge=1, le=5000),
+        latest: bool = False,
     ) -> dict:
         """List matching entries after the exclusive sequence cursor without marking them read.
+
+        ``latest`` returns the newest ``limit`` matches instead of the oldest.
 
         ``role`` matches either sender or recipient. Return entries in sequence
         order, their count, and ``last_seq``: the last returned sequence, or
@@ -350,6 +353,7 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
             kind=kind,
             since=since,
             limit=limit,
+            latest=latest,
         )
         return {
             "entries": rows,

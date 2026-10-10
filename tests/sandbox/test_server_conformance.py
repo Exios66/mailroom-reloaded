@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mailroom_reloaded.sandbox.server.conformance import (
     format_lofo,
     heldout_ids,
@@ -131,3 +133,17 @@ def test_lofo_empty_input_has_unavailable_aggregate_rates():
     assert format_lofo(rep).endswith(
         "macro mean held-out rate n/a; micro pass rate n/a"
     )
+
+
+def test_unknown_only_id_raises_before_any_scenario_runs(idle_service):
+    """Verify an unknown ``only`` ID fails validation without running earlier scenarios."""
+    svc = idle_service.start(worker=False)
+    try:
+        first = min(svc.content.scenario_ids())
+        calls = []
+        svc.reset = lambda: calls.append("reset")
+        with pytest.raises(KeyError, match="zz_nope"):
+            run_conformance(svc, [first, "zz_nope"])
+        assert calls == []
+    finally:
+        svc.stop()

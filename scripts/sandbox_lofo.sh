@@ -14,5 +14,7 @@ OUT="${2:-$ROOT/tests/sandbox}"
 export OTEL_SDK_DISABLED=true
 cd "$ROOT"
 mkdir -p "$OUT"
-exec uv run --offline --extra sandbox mailroom sandbox conformance --content "$CONTENT" \
-  --data-dir "${TMPDIR:-/tmp}/sandbox-lofo-state" --json "$OUT/conformance_baseline.json" --slim --lofo "$OUT/lofo_baseline.json"
+STATE="$(mktemp -d "${TMPDIR:-/tmp}/sandbox-lofo-state.XXXXXX")"
+trap 'rm -rf "$STATE"' EXIT
+uv run --offline --extra sandbox mailroom sandbox conformance --content "$CONTENT" \
+  --data-dir "$STATE" --json "$OUT/conformance_baseline.json" --slim --lofo "$OUT/lofo_baseline.json"

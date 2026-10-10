@@ -273,6 +273,7 @@ class BossMailbox:
         kind: str | None = None,
         since: int = 0,
         limit: int = 500,
+        latest: bool = False,
     ) -> list[dict]:
         """Return matching entries in sequence order without marking them read.
 
@@ -281,6 +282,8 @@ class BossMailbox:
         ``limit`` is applied last as a Python slice stop (zero returns no entries;
         a negative value omits that many entries from the end). SQLite errors
         propagate, including errors opening the queue on its first read.
+        ``latest`` with a non-negative ``limit`` selects the newest ``limit``
+        matches (still returned in sequence order).
         """
         where, args = ["seq > ?"], [since]
         for col, val in (
@@ -298,6 +301,16 @@ class BossMailbox:
         if status:
             where.append("status = ?")
             args.append(status)
+        if latest and limit >= 0:
+            order = "SELECT * FROM (SELECT * FROM matching ORDER BY seq DESC LIMIT ?) ORDER BY seq"
+            tail = ""
+        else:
+            order = "SELECT * FROM matching ORDER BY seq"
+            tail = (
+                " LIMIT (SELECT MAX(0, COUNT(*) + ?) FROM matching)"
+                if limit < 0
+                else " LIMIT ?"
+            )
         query = f"""
             WITH current_entries AS (
                 SELECT entries.*, COALESCE((
@@ -308,12 +321,9 @@ class BossMailbox:
             ), matching AS (
                 SELECT * FROM current_entries WHERE {' AND '.join(where)}
             )
-            SELECT * FROM matching ORDER BY seq
+            {order}
         """
-        if limit < 0:
-            query += " LIMIT (SELECT MAX(0, COUNT(*) + ?) FROM matching)"
-        else:
-            query += " LIMIT ?"
+        query += tail
         with self._lock:
             rows = self._conn().execute(query, [*args, limit]).fetchall()
             return [self._row(r, r["status"]) for r in rows]

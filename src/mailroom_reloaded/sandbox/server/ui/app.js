@@ -148,6 +148,7 @@ function reviewCard(c, withButtons) {
     el("div", {}, chip(c.state, c.state === "pending" ? "warn" : c.state === "released" ? "ok" : "bad"), " ", c.message_id, " ",
       c.attack_classes.map((a) => chip(a + "/" + c.priority, "bad")), " ", chip(c.category)),
     el("div", { class: "muted" }, "held attachments: " + (c.attachments.join(", ") || "none") + " | signal channel: possible_attack"),
+    c.state === "deciding" ? el("div", { class: "muted" }, `decision ${c.decision} was recorded but not finished: press the same button to resume`) : null,
     c.decision ? el("div", {}, `decision: ${c.decision} by ${c.decided_by}: ${c.reason || ""}`) : null,
     withButtons ? el("div", {}, reason, " ", el("button", { ...decisionAttrs, class: "small primary", onclick: () => onDecide("legitimate") }, "Release (legitimate)"), " ",
       el("button", { ...decisionAttrs, class: "small danger", onclick: () => onDecide("quarantine") }, "Quarantine")) : null);
@@ -156,12 +157,12 @@ function reviewCard(c, withButtons) {
 const mbx = { entries: [], last: 0, open: false, timer: null };
 /**
  * Refresh cached entries, the unread badge, and the open dock without marking entries read.
- * Fetch at most 5,000 entries; suppress polling errors and retain existing content on fetch failure.
+ * Fetch the newest 5,000 entries; suppress polling errors and retain existing content on fetch failure.
  */
 async function pollMailbox() {
   try {
     const p = await api("/boss/pending");
-    const upd = await api("/boss/mailbox?limit=5000");  // statuses change, so re-read the whole queue
+    const upd = await api("/boss/mailbox?limit=5000&latest=true");  // statuses change, so re-read the newest page
     mbx.entries = upd.entries; mbx.last = upd.last_seq;
     const pending = new Set(p.pending.map((c) => c.message_id));
     $("mbx-badge").textContent = String(window.sbxMailbox.unread(mbx.entries, pending));
