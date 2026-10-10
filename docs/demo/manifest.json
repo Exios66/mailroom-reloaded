@@ -145,6 +145,22 @@
       "sha256": "00fef420ea3c5306fdf7236cb16ebcecfcf4502bb50ca7d0e4ab4dfb95d5b4d9",
       "size_bytes": 202607,
       "viewport": "1200x800"
+    },
+    {
+      "file": "19-tui-inbox-command.png",
+      "caption": "The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link.",
+      "command": "/tui: `inbox --print` (the API serves sandbox_url from GET /links)",
+      "sha256": "7a6688e8e59eb9279306ae31eb558cb75cb134039e6142c37ac6364aa3981aea",
+      "size_bytes": 211632,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "20-sandbox-inbox-deeplink.png",
+      "caption": "Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail.",
+      "command": "http://127.0.0.1:8100/ui#tab=messages&mailbox=open&role=correspondent after injecting A1 + E1",
+      "sha256": "03b9575c665254944b3f9ba48ab650f87880a1f335d5d38d959ded7246224bd4",
+      "size_bytes": 211700,
+      "viewport": "1200x800"
     }
   ]
 }

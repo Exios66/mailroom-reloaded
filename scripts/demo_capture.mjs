@@ -4,14 +4,17 @@
 //   scripts/tui_dev.sh up
 //   MAILROOM_BASE_DIR=data/tui-dev/base python3 scripts/demo_seed_eval_runs.py   # so /ui lists a run
 //   node scripts/demo_capture.mjs                    # writes docs/demo/*.png and docs/demo/manifest.json
-//   SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs   # + sandbox Boss-mailbox dock shots
+//   MAILROOM_SANDBOX_URL=http://127.0.0.1:8100 scripts/tui_dev.sh up   # so GET /links names the sandbox
+//   SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs   # + sandbox dock shots and the inbox deep link
 //
 // Environment:
 //   TUI_URL            dev API base, default http://127.0.0.1:8000 (must be the unauthenticated dev stack)
 //   SANDBOX_URL        optional sandbox server (`mailroom sandbox serve --content smoke`, port 8100); when set,
-//                      A1 + E1 are injected if its Boss mailbox is empty, then the dock is captured
+//                      A1 + E1 are injected if its Boss mailbox is empty, then the dock and the `inbox` deep link are captured
+//                      (the API must have been started with MAILROOM_SANDBOX_URL=$SANDBOX_URL)
 //   PLAYWRIGHT_MODULE  path or specifier of Playwright (default `playwright`)
 //   CHROMIUM_PATH      Chromium executable (default: Playwright's own download)
+//   ONLY               comma list of image numbers (e.g. 19,20) to re-shoot and merge into the manifest
 //   OUT_DIR            output directory, default docs/demo (relative to the repo root)
 //
 // Determinism: viewport 1200x800, device scale 1, dark colour scheme, prefers-reduced-motion
@@ -34,6 +37,9 @@ const outDir = path.resolve(root, process.env.OUT_DIR || 'docs/demo');
 const RUN = 'run:7e57d0c0ffee';
 const VIEWPORT = { width: 1200, height: 800 };
 const BUDGET = 400 * 1024;
+// ONLY=19,20 re-shoots just those numbered images and merges them into the existing manifest.json,
+// leaving every other PNG and manifest entry untouched (images 13-18 embed seed times, so a full run churns them).
+const only = (process.env.ONLY || '').split(',').map((v) => v.trim()).filter(Boolean);
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 mkdirSync(outDir, { recursive: true });
@@ -51,6 +57,7 @@ const context = await browser.newContext({
 try {
 
   const shoot = async (page, file, caption, produced) => {
+    if (only.length && !only.some((n) => file.startsWith(`${n}-`))) return;
     const dest = path.join(outDir, file);
     await page.screenshot({ path: dest });
     const bytes = readFileSync(dest);
@@ -227,6 +234,30 @@ try {
     await page.waitForTimeout(800);
     await shoot(page, '18-sandbox-pending-review.png', 'Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture).', 'same page, tab "Pending boss review"');
     await page.close();
+
+    // `inbox` deep link: the /tui command prints the sandbox URL (needs the API started with
+    // MAILROOM_SANDBOX_URL=$SANDBOX_URL) and the sandbox UI opens straight onto it.
+    const links = await (await fetch(`${base}/links`)).json();
+    if ((links.sandbox_url || '').replace(/\/+$/, '') !== sandbox) {
+      throw new Error(`GET /links sandbox_url is ${links.sandbox_url}; start the dev stack with MAILROOM_SANDBOX_URL=${sandbox}`);
+    }
+    const tui = await openTui();
+    await cmd(tui, 'inbox --print');
+    await shoot(tui, '19-tui-inbox-command.png',
+      'The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link.',
+      '/tui: `inbox --print` (the API serves sandbox_url from GET /links)');
+    await tui.close();
+
+    const deep = await context.newPage();
+    watch(deep, 'sandbox deep link');
+    await deep.goto(`${sandbox}/ui#tab=messages&mailbox=open&role=correspondent`);
+    await deep.locator('.mbx-filter').waitFor({ timeout: 15000 });
+    await deep.locator('.mbx-entry').first().waitFor({ timeout: 15000 });
+    await deep.waitForTimeout(800);
+    await shoot(deep, '20-sandbox-inbox-deeplink.png',
+      'Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail.',
+      `${sandbox}/ui#tab=messages&mailbox=open&role=correspondent after injecting A1 + E1`);
+    await deep.close();
   }
 
 } finally {
@@ -239,11 +270,18 @@ try {
 } catch {
   /* not a git checkout */
 }
+let images = shots;
+if (only.length) {
+  const old = JSON.parse(readFileSync(path.join(outDir, 'manifest.json'), 'utf8'));
+  const fresh = new Set(shots.map((x) => x.file));
+  images = [...old.images.filter((x) => !fresh.has(x.file)), ...shots].sort((a, b) => a.file.localeCompare(b.file));
+  commit = old.source_commit;
+}
 writeFileSync(
   path.join(outDir, 'manifest.json'),
-  `${JSON.stringify({ source_commit: commit, tool: 'node scripts/demo_capture.mjs', images: shots }, null, 2)}\n`,
+  `${JSON.stringify({ source_commit: commit, tool: 'node scripts/demo_capture.mjs', images }, null, 2)}\n`,
 );
-console.log(`wrote ${shots.length} images + manifest.json to ${path.relative(root, outDir) || '.'}`);
+console.log(`wrote ${images.length} images + manifest.json to ${path.relative(root, outDir) || '.'}`);
 // The one by-design error: the /ui page probes an authenticated endpoint on the unauthenticated dev stack.
 const unexpected = [...new Set(errors)].filter((e) => !/\b401\b|Unauthorized|Refused to apply inline style/i.test(e));
 if (errors.length) {

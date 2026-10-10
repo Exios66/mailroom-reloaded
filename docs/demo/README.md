@@ -25,6 +25,8 @@ viewport; its `source_commit` is the commit of the code that was running (`git r
 | [`16-sandbox-dock-badge.png`](16-sandbox-dock-badge.png) | Sandbox UI with the docked Boss mailbox collapsed: unread badge on the toggle. | 174 KB |
 | [`17-sandbox-dock-open.png`](17-sandbox-dock-open.png) | Boss mailbox dock expanded: draft awaiting approval and the hostile_forward entry (pending Release / Quarantine). | 210 KB |
 | [`18-sandbox-pending-review.png`](18-sandbox-pending-review.png) | Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture). | 197 KB |
+| [`19-tui-inbox-command.png`](19-tui-inbox-command.png) | The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link. | 207 KB |
+| [`20-sandbox-inbox-deeplink.png`](20-sandbox-inbox-deeplink.png) | Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail. | 207 KB |
 
 Not shown: the sandbox `deciding` resume hint ("decision ... was recorded but not finished: press the same
 button to resume"). It needs a decision that failed half way and no supported way to cause that offline was
@@ -42,24 +44,25 @@ export CHROMIUM_PATH=/path/to/chrome                                   # if Play
 scripts/tui_dev.sh up
 MAILROOM_BASE_DIR=data/tui-dev/base python3 scripts/demo_seed_eval_runs.py   # /ui needs one eval run to show links
 
-# optional: the sandbox Boss-mailbox dock (images 16-18)
+# optional: the sandbox Boss-mailbox dock and the `inbox` deep link (images 16-20); the API must name the sandbox
+# in GET /links, so start the dev stack with MAILROOM_SANDBOX_URL=http://127.0.0.1:8100 scripts/tui_dev.sh up
 uv run --extra sandbox mailroom sandbox serve --host 127.0.0.1 --port 8100 --content smoke \
   --data-dir "$(mktemp -d)" &
 
-SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs     # omit SANDBOX_URL to skip 16-18
+SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs     # omit SANDBOX_URL to skip 16-20
 # stop everything
 scripts/tui_dev.sh down; kill %1
 ```
 
 `OUT_DIR` (default `docs/demo`) redirects the output, for example to compare against the committed set.
 The script fails if any PNG exceeds 400 KB. Without `SANDBOX_URL` it still rewrites `manifest.json`
-and drops the three sandbox entries, so regenerate the full set (with the sandbox) before committing.
+and drops the five sandbox entries, so regenerate the full set (with the sandbox) before committing.
 
 Stability: reduced motion, replay opened paused with `--at`, wall clock, random skyline and CSS animations
 hidden. Images 01-12 embed no seed times or ids and were identical across repeated runs (spot-checked after a re-seed). Images 13-15 (`/ui`,
 ledger, `ls`/`runs`) embed the stack's seed time and run ids, so they change
 whenever the dev stack is re-seeded. Images 17 and 18 (sandbox) embed message timestamps and random ids and
-change on every run. Image 16 depends on the sandbox state. Expect `manifest.json` hashes for 13-18 to differ
+change on every run. Image 16 depends on the sandbox state; images 19 and 20 are rendered from the same seeded sandbox (20 shows its mailbox timestamps). `ONLY=19,20 SANDBOX_URL=... node scripts/demo_capture.mjs` re-shoots just those images and merges them into the existing manifest, leaving the other PNGs and entries byte-identical. Expect `manifest.json` hashes for 13-20 to differ
 after every regeneration. `demo_capture.mjs` exits non-zero on any page or console error other than the by-design 401.
 
 ## PR bodies and release notes
@@ -194,3 +197,15 @@ Boss mailbox dock expanded: draft awaiting approval and the hostile_forward entr
 Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture).
 
 ![18-sandbox-pending-review.png](18-sandbox-pending-review.png)
+
+### `19-tui-inbox-command.png`
+
+The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link.
+
+![19-tui-inbox-command.png](19-tui-inbox-command.png)
+
+### `20-sandbox-inbox-deeplink.png`
+
+Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail.
+
+![20-sandbox-inbox-deeplink.png](20-sandbox-inbox-deeplink.png)

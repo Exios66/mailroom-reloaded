@@ -31,8 +31,10 @@ const ENTRIES = [entry("bm00001", "t1", "correspondent", "boss"), entry("bm00002
 async function boot({ hash = "", bare = false } = {}) {
   const els = new Map();
   const calls = [];
+  const timers = [];
+  const status = { content: { kind: "smoke", scenarios: 0, valid: true, policy_source: "x" }, network_guard: { blocked_attempts: 0 }, egress: { profile: "closed", transmitted: 0 }, messages: {}, queue_pending: 0 };
   const ctx = {
-    console: { log() {} }, alert() {}, confirm: () => true, setInterval: () => 0,
+    console: { log() {} }, alert() {}, confirm: () => true, setInterval: (f) => timers.push(f),
     sessionStorage: { getItem: (k) => (k === "sbx_token" ? "sbx-secret-token" : null), setItem() {} },
     document: {
       getElementById: (id) => { if (!els.has(id)) els.set(id, new N("#" + id)); return els.get(id); },
@@ -42,7 +44,7 @@ async function boot({ hash = "", bare = false } = {}) {
       calls.push(url);
       const body = url.includes("/boss/mailbox") ? { entries: ENTRIES, last_seq: 3 } : url.includes("/boss/pending") ? { pending: [] }
         : url.includes("/messages") ? { messages: [] } : url.includes("/scenarios") ? { scenarios: [] }
-        : { content: { kind: "smoke", scenarios: 0, valid: true, policy_source: "x" }, network_guard: { blocked_attempts: 0 }, egress: { profile: "closed", transmitted: 0 }, queue_pending: 0 };
+        : status;
       return { ok: true, status: 200, json: async () => body };
     },
   };
@@ -60,7 +62,7 @@ async function boot({ hash = "", bare = false } = {}) {
   for (const f of ["route.js", "mailbox.js", "app.js"]) vm.runInContext(read(f), ctx);
   const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r)); };
   await settle();
-  return { ctx, els, calls, replaced, listeners, settle, get: (expr) => vm.runInContext(expr, ctx) };
+  return { ctx, els, calls, replaced, timers, status, listeners, settle, get: (expr) => vm.runInContext(expr, ctx) };
 }
 
 test("canonical inbox link selects the tab, opens the dock and filters to the correspondent", async () => {
@@ -127,4 +129,17 @@ test("boot works without location or history", async () => {
   b.els.get("tabs").handlers.click({ target: { dataset: { tab: "boss" } } });
   await b.settle();
   assert.equal(b.get("state.tab"), "boss");
+});
+
+test("the poll re-renders the active tab when mail arrives from outside the page", async () => {
+  const b = await boot({ hash: "#tab=messages&mailbox=open&role=correspondent" });
+  const loads = () => b.calls.filter((u) => u.includes("/messages")).length;
+  const tick = b.timers[b.timers.length - 1]; // app.js registers tick last
+  await tick(); await b.settle();
+  const before = loads();
+  await tick(); await b.settle();
+  assert.equal(loads(), before, "an unchanged status does not re-render");
+  b.status.messages = { admitted: 1 };
+  await tick(); await b.settle();
+  assert.ok(loads() > before, "a changed message count re-renders without a reload or inject click");
 });

@@ -353,7 +353,14 @@ async function showAudit(docId) {
 // ---------------------------------------------------------------- wiring
 async function refreshAll() { await refreshStatus(); await renderScenarios(); await renderTab(); await renderTrace(); }
 async function tick() {
-  try { await refreshStatus(); if (state.status.queue_pending || state.dirty) { await renderTab(); await renderTrace(); await renderScenarios(); state.dirty = !!state.status.queue_pending; } } catch (e) { /* offline blip */ }
+  try {
+    await refreshStatus();
+    // Mail injected from elsewhere (a simulation run) changes these counters without touching state.dirty.
+    const sig = JSON.stringify([state.status.messages, state.status.egress]);
+    const changed = sig !== state.sig;
+    state.sig = sig;
+    if (state.status.queue_pending || state.dirty || changed) { await renderTab(); await renderTrace(); await renderScenarios(); state.dirty = !!state.status.queue_pending; }
+  } catch (e) { /* offline blip */ }
 }
 $("tabs").addEventListener("click", (e) => { if (e.target.dataset.tab) { state.tab = e.target.dataset.tab; renderTab(); } });
 $("inject-all").addEventListener("click", () => guarded(() => { state.dirty = true; return inject("all"); }));
