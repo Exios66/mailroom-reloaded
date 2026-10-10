@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Conventions now require verifying merge state per branch and stating the content mirror for schema PRs.** `AGENTS.md` §8.1: after `git fetch --all --prune`, check `git merge-base --is-ancestor origin/<branch> origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`, never from a note or PR list. §8.2: a PR that changes root `schemas/` must state the content-repo mirror follow-up (K-05) and the merge order (this repo first, then the content mirror).
+
 ### Removed
 
 - `.github/workflows/docker-smoke.yml`, the repository's only GitHub Actions workflow: the owner's account cannot run Actions right now, so every PR showed a failing `docker-smoke` check that never started ("account is locked due to a billing issue"). `scripts/docker_smoke.sh` and `tests/deploy/test_docker_smoke.py` are unchanged and still run locally. References updated in `AGENTS.md` §8.2, `deploy/README.md` and the master plan. Docs/config only; no code change.
