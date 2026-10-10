@@ -465,6 +465,10 @@ AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
   full 40-character `expectedHeadSha`. A PR is mergeable only when its gates
   pass locally, the `[Unreleased]` entry exists, and every CodeRabbit finding is
   either applied or answered (below).
+- **Merge state.** Verify per branch, never from a summary: after
+  `git fetch --all --prune`, run `git merge-base --is-ancestor origin/<branch>
+  origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`. A note,
+  plan or PR list is not evidence.
 - **CodeRabbit.** Do not wait for it to finish when it is overloaded. Apply each
   finding unless it is flawed; verify against current code first (trace a real
   caller to the failure). Reply on a thread only to explain why a finding is not
@@ -509,16 +513,18 @@ parse an issue by heading. Field ids are stable; do not rename them.
   `pass|fail|skipped`), `coderabbit`, `not_verified`, `follow_ups`. Keep the exact
   shape, fill every key (`null` or `[]` when empty), and never mark a gate
   `pass` you did not run. The content repo uses the same block shape with its own
-  gate keys.
+  gate keys. A PR that changes root `schemas/` must state the content-repo mirror
+  follow-up (K-05) and the merge order (**this repo first, then the content
+  mirror**), so `tools/check_schema_drift.py` in the content repo clears.
 - **Gates for this repo:** `ruff check src tests`;
   `PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox`;
   `pytest tests/sandbox -q` for sandbox changes;
   `node --test tests/tui/js/*.test.mjs` (and `tests/sandbox/js/*.test.mjs`);
   `scripts/tui_replay_check.mjs` for TUI changes; `scripts/docker_smoke.sh`
   (optional, only when `deploy/**` or a Dockerfile input changes; prune the build
-  cache afterwards on a small disk). The opt-in `.github/workflows/docker-smoke.yml`
-  is the only workflow; otherwise there is no hosted CI: paste the result lines
-  into the PR.
+  cache afterwards on a small disk). There are no GitHub Actions workflows (the
+  owner's account cannot run them; `docker-smoke.yml` was removed 2026-10-10), so
+  there is no hosted CI: paste the result lines into the PR.
 
 ## 9. Evidence contract
 

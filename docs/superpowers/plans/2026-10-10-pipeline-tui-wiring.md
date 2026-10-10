@@ -1,6 +1,6 @@
 # Plan: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring (Phase 6)
 
-> Parent: `2026-10-09-mailroom-core-plan.md` (Phase 6). Status of this file: **draft for owner review**, written 2026-10-10 against `main` @ `502995a`. **Progress 2026-10-10:** only B11 `inbox` is implemented (#78); the Docker groundwork merged in PR #80 (Dockerfile `schemas/` and `--no-editable`, compose env passthrough, bind guard) is statically verified, with image builds and `compose up` still unrun (issues #81-#84). Tracking issues per phase: #63 (A), #64 (B1-B4), #65 (B5-B10), #66 (C), #67 (D), #68 (E), #69 (F). Items are checkboxes; tick them in the PR that ships them, and cite the evidence path.
+> Parent: `2026-10-09-mailroom-core-plan.md` (Phase 6). Status of this file: **draft for owner review**, written 2026-10-10 against `main` @ `502995a`. **Progress 2026-10-10:** B11 `inbox` is implemented (#78); P6-A (A1-A4) was started at the owner's request and ships in the PR for #63; the Docker groundwork merged in PR #80 (Dockerfile `schemas/` and `--no-editable`, compose env passthrough, bind guard) is statically verified, with image builds and `compose up` still unrun (issues #81-#84). Tracking issues per phase: #63 (A), #64 (B1-B4), #65 (B5-B10), #66 (C), #67 (D), #68 (E), #69 (F). Items are checkboxes; tick them in the PR that ships them, and cite the evidence path.
 
 ## 0. Goal
 
@@ -32,10 +32,10 @@ Non-goals: replacing Phoenix or Grafana (the TUI links to them and shows a thin 
 ## 3. Phases
 
 ### P6-A: Foundations (no user-visible behaviour change)
-- [ ] **A1 plugin boundary** (rule 2) with tests: duplicate/reserved id rejection, panel rows sanitised, module init failure isolated (one bad module does not stop the TUI booting).
-- [ ] **A2 `tui/lib/`**: `http.js` (auth header, timeout, typed errors, 401 → "run `auth`"), `table.js`, `poll.js` (visibility-aware interval with abort), `fmt.js` (bytes, durations, USD).
-- [ ] **A3 `api/routes/` split** for new routes only; existing routes untouched.
-- [ ] **A4 `/ready`** (5): aggregate app DB, ledger, span store, Collector, Phoenix, Prometheus, Grafana, LLM provider. Public summary status code only; per-component detail behind the token.
+- [x] **A1 plugin boundary** (rule 2) with tests: duplicate/reserved id rejection, panel rows sanitised, module init failure isolated (one bad module does not stop the TUI booting). *Shipped (#63): `tui/plugins.js`; evidence `tests/tui/js/plugins.test.mjs`.*
+- [x] **A2 `tui/lib/`**: `http.js` (auth header, timeout, typed errors, 401 → "run `auth`"), `table.js`, `poll.js` (visibility-aware interval with abort), `fmt.js` (bytes, durations, USD). *Shipped (#63); evidence `tests/tui/js/lib-{http,table,poll,fmt}.test.mjs`.*
+- [x] **A3 `api/routes/` split** for new routes only; existing routes untouched. *Shipped (#63): `api/routes/`; `app.py` diff is one import and one `include_router`.*
+- [x] **A4 `/ready`** (5): aggregate app DB, ledger, span store, Collector, Phoenix, Prometheus, Grafana, LLM provider. Public summary status code only; per-component detail behind the token. *Shipped (#63): `api/routes/ready.py`; evidence `tests/api/test_ready_route.py`. Probe framework plus local probes (db, ledger, span store, watcher); collector, Phoenix, Prometheus, Grafana and provider report `unconfigured` until #67, #66 and #70 wire them. Aggregate is `down` (503) only when db or ledger is down. Not done: the 5 s probe cache from section 7.*
 - Depends on: nothing. Risk: low.
 
 ### P6-B: Operator commands (TUI ↔ existing API)
