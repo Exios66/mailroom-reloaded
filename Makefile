@@ -2,7 +2,7 @@
 # `make` with no target prints the list.
 .DEFAULT_GOAL := help
 
-.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test sandbox sandbox-down sandbox-status lint test smoke eval gmail
+.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test sandbox sandbox-down sandbox-status image image-dev image-sandbox lint test smoke eval gmail
 
 help:
 	@echo "mailroom-reloaded targets:"
@@ -15,6 +15,9 @@ help:
 	@echo "  make dev-test    run the dev test suite (scripts/dev_test.sh)"
 	@echo "  make sandbox     run the offline ingress sandbox on the host (scripts/sandbox.sh run)"
 	@echo "  make sandbox-down / sandbox-status   container helpers (scripts/sandbox.sh)"
+	@echo "  make image       build the lean prod image (mailroom-reloaded:latest)"
+	@echo "  make image-dev   build the dev image (mailroom-reloaded-dev:latest)"
+	@echo "  make image-sandbox   build the sandbox image (mailroom-sandbox:latest)"
 	@echo "  make lint        ruff check the tree"
 	@echo "  make test        run the unit tests (live deselected)"
 	@echo "  make smoke       end-to-end smoke against a running stack"
@@ -50,6 +53,16 @@ sandbox-down:
 
 sandbox-status:
 	scripts/sandbox.sh status
+
+# Standalone image builds. Build context is the repository root.
+image:
+	docker build -f deploy/Dockerfile --build-arg ML_BUILD_NONE=1 --build-arg UV_EXTRAS= -t mailroom-reloaded:latest .
+
+image-dev:
+	docker build -f deploy/Dockerfile.dev -t mailroom-reloaded-dev:latest .
+
+image-sandbox:
+	docker build -f deploy/Dockerfile.sandbox -t mailroom-sandbox:latest .
 
 lint:
 	uv run ruff check .

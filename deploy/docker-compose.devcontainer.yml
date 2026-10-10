@@ -1,0 +1,15 @@
+# VS Code Dev Containers override for deploy/docker-compose.dev.yml.
+#
+# Dev Containers does not auto-mount the workspace for Docker Compose
+# configurations (only image/Dockerfile configs get an automatic workspace
+# mount), so mount the repository root at /app here. Relative paths resolve
+# against the *first* compose file in the devcontainer.json list (deploy/), so
+# `..` is the repository root. The base file already mounts /app/src and
+# /app/tests; Docker resolves the more specific nested mounts over this one, and
+# all of them point at the same host tree.
+#
+# The dev image's /opt/venv lives outside /app and is unaffected by the mount.
+services:
+  app:
+    volumes:
+      - ..:/app:cached

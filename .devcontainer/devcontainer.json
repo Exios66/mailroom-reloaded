@@ -1,0 +1,59 @@
+{
+  // mailroom-reloaded — VS Code Dev Containers (image mode).
+  //
+  // Builds deploy/Dockerfile.dev and mounts the repository at /app. The image's
+  // /opt/venv lives outside /app, so it survives the mount and the toolchain is
+  // ready with no extra install step (works offline). postStartCommand boots the
+  // bundled mock provider (127.0.0.1:8001) and the API (0.0.0.0:8000) so the
+  // stack is live the moment you attach.
+  //
+  // Open with: Command Palette -> "Dev Containers: Reopen in Container".
+  // For the full app + watcher + observability stack, use the Docker Compose
+  // config in .devcontainer/compose/devcontainer.json instead.
+  "name": "mailroom-reloaded (dev image)",
+  "build": {
+    "context": "..",
+    "dockerfile": "../deploy/Dockerfile.dev",
+    "args": { "APP_UID": "1000" }
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached",
+  "workspaceFolder": "/app",
+  "remoteUser": "app",
+  "overrideCommand": true,
+  "shutdownAction": "stopContainer",
+  "forwardPorts": [8000, 8001, 8100],
+  "portsAttributes": {
+    "8000": { "label": "mailroom API /ui" },
+    "8001": { "label": "mock provider" },
+    "8100": { "label": "sandbox" }
+  },
+  "containerEnv": {
+    "PYTHONPATH": "/app/src",
+    "MAILROOM_BASE_DIR": "/data",
+    "DEFAULT_PROVIDER": "mock",
+    "MOCK_BASE_URL": "http://127.0.0.1:8001/v1",
+    "MAILROOM_API_HOST": "0.0.0.0",
+    "MAILROOM_ALLOW_UNAUTHENTICATED_BIND": "1",
+    "MAILROOM_EMBED_WATCHER": "1",
+    "CREWAI_DISABLE_TELEMETRY": "true"
+  },
+  "postCreateCommand": "python -c \"import mailroom_reloaded, fastapi, uvicorn\"",
+  "postStartCommand": "bash .devcontainer/start-dev.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode-remote.remote-containers",
+        "ms-azuretools.vscode-docker",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "ruff.nativeServer": true
+      }
+    }
+  }
+}

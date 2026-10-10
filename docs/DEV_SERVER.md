@@ -18,6 +18,8 @@ The offline sandbox ingress simulation (Correspondent stand-in + pipeline on a m
 
 No Docker? `scripts/tui_dev.sh up` runs a host-only mock stack for the `/tui` browser terminal; see [TUI.md](TUI.md).
 
+Prefer to work inside a container? The VS Code dev container builds `deploy/Dockerfile.dev` and runs the mock + API on attach (or the full Compose stack); see [deploy/README.md](../deploy/README.md#vs-code-dev-container).
+
 ## What `scripts/dev.sh up` does, step by step
 
 1. Verifies `docker` and the `docker compose` plugin are on `PATH`; exits 127

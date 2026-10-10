@@ -70,6 +70,16 @@ Containers also scale to zero after `MODAL_SCALEDOWN_WINDOW` idle seconds, but s
 - The OTel collector runs as root so `docker_stats` can read the Docker socket on any host. It also works non-root (`user: "10001:10001"` plus `group_add` with the socket's gid, `stat -c %g /var/run/docker.sock`); without the group it fails with `permission denied`.
 - `uvicorn mailroom_reloaded.api.app:app --host 0.0.0.0` without `MAILROOM_API_TOKEN` now refuses to start, like `mailroom serve`.
 
+## VS Code dev container
+
+Open the repo in a container with the Dev Containers extension (`ms-vscode-remote.remote-containers`), and manage the images/containers with the Docker extension (`ms-azuretools.vscode-docker`).
+
+- **Image mode (default):** Command Palette → **Dev Containers: Reopen in Container**. `.devcontainer/devcontainer.json` builds `deploy/Dockerfile.dev`, mounts the repo at `/app` (the image's `/opt/venv` survives the mount), and `postStartCommand` runs `.devcontainer/start-dev.sh`, which starts the bundled mock (`127.0.0.1:8001`) and the API (`0.0.0.0:8000`). No network or model download is needed.
+- **Full stack (Compose):** Command Palette → **Dev Containers: Open Folder in Container…** and pick `.devcontainer/compose/devcontainer.json`. It runs all of `deploy/docker-compose.dev.yml` plus `deploy/docker-compose.devcontainer.yml` (which adds the `..:/app` workspace mount Compose configs do not get automatically) and attaches to the `app` service. Ports 8000 (API), 6006 (Phoenix), 9090 (Prometheus) and 3000 (Grafana) are forwarded.
+- **Images:** `make image` (lean prod, `ML_BUILD_NONE=1`, no weights), `make image-dev`, `make image-sandbox` build and tag `mailroom-reloaded:latest`, `mailroom-reloaded-dev:latest` and `mailroom-sandbox:latest`. They then appear under **Images** in the Docker extension. To attach to a running stack without a devcontainer, right-click the `mailroom-dev-app-1` container in the Docker extension → **Attach Visual Studio Code** (use the dev image; the prod image runs as uid 10001 with no `git`/`curl`).
+
+`docker-compose.devcontainer.yml` is only consumed by the Compose devcontainer; `scripts/dev.sh` and the other compose files are unchanged. `.devcontainer/` and `.vscode/` are excluded from the Docker build context (`.dockerignore`).
+
 ## Docker smoke test
 
 `scripts/docker_smoke.sh` builds the lean app image and the sandbox image, runs them, and checks the compose files statically; it prints `DOCKER SMOKE OK`.
