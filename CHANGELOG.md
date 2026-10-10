@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refreshed `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`: content PRs #23-#28 merged (K-01, K-02, content issues #12/#13, C-01/C-02, and K-05 — the schema mirror), with the verified content `main` state (116 scenarios, 228 unit tests, `schema drift: none`); K-05 and X-03 ticked (content #28 @ `aedbc79`, reloaded #94 @ `09d318d`); the open-PR and ledger tables and D3 updated.
 - **Conventions now require verifying merge state per branch and stating the content mirror for schema PRs.** `AGENTS.md` §8.1: after `git fetch --all --prune`, check `git merge-base --is-ancestor origin/<branch> origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`, never from a note or PR list. §8.2: a PR that changes root `schemas/` must state the content-repo mirror follow-up (K-05) and the merge order (this repo first, then the content mirror).
 
 ### Removed
