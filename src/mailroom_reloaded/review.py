@@ -59,8 +59,8 @@ def resolve_review(
         raise ReviewRequestError(f"unknown review action: {action!r}")
     if action == "correct":
         taxonomy = load_taxonomy()
-        if doc_type and doc_type not in taxonomy.classes:
-            raise ReviewRequestError(f"correct requires a valid doc_type; {doc_type!r} not found")
+        if doc_type not in taxonomy.classes:
+            raise ReviewRequestError("correct requires a valid doc_type")
         # Validate doc_subclass if provided (must be non-empty string, no validation table exists)
         if doc_subclass is not None and not isinstance(doc_subclass, str):
             raise ReviewRequestError(f"doc_subclass must be a string, not {type(doc_subclass).__name__}")

@@ -7,6 +7,7 @@ wiring so a broken option name or output path fails loudly.
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -31,7 +32,8 @@ def test_card_requires_run_id() -> None:
 def test_card_help_mentions_master() -> None:
     result = runner.invoke(cli.app, ["card", "--help"])
     assert result.exit_code == 0
-    assert "--master" in result.stdout
+    # FORCE_COLOR in the caller's environment makes rich emit ANSI codes mid-word.
+    assert "--master" in re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
 
 
 def test_card_single_writes_json_and_md(tmp_path, monkeypatch) -> None:
