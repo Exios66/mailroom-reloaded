@@ -18,6 +18,7 @@ at import time.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import time
@@ -196,6 +197,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.sort = result
         self._add_usage("sorter", result.usage)
         self._llm_calls += 1
+        state.llm_calls = self._llm_calls
 
     @guarded("extract", NODE_DEADLINES["extract"], 0)
     def _node_extract(self) -> None:
@@ -217,6 +219,7 @@ class MailroomFlow(Flow[MailroomState]):
         state.extract = result
         self._add_usage(load_taxonomy().classes[doc_type].specialist, result.usage)
         self._llm_calls += 1
+        state.llm_calls = self._llm_calls
         M.schema_valid.add(1 if result.schema_valid else 0, {"doc_type": doc_type})
 
     @guarded("verify", NODE_DEADLINES["verify"], 0)
@@ -264,6 +267,11 @@ class MailroomFlow(Flow[MailroomState]):
         """
         state = self.state
         report = compile_report(state)
+        report["status"] = "archived"
+        report["final_classification"] = {
+            "doc_type": self._effective_doc_type(),
+            "doc_subclass": self._effective_subclass(),
+        }
         report["llm_calls"] = self._llm_calls
         state.report = report
         result = archive_document(self._bins, self._manifest, state)
@@ -627,6 +635,7 @@ class MailroomFlow(Flow[MailroomState]):
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_type"),
+            self.state.classification_override.get("doc_type"),
             boss.doc_type
             if (boss is not None and boss.action == "reassign_class")
             else None,
@@ -644,6 +653,8 @@ class MailroomFlow(Flow[MailroomState]):
 
     def _effective_subclass(self) -> str | None:
         """Current doc_subclass: explicit override, boss reassignment, else sort."""
+        if self.state.classification_override:
+            return self.state.classification_override.get("doc_subclass")
         boss = self.state.boss
         candidates = [
             self._overrides.get("doc_subclass"),
@@ -740,12 +751,49 @@ class MailroomFlow(Flow[MailroomState]):
         base.doc_id = doc_id
         base.path = str(work)
         base.eval_mode = eval_ctx is not None
+        self._llm_calls = base.llm_calls
+        if resume_from == "extract" and manifest.status == "parked":
+            boss = base.boss
+            if (
+                boss is not None
+                and boss.action == "reassign_class"
+                and not self._overrides.get("doc_type")
+                and "doc_subclass" not in self._overrides
+            ):
+                # Keep the boss's class: clearing base.boss below would otherwise
+                # fall back to the sorter's class on the approved re-extraction.
+                base.classification_override = {
+                    "doc_type": boss.doc_type,
+                    "doc_subclass": boss.doc_subclass,
+                }
+            base.review_approved = True
+            base.extract_attempts = 0
+            base.boss_reassignments = 0
+            base.boss = None
+            base.verdict = None
+            base.arbiter = None
+            base.extract = None
+            base.report = None
+            manifest.completed_nodes = [
+                n for n in manifest.completed_nodes if n in {"ingest", "bert_primary", "sort"}
+            ]
+        if self._overrides.get("doc_type") or "doc_subclass" in self._overrides:
+            base.classification_override = {
+                "doc_type": self._overrides.get("doc_type") or self._effective_doc_type(),
+                "doc_subclass": self._overrides.get("doc_subclass"),
+            }
+        if resume_from is not None or manifest.status == "processing":
+            base.status = manifest.status = "processing"
+        manifest.state = base.model_dump(mode="json")
+        save_manifest(self._bins, manifest)
 
     def _resume_start(self) -> str | None:
         """First node to run: the explicit ``resume_from`` else the manifest's next."""
         if self._resume_from:
             self._resume_done = set()
             return self._resume_from
+        if self.state.review_approved:
+            return "gate_extract" if "extract" in self._manifest.completed_nodes else "extract"
         return next_node(self._manifest, NODE_ORDER)
 
     def _drive(self) -> MailroomState:
@@ -856,6 +904,11 @@ class MailroomFlow(Flow[MailroomState]):
                     self._arbiter_events()
                     arbiter_route = self._arbiter_route()
                     if arbiter_route == "retry_extract":
+                        if state.extract_attempts >= load_taxonomy().confidence_for(
+                            self._effective_doc_type()
+                        ).retry_max:
+                            self._escalation("human_review", "arbiter_retries_spent")
+                            return self._park("arbiter_retries_spent")
                         state.extract_attempts += 1
                         self._retry_event("retry_extract", state.extract_attempts, state.extract)
                         self._resume_done.discard("extract")
@@ -880,6 +933,10 @@ class MailroomFlow(Flow[MailroomState]):
                 action = state.boss.action if state.boss is not None else "accept"
                 trace_capture.emit_event("boss", action=action)
                 if action == "reassign_class":
+                    if state.boss_reassignments >= 1:
+                        self._escalation("human_review", "boss_reassignments_spent")
+                        return self._park("boss_reassignments_spent")
+                    state.boss_reassignments += 1
                     self._retry_kind = "retry_extract"
                     self._resume_done.discard("extract")
                     node = "extract"
@@ -930,7 +987,7 @@ class MailroomFlow(Flow[MailroomState]):
 
     async def kickoff_async(self, inputs: dict[str, Any] | None = None, input_files: Any = None, **kwargs: Any):
         """Async wrapper around :meth:`kickoff` (the driver is synchronous)."""
-        return self.kickoff(inputs, input_files, **kwargs)
+        return await asyncio.to_thread(self.kickoff, inputs, input_files, **kwargs)
 
 
 def _document_scope(eval_ctx: Any | None):

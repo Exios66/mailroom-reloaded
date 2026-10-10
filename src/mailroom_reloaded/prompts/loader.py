@@ -26,6 +26,7 @@ class PromptLockError(Exception):
 
 
 def _root():
+    """Return the packaged prompts resource directory."""
     return resources.files("mailroom_reloaded.prompts")
 
 
@@ -41,6 +42,10 @@ def _read_bytes(name: str, prompt_set: str) -> bytes:
 
 @cache
 def _lineage(prompt_set: str) -> dict[str, str]:
+    """Cache the specialist hash mapping for a prompt set; missing files yield {}.
+
+    Malformed JSON and missing ``sha256`` keys propagate as errors.
+    """
     f = _root() / prompt_set / "lineage.json"
     if not f.is_file():
         return {}
@@ -49,11 +54,22 @@ def _lineage(prompt_set: str) -> dict[str, str]:
 
 
 def prompt_sha256(name: str, prompt_set: PromptSet = "frozen_v1") -> str:
+    """Return the prompt bytes' SHA-256 hex digest without checking the lock.
+
+    Search the prompt set before shared prompts; raise ``KeyError`` if absent.
+    Resource read errors propagate.
+    """
     return hashlib.sha256(_read_bytes(name, prompt_set)).hexdigest()
 
 
 @cache
 def load_prompt(name: str, *, prompt_set: PromptSet = "frozen_v1") -> str:
+    """Load and cache UTF-8 prompt text, checking any recorded lineage hash.
+
+    Search the prompt set before shared prompts. Raise ``KeyError`` for a
+    missing prompt or ``PromptLockError`` for a hash mismatch. Resource read,
+    lineage parsing, and UTF-8 decoding errors propagate.
+    """
     raw = _read_bytes(name, prompt_set)
     expected = _lineage(prompt_set).get(name)
     if expected is not None:

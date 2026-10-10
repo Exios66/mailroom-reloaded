@@ -16,6 +16,7 @@ class PdfOpenError(Exception):
 
 
 def _pypdf(path: Path) -> tuple[str, int]:
+    """Return nonblank page text and total page count; pypdf errors propagate."""
     import pypdf
 
     reader = pypdf.PdfReader(str(path))
@@ -24,6 +25,7 @@ def _pypdf(path: Path) -> tuple[str, int]:
 
 
 def _pdfplumber(path: Path) -> tuple[str, int]:
+    """Return nonblank page text and total page count; pdfplumber errors propagate."""
     import pdfplumber
 
     with pdfplumber.open(str(path)) as pdf:
@@ -32,6 +34,7 @@ def _pdfplumber(path: Path) -> tuple[str, int]:
 
 
 def _pymupdf(path: Path) -> tuple[str, int]:
+    """Return nonblank page text and total page count; PyMuPDF errors propagate."""
     import fitz
 
     with fitz.open(str(path)) as doc:

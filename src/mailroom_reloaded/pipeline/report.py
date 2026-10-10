@@ -94,13 +94,20 @@ def _cost_usd(state: MailroomState) -> float:
 
 
 def compile_report(state: MailroomState) -> dict[str, Any]:
-    """Assemble the per-document report. Deterministic; no LLM calls."""
+    """Assemble the per-document report. Deterministic; no LLM calls.
+
+    ``classification`` is always the sorter's result. ``final_classification``
+    (``{doc_type, doc_subclass}``) is the class the document was archived under
+    after any reviewer correction or boss reassignment; the archive node sets it,
+    so it is ``None`` until then.
+    """
     usage = state.usage_total
     caveats = list(state.arbiter.caveats) if state.arbiter is not None else []
     return {
         "doc_id": state.doc_id,
         "status": state.status,
         "classification": _classification(state),
+        "final_classification": None,
         "extraction": _extraction(state),
         "verdict": state.verdict.model_dump() if state.verdict is not None else None,
         "arbiter": (

@@ -75,6 +75,8 @@ _PARK_REASONS = frozenset(
         "classify_human_review",
         "extract_human_review",
         "boss_human_review",
+        "arbiter_retries_spent",
+        "boss_reassignments_spent",
     }
 )
 _REVIEW_ACTIONS = frozenset({"approve", "correct", "reject"})

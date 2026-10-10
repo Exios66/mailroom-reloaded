@@ -22,6 +22,7 @@ from __future__ import annotations
 import contextvars
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,10 @@ _MAX_DRAIN_WORKERS = 32
 
 class WatcherLockHeld(RuntimeError):
     """Another process already holds ``watcher.lock``."""
+
+
+#: Upload staging files older than this are abandoned by a crashed upload.
+STAGING_STALE_AFTER_S = 3600
 
 
 def _is_processable(path: Path) -> bool:
@@ -135,6 +140,23 @@ class Watcher:
                 M.inflight.set(self._inflight, {"worker": self.worker_id})
 
     # ------------------------------------------------------------- startup
+    def _sweep_stale_staging(self) -> int:
+        """Remove hidden upload staging files abandoned by a crash; return the count.
+
+        Only files older than ``STAGING_STALE_AFTER_S`` are removed, so an upload
+        still being written by a live API process is never touched.
+        """
+        cutoff = time.time() - STAGING_STALE_AFTER_S
+        removed = 0
+        for path in self.bins.inbox.glob(".upload-*"):
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                logger.warning("staging_sweep_failed", path=str(path))
+        return removed
+
     def resume_processing(self) -> int:
         """Resume every manifest left ``processing`` by a crash; return the count.
 
@@ -144,6 +166,7 @@ class Watcher:
         """
         count = 0
         self._close_stale_ledger_runs()
+        self._sweep_stale_staging()
         for manifest_path in sorted(self.bins.manifests.glob("*.json")):
             try:
                 manifest = Manifest.model_validate_json(manifest_path.read_text())

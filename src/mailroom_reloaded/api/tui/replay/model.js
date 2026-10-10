@@ -92,19 +92,35 @@ function computeDuration(session, segments, events) {
   return d;
 }
 
+// Outcome fields of a document exist for the viewer only from its end time (t_end).
+const OUTCOME_KEYS = [
+  'final_stage',
+  'final_status',
+  'failure_class',
+  'review_causes',
+  'verdict',
+  'quality',
+  'totals',
+  'doc_type',
+  'doc_subclass',
+  'expected_doc_class',
+  'expected_subclass',
+];
+
 function docState(entity, segs, t) {
   const tEnd = finite(entity.t_end);
+  const tStart = finite(entity.t_start, 0);
   const base = {
     doc_id: entity.doc_id,
-    filename: entity.filename ?? '',
+    filename: t >= tStart ? (entity.filename ?? '') : '',
     station: null,
     status: 'waiting',
     attempt: null,
     retry_kind: null,
     finished: false,
-    final_status: entity.final_status ?? null,
-    final_stage: entity.final_stage ?? null,
-    verdict: entity.verdict ?? null,
+    final_status: null,
+    final_stage: null,
+    verdict: null,
   };
   const n = upperBound(segs, t, 't0');
   const last = n > 0 ? segs[n - 1] : null;
@@ -118,6 +134,9 @@ function docState(entity, segs, t) {
       attempt: seg ? seg.attempt ?? 1 : null,
       retry_kind: seg ? seg.retry_kind ?? null : null,
       finished: true,
+      final_status: entity.final_status ?? null,
+      final_stage: entity.final_stage ?? null,
+      verdict: entity.verdict ?? null,
     };
   }
   if (!last) return base;
@@ -175,7 +194,9 @@ export function createModel(timeline) {
     let done = 0;
     let failed = 0;
     let active = 0;
+    let started = 0;
     const docs = entities.map((e) => {
+      if (finite(e.t_start, 0) <= at) started += 1;
       const d = docState(e, segsByDoc.get(keyOf(e.doc_id)) ?? [], at);
       if (d.station !== null) counts[d.station] = (counts[d.station] ?? 0) + 1;
       if (d.finished) {
@@ -186,7 +207,37 @@ export function createModel(timeline) {
       }
       return d;
     });
-    return { t: at, docs, counts, done, failed, active };
+    return { t: at, docs, counts, done, failed, active, started, total: entities.length };
+  }
+
+  /** Share of the documents finished by t that went through first time; null when none has finished. */
+  function firstPassAt(t) {
+    const at = finite(t, -Infinity);
+    const flags = new Map(); // doc -> latest success_rate visible at t (scores are time-ordered)
+    for (const s of scores) {
+      if (s.t > at) break;
+      if (s.name === 'success_rate') flags.set(keyOf(s.doc_id), s.value);
+    }
+    let done = 0;
+    let passed = 0;
+    for (const e of entities) {
+      const tEnd = finite(e.t_end);
+      if (tEnd === null || tEnd > at) continue;
+      done += 1;
+      const k = keyOf(e.doc_id);
+      const flag = flags.get(k);
+      if (typeof flag === 'number' && Number.isFinite(flag)) {
+        if (flag >= 1) passed += 1;
+        continue;
+      }
+      const segs = segsByDoc.get(k) ?? [];
+      const retried =
+        (eventsByDoc.get(k) ?? []).some((ev) => ev.kind === 'retry' && ev.t <= at) ||
+        segs.some((s) => s.t0 <= at && (s.retry_kind || s.attempt > 1));
+      const detoured = segs.some((s) => s.t0 <= at && (s.station === 'boss' || s.station === 'review'));
+      if (e.final_status === 'archived' && !retried && !detoured) passed += 1;
+    }
+    return done > 0 ? passed / done : null;
   }
 
   function eventsBetween(a, b) {
@@ -214,17 +265,50 @@ export function createModel(timeline) {
     return upto.filter((s) => keyOf(s.doc_id) === keyOf(docId));
   }
 
+  /** Generations that have ended by t: a call in flight has no tokens or cost yet. */
   function generationsFor(docId, t) {
-    const list = gensByDoc.get(keyOf(docId)) ?? [];
-    return list.slice(0, upperBound(list, finite(t, -Infinity), 't0'));
+    const at = finite(t, -Infinity);
+    return (gensByDoc.get(keyOf(docId)) ?? []).filter((g) => g.t1 <= at);
   }
 
-  function docAt(docId) {
-    return entityById.get(keyOf(docId));
+  /** Identity at any t; outcome fields only once the document has finished. No t means no outcome. */
+  function docAt(docId, t = -Infinity) {
+    const e = entityById.get(keyOf(docId));
+    if (!e) return undefined;
+    const at = finite(t, -Infinity);
+    const out = { doc_id: e.doc_id, filename: at >= finite(e.t_start, 0) ? (e.filename ?? '') : '' };
+    const tEnd = finite(e.t_end);
+    if (tEnd !== null && at >= tEnd) for (const k of OUTCOME_KEYS) out[k] = e[k];
+    return out;
   }
 
   function segmentsFor(docId) {
     return (segsByDoc.get(keyOf(docId)) ?? []).slice();
+  }
+
+  /** Per-station p50/p95/n over segments that have ended at or before t (linear-interpolated, as the rollup). */
+  function stationLatencyAt(t) {
+    const at = finite(t, -Infinity);
+    const byStation = new Map();
+    for (const s of segments) {
+      if (s.t0 > at) break; // segments are sorted by t0
+      if (s.t1 > at || s.status === 'running') continue;
+      const k = String(s.station ?? '');
+      if (!byStation.has(k)) byStation.set(k, []);
+      byStation.get(k).push(s.t1 - s.t0);
+    }
+    const pct = (sorted, q) => {
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+    };
+    const out = {};
+    for (const [k, v] of byStation) {
+      v.sort((a, b) => a - b);
+      out[k] = { p50_s: pct(v, 0.5), p95_s: pct(v, 0.95), n: v.length };
+    }
+    return out;
   }
 
   function runningTotalsAt(t) {
@@ -247,5 +331,7 @@ export function createModel(timeline) {
     docAt,
     segmentsFor,
     runningTotalsAt,
+    stationLatencyAt,
+    firstPassAt,
   };
 }

@@ -38,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Gate/Jev calibration no longer degenerates on the all-false core labels (issue #14). `eval/dataset.py` parses the Hub `"true"`/`"false"` escalation strings to `bool` and derives `retry_expected`/`review_expected` from the richer `expected_stage`/`expected_post_retry_state` columns when the booleans are absent or contradict them; `load_split` gains `repo`/`config` to load a self-contained labeled config. `fit_jev_calibration._search_thresholds` returns the neutral operating points when the balanced-accuracy plateau is no better than chance, refusing the `accept=1.0`/`verify=0.0` artifact. `scripts/jev_harvest.py --mode features` now treats only `retry`/`re_sort`/`human_review`/`boss` as escalations (not the `verify` caution tier) and refuses a single-class label batch.
 
+### Fixed
+
+- Replay viewer no longer shows data from after the playhead: first-pass, document outcome fields, document counts ("started of total"), generations and the metrics, tokens and latency panels now read only what has happened by `t` (`model.firstPassAt`, `docAt`, `stationLatencyAt`).
+- `/tui` declares an inline favicon, so the page makes no failing `/favicon.ico` request.
+- `scripts/tui_dev.sh` seeds a replayable run (`scripts/tui_seed_replay/seed_replay.py`, pinned `run:7e57d0c0ffee`); the seeder refuses to run unless the span store resolves under `MAILROOM_BASE_DIR`.
+- Uploads are published atomically (hard link from a dot-prefixed staging file), so the watcher can never claim a partial file; Gmail attachments use the same path and listings page past already-processed messages.
+- Uploads the clerk cannot parse are rejected with 400 before queueing: the accepted set is now exactly `.txt .md .text .pdf .docx .png .jpg .jpeg` (`.rtf`, `.html` and `.htm` were accepted before but always failed in the clerk).
+- Pipeline: arbiter-requested re-extraction is bounded by `retry_max`, boss reassignment to one re-extraction per document, the manifest is checkpointed before ingest so an early crash can resume, the LLM call count is carried across resumes, and `kickoff_async` runs the synchronous driver off the event loop.
+- Review: a correction without a valid `doc_type` is rejected with 422, and a reviewer's correction is persisted before re-extraction. Ingest: `.docx` text is extracted in document order including tables, and PNG/JPEG attachments are transcribed through vision.
+- Tests salvaged from CodeRabbit branches (API/CLI/telemetry/dataset/runbook coverage) and function-contract docstrings across `src/`.
+
 ## [0.2.0] - 2026-10-08
 
 Everything since `main`'s "CrewAi Enhancements" commit (`ce1c1ff`): the

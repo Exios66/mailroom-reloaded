@@ -631,3 +631,110 @@ def test_startup_skips_retention_under_pytest(env, monkeypatch):
     monkeypatch.setattr(retention, "maintain", lambda: pytest.fail("must not run"))
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200
+
+
+def _watcher_claims_on_publish(monkeypatch, base):
+    """Simulate a watcher that claims each visible inbox name the moment it appears.
+
+    Returns the list of bytes the watcher read from every file it claimed.
+    """
+    import os
+    from pathlib import Path
+
+    bins = Bins(base)
+    inbox = bins.inbox.resolve()
+    seen: list[bytes] = []
+
+    def on_publish(dest):
+        dest = Path(dest)
+        if dest.parent.resolve() == inbox and not dest.name.startswith("."):
+            seen.append(bins.claim(dest, "watcher").read_bytes())
+
+    real_open, real_link = os.open, os.link
+
+    def open_hook(path, flags, *args, **kwargs):
+        fd = real_open(path, flags, *args, **kwargs)
+        if flags & os.O_EXCL:
+            on_publish(path)
+        return fd
+
+    def link_hook(src, dst, *args, **kwargs):
+        real_link(src, dst, *args, **kwargs)
+        on_publish(dst)
+
+    monkeypatch.setattr(os, "open", open_hook)
+    monkeypatch.setattr(os, "link", link_hook)
+    return seen
+
+
+def test_upload_is_claimable_only_after_complete_write(client, env, monkeypatch):
+    import hashlib
+
+    seen = _watcher_claims_on_publish(monkeypatch, env)
+    response = client.post("/v1/documents", files={"file": ("letter.txt", LETTER)})
+    assert response.status_code == 202
+    assert seen == [LETTER]
+    assert response.json()["doc_id"] == hashlib.sha256(LETTER).hexdigest()[:16]
+
+
+@pytest.mark.parametrize('suffix', ['.rtf', '.html', '.htm'])
+def test_unsupported_parser_is_rejected_before_queueing(client, env, suffix):
+    response = client.post('/v1/documents', files={'file': ('document' + suffix, b'document')})
+    assert response.status_code == 400
+    assert not list(Bins(env).inbox.iterdir())
+
+
+@pytest.mark.parametrize('doc_type', [None, 'not-a-class', '../escape'])
+def test_review_rejects_invalid_correction(client, doc_type):
+    response = client.post('/v1/review/abc/resolve', json={
+        'action': 'correct', 'doc_type': doc_type,
+    })
+    assert response.status_code == 422
+
+
+def test_internal_value_error_during_correction_is_not_echoed_as_422(env, monkeypatch):
+    """Verify a ValueError raised inside the pipeline is a server error and its text is not returned."""
+    from fastapi.testclient import TestClient
+
+    from mailroom_reloaded import review as review_mod
+    from mailroom_reloaded.api.app import app
+    from mailroom_reloaded.schemas.manifest import Manifest
+    from mailroom_reloaded.storage.bins import save_manifest
+
+    bins = Bins(env)
+    path = bins.review / "letter.txt"
+    path.write_bytes(LETTER)
+    save_manifest(bins, Manifest(
+        doc_id="abc", filename="letter.txt", content_sha256="unused",
+        status="parked", state={"path": str(path)},
+    ))
+
+    def boom(*args, **kwargs):
+        raise ValueError("internal secret: /srv/x")
+
+    monkeypatch.setattr(review_mod._flow, "run_document", boom)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        response = c.post("/v1/review/abc/resolve", json={"action": "correct", "doc_type": "contract"})
+    assert response.status_code == 500
+    assert "internal secret" not in response.text
+
+
+@pytest.mark.parametrize("extract_doc_type,expected", [("contract", "contract"), (None, "correspondence")])
+def test_review_response_reports_the_extracted_class(client, monkeypatch, extract_doc_type, expected):
+    """Verify the resolve response reports the extraction's class, else the sorter's."""
+    import importlib
+    from types import SimpleNamespace
+
+    app_module = importlib.import_module("mailroom_reloaded.api.app")
+
+    extract = SimpleNamespace(doc_type=extract_doc_type) if extract_doc_type else None
+    state = SimpleNamespace(
+        status="archived",
+        route_trail=[],
+        sort=SimpleNamespace(doc_type="correspondence"),
+        extract=extract,
+    )
+    monkeypatch.setattr(app_module, "resolve_review", lambda *a, **k: state)
+    response = client.post("/v1/review/abc/resolve", json={"action": "correct", "doc_type": "contract"})
+    assert response.status_code == 200
+    assert response.json()["doc_type"] == expected

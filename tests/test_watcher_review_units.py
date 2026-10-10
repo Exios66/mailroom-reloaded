@@ -432,3 +432,22 @@ def test_startup_continues_when_ledger_closeout_fails(bins, monkeypatch, failure
 
     failure.assert_called_once()
     assert instance._startup_done is True
+
+
+def test_startup_sweeps_only_stale_upload_staging_files(bins):
+    """Verify startup removes abandoned upload staging files and keeps fresh ones and documents."""
+    import os
+    import time
+
+    stale = bins.inbox / ".upload-stale"
+    fresh = bins.inbox / ".upload-fresh"
+    document = bins.inbox / "letter.txt"
+    for path in (stale, fresh, document):
+        path.write_bytes(b"content")
+    old = time.time() - 2 * 3600
+    os.utime(stale, (old, old))
+    instance = watcher.Watcher(bins, "worker")
+    assert instance.resume_processing() == 0
+    assert not stale.exists()
+    assert fresh.exists()
+    assert document.exists()

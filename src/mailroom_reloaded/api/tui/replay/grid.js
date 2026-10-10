@@ -118,7 +118,8 @@ function headerRow({ model, clock, sess }) {
 function trackRows({ model, st, sel, cols }) {
   const stations = Array.isArray(model.stations) ? model.stations : [];
   const docs = Array.isArray(st.docs) ? st.docs : [];
-  const total = Math.max(1, docs.length);
+  // Bars scale to the documents started by t, so the count of future documents does not show.
+  const total = Math.max(1, typeof st.started === 'number' ? st.started : docs.length);
   const counts = st.counts && typeof st.counts === 'object' ? st.counts : {};
   const out = [];
   for (const s of stations) {
@@ -157,9 +158,13 @@ function scrubRow({ model, clock, cols }) {
 
 function metricsRow({ model, st, cols }) {
   const totals = safe(() => model.runningTotalsAt(st.t), {}) || {};
-  const roll = (model.rollups && typeof model.rollups === 'object' ? model.rollups : {});
+  const firstPass = safe(() => model.firstPassAt(st.t), null);
+  const docs = Array.isArray(st.docs) ? st.docs : [];
+  // Documents started by t, out of all documents; the total is labelled as such.
+  const started = typeof st.started === 'number' ? st.started : docs.length;
+  const total = typeof st.total === 'number' ? st.total : docs.length;
   const segs = [
-    [` docs ${(st.docs || []).length}  done `, 'dim'],
+    [` docs ${started} of ${total}  done `, 'dim'],
     [String(num(st.done)), 'ok'],
     ['  failed ', 'dim'],
     [String(num(st.failed)), num(st.failed) > 0 ? 'err' : ''],
@@ -167,9 +172,9 @@ function metricsRow({ model, st, cols }) {
     [String(num(st.active)), 'info'],
     [`  tok ${compact(totals.tokens)}  ${money(totals.cost_usd)}  calls ${num(totals.llm_calls)}`, ''],
   ];
-  if (typeof roll.first_pass_rate === 'number' && Number.isFinite(roll.first_pass_rate)) {
-    segs.push([`  first-pass ${Math.round(roll.first_pass_rate * 100)}%`, 'info']);
-  }
+  // First-pass over the documents finished by t (model.firstPassAt); '--' until one has finished.
+  const fp = typeof firstPass === 'number' && Number.isFinite(firstPass) ? `${Math.round(firstPass * 100)}%` : '--';
+  segs.push([`  first-pass ${fp}`, 'info']);
   return clip(segs, cols);
 }
 
@@ -200,7 +205,10 @@ function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
     out.push(clip([[' no document selected (j/k)', 'dim']], cols));
     return out;
   }
-  const ent = safe(() => model.docAt(d.doc_id), null) || {};
+  const ent = safe(() => model.docAt(d.doc_id, clock.t), null) || {};
+  // Outcome fields are read only once the document has finished; before that it is in progress.
+  const done = d.finished === true;
+  const outcome = done ? ent : {};
   out.push(clip([[' file ', 'dim'], [truncate(d.filename || ent.filename, cols - 8), 'sel']], cols));
   out.push(
     clip(
@@ -208,19 +216,24 @@ function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
         [' station ', 'dim'], [truncate(d.station, 16), 'info'],
         ['  status ', 'dim'], [truncate(d.status, 10), d.status === 'failed' ? 'err' : 'ok'],
         ['  attempt ', 'dim'], [truncate(d.attempt ?? 1, 4), ''],
-        ['  verdict ', 'dim'], [truncate(d.verdict ?? ent.verdict, 16), ''],
+        ['  verdict ', 'dim'], [truncate(d.verdict ?? outcome.verdict, 16), ''],
       ],
       cols,
     ),
   );
-  const causes = Array.isArray(ent.review_causes) && ent.review_causes.length ? ent.review_causes.map(clean).join(',') : '—';
+  const causes = Array.isArray(outcome.review_causes) && outcome.review_causes.length ? outcome.review_causes.map(clean).join(',') : '—';
+  const finalCells = done
+    ? [
+        [' final ', 'dim'], [truncate(d.final_status ?? outcome.final_status, 12), ''],
+        ['/', 'dim'], [truncate(d.final_stage ?? outcome.final_stage, 16), ''],
+      ]
+    : [[' final ', 'dim'], ['in progress', 'info']];
   out.push(
     clip(
       [
-        [' final ', 'dim'], [truncate(d.final_status ?? ent.final_status, 12), ''],
-        ['/', 'dim'], [truncate(d.final_stage ?? ent.final_stage, 16), ''],
-        ['  failure ', 'dim'], [truncate(ent.failure_class, 16), ent.failure_class ? 'err' : 'dim'],
-        ['  causes ', 'dim'], [truncate(causes, 30), ent.review_causes && ent.review_causes.length ? 'warn' : 'dim'],
+        ...finalCells,
+        ['  failure ', 'dim'], [truncate(outcome.failure_class, 16), outcome.failure_class ? 'err' : 'dim'],
+        ['  causes ', 'dim'], [truncate(causes, 30), outcome.review_causes && outcome.review_causes.length ? 'warn' : 'dim'],
       ],
       cols,
     ),

@@ -12,8 +12,9 @@ from pydantic import BaseModel
 from mailroom_reloaded.agents.arbiter import ArbiterDecision
 from mailroom_reloaded.agents.boss import BossDecision
 from mailroom_reloaded.agents.judge import JudgeVerdict
+from mailroom_reloaded.agents.sorter import SortResult
 from mailroom_reloaded.agents.specialists import ExtractResult
-from mailroom_reloaded.ingest.bert import Handoff, SortMode
+from mailroom_reloaded.ingest.bert import BertVerdict, Handoff, SortMode
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.pipeline import flow as flow_mod
 from mailroom_reloaded.pipeline.archivist import ArchiveResult
@@ -89,6 +90,37 @@ def test_classification_route_without_results_fails_closed(flow, action, route):
         == features.bert_window_agreement
         == 0
     )
+
+
+@pytest.mark.parametrize("resorted", [False, True])
+def test_routes_pass_disagreement_and_resort_history_to_gate(flow, resorted):
+    flow.state.sort = SortResult(
+        doc_type="correspondence", doc_subclass="email", confidence=0.85,
+        raw_confidence=0.9, calibrated=True, mode=SortMode.SUBCLASS_ONLY,
+        confidence_source="self_report", doc_type_disagree=True,
+        disagree_reason="contract instead", usage=Usage(),
+    )
+    flow.state.bert = BertVerdict(
+        available=True, reason="ok", calibrated_confidence=0.97,
+        margin=0.7, window_agreement=0.95,
+    )
+    flow.state.resorted = resorted
+    flow.state.extract = extraction()
+    flow._gate.decide.return_value = SimpleNamespace(action="proceed")
+
+    assert flow._classify_route() == "do_extract"
+    classify = flow._gate.decide.call_args.args[0]
+    assert classify.confidence == 0.85
+    assert (classify.bert_confidence, classify.bert_margin, classify.bert_window_agreement) == (0.97, 0.7, 0.95)
+    assert classify.doc_type_disagree is True
+    assert classify.resorted is resorted
+
+    assert flow._extract_route() == "report"
+    extract = flow._gate.decide.call_args.args[0]
+    assert extract.doc_type_disagree is True
+    assert extract.resorted is resorted
+    assert extract.schema_valid is True
+    assert extract.field_coverage == 1
 
 
 @pytest.mark.parametrize(
@@ -564,3 +596,74 @@ def test_drive_preserves_original_exception_when_ledger_end_fails(flow, monkeypa
     record.assert_called_once()
     assert record.call_args.kwargs["failure"] is original
     assert record.call_args.kwargs["aborted"] is True
+
+
+async def test_async_kickoff_does_not_block_event_loop(flow, monkeypatch):
+    import asyncio
+    import threading
+
+    release = threading.Event()
+    monkeypatch.setattr(flow, 'kickoff', lambda *a, **k: release.wait(2))
+    task = asyncio.create_task(flow.kickoff_async({}))
+    try:
+        await asyncio.sleep(0.05)
+        assert not task.done(), 'synchronous kickoff blocked the event loop'
+    finally:
+        release.set()
+        await task
+
+
+async def test_async_kickoffs_overlap_synchronous_work(monkeypatch):
+    import asyncio
+    import threading
+
+    barrier = threading.Barrier(2)
+
+    def kickoff(self, *args, **kwargs):
+        barrier.wait(timeout=2)
+        return 'completed'
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, 'kickoff', kickoff)
+    results = await asyncio.gather(
+        flow_mod.MailroomFlow().kickoff_async({}),
+        flow_mod.MailroomFlow().kickoff_async({}),
+    )
+    assert results == ['completed', 'completed']
+
+
+def test_arbiter_cannot_retry_forever(flow, monkeypatch):
+    flow._resume_from = 'gate_extract'
+    monkeypatch.setattr(flow, '_extract_route', lambda: 'do_verify')
+    calls = []
+
+    def verify():
+        calls.append('verify')
+        assert len(calls) <= 4, 'unbounded verifier loop'
+        flow.state.arbiter = ArbiterDecision(action='re_extract')
+
+    monkeypatch.setattr(flow, '_node_verify', verify)
+    monkeypatch.setattr(flow, 'extract', Mock())
+    escalation = Mock()
+    monkeypatch.setattr(flow, '_escalation', escalation)
+    assert flow._drive().status == 'parked'
+    assert len(calls) == 3
+    escalation.assert_called_once_with('human_review', 'arbiter_retries_spent')
+
+
+def test_boss_cannot_reassign_forever(flow, monkeypatch):
+    flow._resume_from = 'boss'
+    monkeypatch.setattr(flow, '_extract_route', lambda: 'do_boss')
+    calls = []
+
+    def boss():
+        calls.append('boss')
+        assert len(calls) <= 3, 'unbounded boss loop'
+        flow.state.boss = BossDecision(action='reassign_class', doc_type='contract')
+
+    monkeypatch.setattr(flow, '_node_boss', boss)
+    monkeypatch.setattr(flow, 'extract', Mock())
+    escalation = Mock()
+    monkeypatch.setattr(flow, '_escalation', escalation)
+    assert flow._drive().status == 'parked'
+    assert len(calls) == 2
+    assert escalation.call_args_list[-1] == (('human_review', 'boss_reassignments_spent'), {})

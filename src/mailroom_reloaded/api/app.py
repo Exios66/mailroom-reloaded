@@ -26,6 +26,7 @@ refuses to start (:func:`assert_bind_allowed`). ``/health``, ``/links`` and
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import os
@@ -55,11 +56,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from mailroom_reloaded import __version__
+from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS
 from mailroom_reloaded.intake import gmail as gmail_intake
-from mailroom_reloaded.review import resolve_review
+from mailroom_reloaded.review import ReviewRequestError, resolve_review
 from mailroom_reloaded.settings import get_settings
 from mailroom_reloaded.storage import audit_log, catalog
-from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
+from mailroom_reloaded.storage.bins import Bins, load_manifest
 
 logger = structlog.get_logger(__name__)
 
@@ -72,7 +74,7 @@ MAX_UPLOAD_BYTES = int(
 
 #: Accepted upload extensions. Kept local so the API does not depend on the
 #: taxonomy's current ``file_extensions`` block.
-_ACCEPTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".rtf", ".html", ".htm"}
+_ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS
 
 #: Hosts considered loopback; anything else is an off-loopback bind.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -214,7 +216,7 @@ push_api = APIRouter(prefix="/v1", dependencies=[Depends(require_push_auth)])
 async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     """Write an upload to ``inbox/`` and return its content-addressed ``doc_id``."""
     filename = Path((file.filename or "").replace("\\", "/")).name
-    if not filename or filename.startswith("."):
+    if not filename or filename.startswith(".") or "\x00" in filename:
         raise HTTPException(status_code=400, detail="Invalid file name")
     suffix = Path(filename).suffix.lower()
     if suffix not in _ACCEPTED_EXTENSIONS:
@@ -230,23 +232,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    inbox = _bins().inbox
-    stem = Path(filename).stem
-    dest = inbox / filename
-    counter = 0
-    # Hard-link/concurrent-safe: an exclusive create avoids clobbering a
-    # same-named document already queued (the watcher keys claims by name).
-    while True:
-        try:
-            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-            break
-        except FileExistsError:
-            counter += 1
-            dest = inbox / f"{stem}-{counter}{suffix}"
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(content)
-
-    doc_id = doc_id_for(dest)
+    dest = _bins().enqueue(content, filename)
+    doc_id = hashlib.sha256(content).hexdigest()[:16]
     logger.info("document_uploaded", doc_id=doc_id, file=dest.name, size=len(content))
     return {"doc_id": doc_id, "file": dest.name, "status": "accepted"}
 
@@ -330,13 +317,16 @@ def jev_status_endpoint() -> dict:
 @api.post("/review/{doc_id}/resolve")
 def resolve_review_endpoint(doc_id: str, payload: ReviewResolve) -> dict:
     """Disposition a parked document (approve / correct / reject)."""
-    state = resolve_review(
-        doc_id,
-        payload.action,
-        doc_type=payload.doc_type,
-        doc_subclass=payload.doc_subclass,
-        reviewer=payload.reviewer,
-    )
+    try:
+        state = resolve_review(
+            doc_id,
+            payload.action,
+            doc_type=payload.doc_type,
+            doc_subclass=payload.doc_subclass,
+            reviewer=payload.reviewer,
+        )
+    except ReviewRequestError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if state is None:
         raise HTTPException(
             status_code=404, detail=f"No parked document with id {doc_id}"
@@ -345,7 +335,10 @@ def resolve_review_endpoint(doc_id: str, payload: ReviewResolve) -> dict:
         "doc_id": doc_id,
         "action": payload.action,
         "status": state.status,
-        "doc_type": state.sort.doc_type if state.sort is not None else payload.doc_type,
+        "doc_type": (
+            state.extract.doc_type if state.extract is not None
+            else state.sort.doc_type if state.sort is not None else payload.doc_type
+        ),
         "route_trail": state.route_trail,
     }
 

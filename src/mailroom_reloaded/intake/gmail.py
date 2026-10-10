@@ -35,6 +35,7 @@ from __future__ import annotations
 import base64
 import binascii
 import fcntl
+import hashlib
 import json
 import os
 import sys
@@ -48,7 +49,7 @@ from typing import Any
 import structlog
 
 from mailroom_reloaded.settings import get_settings
-from mailroom_reloaded.storage.bins import Bins, doc_id_for
+from mailroom_reloaded.storage.bins import Bins
 
 logger = structlog.get_logger(__name__)
 
@@ -80,6 +81,8 @@ DEFAULT_ALLOWED_EXTENSIONS: tuple[str, ...] = (
 )
 DEFAULT_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 DEFAULT_FETCH_LIMIT = 25
+#: Upper bound on list calls per poll, so a mailbox full of processed mail cannot page forever.
+MAX_LIST_PAGES_PER_POLL = 20
 _STATE_KIND = "mailroom.gmail.state/v1"
 _POLL_LOCK = threading.Lock()
 
@@ -180,7 +183,7 @@ def _safe_filename(name: str | None) -> str:
     if not name:
         return ""
     base = Path(str(name).replace("\\", "/")).name
-    if not base or base.startswith("."):
+    if not base or base.startswith(".") or "\x00" in base:
         return ""
     return base
 
@@ -338,19 +341,30 @@ class GmailIntake:
         """List message stubs matching the query, excluding already-processed ids."""
         service = self.authenticate()
         bound = int(limit) if limit is not None else self.config.fetch_limit
-        response = (
-            service.users()
-            .messages()
-            .list(userId="me", q=self.config.query, maxResults=max(1, bound))
-            .execute()
-        )
-        stubs = response.get("messages") or []
+        if bound <= 0:
+            return []
         processed = self.processed_message_ids()
-        fresh = [
-            stub
-            for stub in stubs
-            if isinstance(stub, dict) and stub.get("id") and stub["id"] not in processed
-        ]
+        fresh: list[dict[str, Any]] = []
+        seen = set(processed)
+        page_token = None
+        visited_tokens: set[str] = set()
+        pages = 0
+        while len(fresh) < bound and pages < MAX_LIST_PAGES_PER_POLL:
+            pages += 1
+            params = {"userId": "me", "q": self.config.query, "maxResults": min(500, bound)}
+            if page_token:
+                params["pageToken"] = page_token
+            response = service.users().messages().list(**params).execute()
+            for stub in response.get("messages") or []:
+                if isinstance(stub, dict) and stub.get("id") and stub["id"] not in seen:
+                    fresh.append(stub)
+                    seen.add(stub["id"])
+                    if len(fresh) == bound:
+                        break
+            page_token = response.get("nextPageToken")
+            if not page_token or page_token in visited_tokens:
+                break
+            visited_tokens.add(page_token)
         return fresh
 
     def _get_message(self, message_id: str) -> dict[str, Any]:
@@ -425,20 +439,8 @@ class GmailIntake:
         return _b64url_decode(response.get("data") or "")
 
     def _write_to_inbox(self, content: bytes, filename: str) -> str:
-        inbox = self.bins.inbox
-        stem, suffix = Path(filename).stem, Path(filename).suffix
-        dest = inbox / filename
-        counter = 0
-        while True:
-            try:
-                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-                break
-            except FileExistsError:
-                counter += 1
-                dest = inbox / f"{stem}-{counter}{suffix}"
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(content)
-        doc_id = doc_id_for(dest)
+        dest = self.bins.enqueue(content, filename)
+        doc_id = hashlib.sha256(content).hexdigest()[:16]
         logger.info(
             "gmail_attachment_ingested",
             doc_id=doc_id,

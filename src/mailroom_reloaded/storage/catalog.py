@@ -15,10 +15,16 @@ _list = list
 
 
 def _to_record(r) -> CatalogRecord:
+    """Validate a database row as a catalog record; validation errors propagate."""
     return CatalogRecord(**r._mapping)
 
 
 def upsert(record: CatalogRecord, *, engine: Engine | None = None) -> None:
+    """Insert a record or replace all stored fields for its ``doc_id``.
+
+    Use the default database when ``engine`` is omitted; database errors
+    propagate.
+    """
     engine = engine or get_engine()
     values = record.model_dump(mode="json")
     stmt = insert(t).values(**values)
@@ -31,6 +37,11 @@ def upsert(record: CatalogRecord, *, engine: Engine | None = None) -> None:
 
 
 def get(doc_id: str, *, engine: Engine | None = None) -> CatalogRecord | None:
+    """Return a document's catalog record, or ``None`` if absent.
+
+    Use the default database when ``engine`` is omitted. Database and record
+    validation errors propagate.
+    """
     engine = engine or get_engine()
     with engine.connect() as conn:
         r = conn.execute(select(t).where(t.c.doc_id == doc_id)).first()
@@ -44,6 +55,11 @@ def list(
     *,
     engine: Engine | None = None,
 ) -> _list[CatalogRecord]:
+    """Return records ordered by document ID, with optional exact status filtering.
+
+    ``limit`` and ``offset`` count records. Use the default database when
+    ``engine`` is omitted; database and record validation errors propagate.
+    """
     engine = engine or get_engine()
     q = select(t).order_by(t.c.doc_id).limit(limit).offset(offset)
     if status is not None:

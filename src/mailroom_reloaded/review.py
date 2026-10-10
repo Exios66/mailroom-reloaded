@@ -30,13 +30,17 @@ from mailroom_reloaded.pipeline import flow as _flow
 from mailroom_reloaded.pipeline.state import MailroomState
 from mailroom_reloaded.schemas.audit import CatalogRecord
 from mailroom_reloaded.schemas.manifest import Manifest
-from mailroom_reloaded.settings import get_settings
+from mailroom_reloaded.settings import get_settings, load_taxonomy
 from mailroom_reloaded.storage import audit_log, catalog
 from mailroom_reloaded.storage.bins import Bins, load_manifest, save_manifest
 
 logger = structlog.get_logger(__name__)
 
-__all__ = ["resolve_review"]
+__all__ = ["ReviewRequestError", "resolve_review"]
+
+
+class ReviewRequestError(ValueError):
+    """A review request the caller can correct: an unknown action or an invalid class."""
 
 ReviewAction = Literal["approve", "correct", "reject"]
 
@@ -52,7 +56,9 @@ def resolve_review(
 ) -> MailroomState | None:
     """Resolve a parked document; ``None`` when no parked manifest matches."""
     if action not in ("approve", "correct", "reject"):
-        raise ValueError(f"unknown review action: {action!r}")
+        raise ReviewRequestError(f"unknown review action: {action!r}")
+    if action == "correct" and doc_type not in load_taxonomy().classes:
+        raise ReviewRequestError("correct requires a valid doc_type")
 
     bins = bins if bins is not None else Bins(get_settings().base_dir)
     manifest = load_manifest(bins, doc_id)
@@ -85,10 +91,11 @@ def resolve_review(
         )
     except BaseException:
         # Keep the doc parked: put the file back and restore the parked manifest.
+        # Once the flow has re-claimed the file it owns the manifest, so leave it.
         try:
             if claimed.is_file():
                 os.replace(claimed, path)
-            save_manifest(bins, manifest)
+                save_manifest(bins, manifest)
         except OSError:
             logger.exception("review_restore_failed", doc_id=doc_id)
         raise

@@ -160,7 +160,9 @@ is `false`. A session id is `run:<id>`, `session:<id>`, `doc:<id>` or
 `window:<from_ns>-<to_ns>`; a bare id means a run.
 
 Uploads are capped at 50 MB (`MAILROOM_MAX_UPLOAD_BYTES`) and accept
-`.txt .md .pdf .docx .rtf .html .htm` (`api/app.py:60-66`).
+`.txt .md .text .pdf .docx .png .jpg .jpeg` (`SUPPORTED_EXTENSIONS` in
+`ingest/clerk.py`). Images and scanned PDFs need a configured vision provider.
+RTF and HTML are rejected with 400 because the clerk has no parser for them.
 
 ### `/ui`
 
