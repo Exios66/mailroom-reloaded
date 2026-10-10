@@ -116,12 +116,22 @@ Production uses named volumes:
 - `prometheus_data:/prometheus` — Prometheus timeseries
 
 **Backup:**
+Stop the app and every watcher or scaled app instance mounting `mailroom_data`
+before running the backup. For this Compose project, stop all app and watcher
+replicas with:
 ```bash
-# Resolve the actual named volume mounted by the running app
+docker compose -f deploy/docker-compose.yml --profile split-watcher stop app watcher
+```
+Also stop any containers or processes outside this project that write to the
+same volume. Keep them stopped until the backup completes so SQLite databases,
+including their WAL files, and document files remain consistent.
+
+```bash
+# Resolve the actual named volume mounted by a stopped app
 (
   set -eu
-  app_container=$(docker compose -f deploy/docker-compose.yml ps -q app)
-  : "${app_container:?No running app container found}"
+  app_container=$(docker compose -f deploy/docker-compose.yml ps --all -q app | sed -n '1p')
+  : "${app_container:?No app container found}"
   data_volume=$(docker inspect --format '{{range .Mounts}}{{if and (eq .Destination "/data") (eq .Type "volume")}}{{.Name}}{{end}}{{end}}' "$app_container")
   : "${data_volume:?No named volume mounted at /data}"
   docker run --rm -v "$data_volume:/data:ro" -v "$(pwd):/backup" \
@@ -129,19 +139,43 @@ Production uses named volumes:
 )
 ```
 
-**Restore:**
+After a successful backup, restart the app and watchers you stopped:
 ```bash
-# Resolve the actual named volume mounted by the running app
+docker compose -f deploy/docker-compose.yml --profile split-watcher start app watcher
+```
+Restart any writers stopped outside this project as well.
+
+**Restore:**
+Stop the app and every watcher or scaled app instance mounting `mailroom_data`
+before running the restore:
+```bash
+docker compose -f deploy/docker-compose.yml --profile split-watcher stop app watcher
+```
+Also stop any containers or processes outside this project that use the same
+volume. **Restore only into an empty volume:** after stopping all users, clear
+all existing contents of the resolved `/data` volume (including hidden files)
+before extracting the archive below. Extraction alone does not remove files
+absent from the backup. Keep all volume users stopped throughout the restore.
+
+```bash
+# Resolve the actual named volume mounted by a stopped app
 (
   set -eu
-  app_container=$(docker compose -f deploy/docker-compose.yml ps -q app)
-  : "${app_container:?No running app container found}"
+  app_container=$(docker compose -f deploy/docker-compose.yml ps --all -q app | sed -n '1p')
+  : "${app_container:?No app container found}"
   data_volume=$(docker inspect --format '{{range .Mounts}}{{if and (eq .Destination "/data") (eq .Type "volume")}}{{.Name}}{{end}}{{end}}' "$app_container")
   : "${data_volume:?No named volume mounted at /data}"
   docker run --rm -v "$data_volume:/data" -v "$(pwd):/backup:ro" \
     alpine tar xzf /backup/mailroom-data.tar.gz -C /data
 )
 ```
+
+After a successful restore, restart the app and watchers you stopped:
+```bash
+docker compose -f deploy/docker-compose.yml --profile split-watcher start app watcher
+```
+Restart any volume users stopped outside this project as well. If extraction
+fails, keep them stopped until the restore has been completed successfully.
 
 ### Horizontal Scaling
 

@@ -110,19 +110,26 @@ cmd_up() {
     docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
 }
 
+# An explicit empty file also prevents loading a caller directory's .env.
+compose_existing() {
+    local env_file="$PROJECT_ROOT/.env"
+    [ -f "$env_file" ] || env_file=/dev/null
+    docker compose --env-file "$env_file" -f "$DEPLOY_DIR/docker-compose.dev.yml" "$@"
+}
+
 cmd_down() {
     echo -e "${BLUE}🛑 Stopping mailroom-reloaded dev stack${NC}"
-    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" down
+    compose_existing down
     echo -e "${GREEN}✓ Stack stopped${NC}"
 }
 
 cmd_logs() {
-    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" logs -f app
+    compose_existing logs -f app
 }
 
 cmd_status() {
     echo -e "${BLUE}📊 Stack status${NC}"
-    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
+    compose_existing ps
     
     echo ""
     echo -e "${BLUE}🏥 Health checks${NC}"
@@ -159,7 +166,7 @@ cmd_reset() {
     fi
     
     echo "Resetting..."
-    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" down -v
+    compose_existing down -v
     rm -rf "$PROJECT_ROOT/data"
     rm -f "$PROJECT_ROOT/.env"
     echo -e "${GREEN}✓ Reset complete${NC}"

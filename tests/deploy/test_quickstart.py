@@ -30,6 +30,10 @@ def quickstart(tmp_path):
             f"#!{sys.executable}\n"
             "import json, os, sys\n"
             "from pathlib import Path\n"
+            "if '--env-file' in sys.argv:\n"
+            "    env_file = Path(sys.argv[sys.argv.index('--env-file') + 1])\n"
+            "    if not env_file.exists():\n"
+            "        sys.exit('Environment file does not exist')\n"
             "record = {'args': sys.argv[1:]}\n"
             "record['overrides'] = {key: os.environ.get(key) for key in "
             "('DEFAULT_PROVIDER', 'MAILROOM_API_TOKEN')}\n"
@@ -117,12 +121,24 @@ def test_existing_env_keeps_unspecified_settings_and_applies_options(quickstart,
 
 
 @pytest.mark.parametrize("command", ["down", "logs", "status", "reset"])
-def test_all_compose_commands_use_project_env(quickstart, command):
+@pytest.mark.parametrize("env_exists", [True, False])
+def test_all_compose_commands_use_project_env(quickstart, command, env_exists):
     project, _, run, calls = quickstart
-    (project / ".env").write_text("MAILROOM_API_TOKEN=synthetic\n")
+    if env_exists:
+        (project / ".env").write_text("MAILROOM_API_TOKEN=synthetic\n")
     result = run(command, input="yes\n" if command == "reset" else None)
     assert result.returncode == 0, result.stderr
-    assert calls()[0]["args"][:3] == ["compose", "--env-file", str(project / ".env")]
+    env_file = str(project / ".env") if env_exists else "/dev/null"
+    expected_command = {
+        "down": ["down"], "logs": ["logs", "-f", "app"],
+        "status": ["ps"], "reset": ["down", "-v"],
+    }[command]
+    assert calls()[0]["args"] == [
+        "compose", "--env-file", env_file,
+        "-f", str(project / "deploy/docker-compose.dev.yml"), *expected_command,
+    ]
+    if not env_exists or command == "reset":
+        assert not (project / ".env").exists()
     if command == "status":
         assert [call["args"] for call in calls("curl")] == [
             ["-s", "http://127.0.0.1:8000/health"],

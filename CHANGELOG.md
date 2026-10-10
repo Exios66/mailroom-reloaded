@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/quickstart.sh`: `down`, `logs`, `status`, and `reset` use an empty environment file when `.env` is missing, with regression coverage in `tests/deploy/test_quickstart.py`. `DOCKER_DEPLOYMENT.md` selects one app replica for volume inspection and requires stopped volume users and an empty restore target.
+
 - Docker helpers: quickstart honors explicit provider/token options with existing `.env` files, uses portable initialization and an explicit Compose env file, and preserves health-check URLs. Deployment validation supports the Compose plugin and standalone fallback, validates production config with placeholder credentials, and fails on invalid Compose files or Dockerfiles. Deployment guides select pushed versioned images and resolve the mounted data volume for backups/restores; summary severity and historical validation claims are corrected.
 
 - Sandbox `PipelineRunner.reset()` no longer causes `ledger_write_failed` tracebacks: `_repoint()` now calls `reset_ledger()` (flushing queued writes before the database is deleted); `Ledger.close()` and `reset_ledger()` now report whether the writer stopped and `reset()` refuses to delete the database otherwise; tests in `tests/sandbox/test_server_pipeline_runner.py`.
