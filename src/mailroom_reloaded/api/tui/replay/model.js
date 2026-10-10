@@ -286,6 +286,31 @@ export function createModel(timeline) {
     return (segsByDoc.get(keyOf(docId)) ?? []).slice();
   }
 
+  /** Per-station p50/p95/n over segments that have ended at or before t (linear-interpolated, as the rollup). */
+  function stationLatencyAt(t) {
+    const at = finite(t, -Infinity);
+    const byStation = new Map();
+    for (const s of segments) {
+      if (s.t0 > at) break; // segments are sorted by t0
+      if (s.t1 > at || s.status === 'running') continue;
+      const k = String(s.station ?? '');
+      if (!byStation.has(k)) byStation.set(k, []);
+      byStation.get(k).push(s.t1 - s.t0);
+    }
+    const pct = (sorted, q) => {
+      const pos = (sorted.length - 1) * q;
+      const lo = Math.floor(pos);
+      const hi = Math.ceil(pos);
+      return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+    };
+    const out = {};
+    for (const [k, v] of byStation) {
+      v.sort((a, b) => a - b);
+      out[k] = { p50_s: pct(v, 0.5), p95_s: pct(v, 0.95), n: v.length };
+    }
+    return out;
+  }
+
   function runningTotalsAt(t) {
     const p = prefix[upperBound(gensByEnd, finite(t, -Infinity), 't1')];
     return { tokens: p.tokens, cost_usd: p.cost_usd, llm_calls: p.llm_calls };
@@ -306,6 +331,7 @@ export function createModel(timeline) {
     docAt,
     segmentsFor,
     runningTotalsAt,
+    stationLatencyAt,
     firstPassAt,
   };
 }

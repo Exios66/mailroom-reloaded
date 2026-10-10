@@ -262,3 +262,14 @@ test('firstPassAt ignores a score that arrives after the document finished', () 
   assert.equal(m.firstPassAt(6), 1, 'the failing score is not visible until t=9');
   assert.equal(m.firstPassAt(9), 0);
 });
+
+test('stationLatencyAt uses only segments that ended by t', () => {
+  const m = createModel(timeline());
+  assert.deepEqual(m.stationLatencyAt(1), {});
+  assert.deepEqual(m.stationLatencyAt(3), {});
+  assert.deepEqual(m.stationLatencyAt(4), { sorter: { p50_s: 2, p95_s: 2, n: 1 } });
+  const later = m.stationLatencyAt(10);
+  assert.equal(later.sorter.n, 2);
+  assert.equal(later.specialist.n, 2); // the running segment never counts
+  assert.equal(later.specialist.p50_s, 2.5);
+});

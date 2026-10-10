@@ -175,3 +175,23 @@ def test_main_refuses_without_base_dir(
     assert seed_mod.main() == 2
     assert "MAILROOM_BASE_DIR" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
+
+
+def test_main_refuses_store_outside_base_dir(
+    seed_mod, tmp_path, monkeypatch, capsys
+) -> None:
+    """A configured trace store outside the dev base dir is refused, never written."""
+    base = tmp_path / "base"
+    base.mkdir()
+    outside = tmp_path / "elsewhere" / "traces.db"
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(base))
+    monkeypatch.setenv("MAILROOM_TRACE_STORE_PATH", str(outside))
+    settings.get_settings.cache_clear()
+    try:
+        assert seed_mod.main() == 2
+    finally:
+        settings.get_settings.cache_clear()
+    err = capsys.readouterr().err
+    assert "outside MAILROOM_BASE_DIR" in err and "MAILROOM_TRACE_STORE_PATH" in err
+    assert not outside.parent.exists()
+    assert list(base.iterdir()) == []

@@ -2,6 +2,7 @@ import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderFrame, truncate } from '../../../src/mailroom_reloaded/api/tui/replay/grid.js';
 import { registerPanel, getPanel, listPanels, resetPanels } from '../../../src/mailroom_reloaded/api/tui/replay/panels.js';
+import { createModel } from '../../../src/mailroom_reloaded/api/tui/replay/model.js';
 import { createRegistry, dispatch } from '../../../src/mailroom_reloaded/api/tui/engine.js';
 import { registerReplay } from '../../../src/mailroom_reloaded/api/tui/commands/replay.js';
 
@@ -174,4 +175,66 @@ test('p cycles insight panels, starts from another panel, and never fetches the 
   assert.equal(h.calls.filter((c) => c.path.startsWith('/v1/ledger')).length, 0);
   h.tk.opts.onKey(key('q'));
   await p;
+});
+
+function runModel() {
+  return createModel({
+    session: { id: 'run:r1', duration_s: 40 },
+    entities: [
+      { doc_id: 'a', filename: 'a.pdf', t_start: 1, t_end: 10, final_status: 'archived' },
+      { doc_id: 'b', filename: 'b.pdf', t_start: 12, t_end: 30, final_status: 'archived' },
+    ],
+    segments: [
+      { doc_id: 'a', node: 'sort', station: 'sorter', t0: 2, t1: 4, status: 'ok' },
+      { doc_id: 'b', node: 'sort', station: 'sorter', t0: 13, t1: 19, status: 'ok' },
+    ],
+    generations: [
+      { doc_id: 'a', span_id: 'g1', t0: 2, t1: 3, prompt_tokens: 1000, completion_tokens: 234, cost_usd: 0.5 },
+      { doc_id: 'b', span_id: 'g2', t0: 14, t1: 15, prompt_tokens: 2000, completion_tokens: 500, cost_usd: 0.25 },
+    ],
+    rollups: {
+      tokens: 3734,
+      cost_usd: 0.75,
+      first_pass_rate: 0.5,
+      per_station: { sorter: { p50_s: 4.0, p95_s: 5.8, n: 2 } },
+    },
+  });
+}
+
+function panelAt(id, model, t) {
+  const st = model.stateAt(t);
+  return textOf(getPanel(id).render({ model, st, clock: { t }, cols: 100 }));
+}
+
+test('metrics, tokens and latency panels show nothing from after the playhead', () => {
+  const m = runModel();
+  const metrics = panelAt('metrics', m, 0);
+  assert.match(metrics, /docs 0 of 2/);
+  assert.match(metrics, /first-pass --/);
+  assert.doesNotMatch(metrics, /first-pass 50%/);
+  const tokens = panelAt('tokens', m, 0);
+  assert.match(tokens, /tokens 0 /);
+  assert.match(tokens, /\$0\.0000/);
+  assert.doesNotMatch(tokens, /3\.7k|0\.75/);
+  const latency = panelAt('latency', m, 0);
+  assert.match(latency, /p50\/p95 —/);
+  assert.doesNotMatch(latency, /sorter/);
+});
+
+test('panels at mid-run use only ended segments and finished documents', () => {
+  const m = runModel();
+  const latency = panelAt('latency', m, 5);
+  assert.match(latency, /sorter\s+2\.00\s+2\.00 n 1/);
+  assert.match(panelAt('metrics', m, 5), /docs 1 of 2/);
+});
+
+test('after the run ends the panels show the full totals', () => {
+  const m = runModel();
+  const metrics = panelAt('metrics', m, 40);
+  assert.match(metrics, /docs 2 of 2/);
+  assert.match(metrics, /first-pass 100%/);
+  const tokens = panelAt('tokens', m, 40);
+  assert.match(tokens, /tokens 3\.7k/);
+  assert.match(tokens, /\$0\.7500/);
+  assert.match(panelAt('latency', m, 40), /sorter\s+4\.00\s+5\.80 n 2/);
 });

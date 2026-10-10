@@ -6,7 +6,8 @@ fixture builders in ``tests/fixtures/replay``, re-id'd and stripped to content-f
 attributes by the showcase generator. The run is pinned, so the startup retention prune
 keeps it. Running again writes nothing new.
 
-Needs ``MAILROOM_BASE_DIR`` (``scripts/tui_dev.sh`` sets it); open the printed path on the API.
+Needs ``MAILROOM_BASE_DIR`` (``scripts/tui_dev.sh`` sets it) and a span store under it
+(refuses when ``MAILROOM_TRACE_STORE_PATH`` points elsewhere); open the printed path on the API.
 """
 
 from __future__ import annotations
@@ -80,7 +81,17 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    store = SpanStore(default_span_store_path())
+    base = Path(os.environ["MAILROOM_BASE_DIR"]).expanduser().resolve()
+    path = Path(default_span_store_path()).expanduser().resolve()
+    if not path.is_relative_to(base):
+        print(
+            f"seed_replay: the span store resolves to {path}, outside MAILROOM_BASE_DIR "
+            f"({base}); unset MAILROOM_TRACE_STORE_PATH (or trace_store_path in .env) "
+            "- refusing to seed it",
+            file=sys.stderr,
+        )
+        return 2
+    store = SpanStore(path)
     try:
         written = seed(store, get_ledger(anchor=False))
     finally:

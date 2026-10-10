@@ -44,10 +44,6 @@ function playhead(ctx) {
   return isObj(s) && Number.isFinite(s.t) ? s.t : 0;
 }
 
-function rollupsOf(model) {
-  return isObj(model) && isObj(model.rollups) ? model.rollups : {};
-}
-
 // ------------------------------------------------------------------ built-ins
 
 function metricsPanel(ctx) {
@@ -55,14 +51,17 @@ function metricsPanel(ctx) {
   const st = isObj(ctx) ? ctx.st : {};
   const cols = isObj(ctx) ? ctx.cols : 100;
   const totals = safe(() => model.runningTotalsAt(playhead(ctx)), {}) || {};
-  const roll = rollupsOf(model);
-  const docs = Array.isArray(st.docs) ? st.docs.length : 0;
+  const firstPass = safe(() => model.firstPassAt(playhead(ctx)), null);
+  const docList = Array.isArray(st.docs) ? st.docs : [];
+  // Documents started by t, out of all documents (as grid.js's metrics row).
+  const started = typeof st.started === 'number' ? st.started : docList.length;
+  const total = typeof st.total === 'number' ? st.total : docList.length;
   const failed = num(st.failed);
   return [
     header('metrics', cols),
     clip(
       [
-        [' docs ', 'dim'], [String(docs), 'info'],
+        [` docs ${started} of ${total}`, 'info'],
         ['  done ', 'dim'], [String(num(st.done)), 'ok'],
         ['  failed ', 'dim'], [String(failed), failed > 0 ? 'err' : ''],
         ['  active ', 'dim'], [String(num(st.active)), 'info'],
@@ -74,7 +73,10 @@ function metricsPanel(ctx) {
         [' tok ', 'dim'], [compact(totals.tokens), ''],
         ['  cost ', 'dim'], [money(totals.cost_usd), ''],
         ['  calls ', 'dim'], [String(num(totals.llm_calls)), ''],
-        ['  first-pass ', 'dim'], [pct(roll.first_pass_rate), Number.isFinite(roll.first_pass_rate) ? 'info' : 'dim'],
+        ['  first-pass ', 'dim'], [
+          typeof firstPass === 'number' && Number.isFinite(firstPass) ? pct(firstPass) : '--',
+          typeof firstPass === 'number' && Number.isFinite(firstPass) ? 'info' : 'dim',
+        ],
       ],
       cols,
     ),
@@ -85,9 +87,8 @@ function tokensPanel(ctx) {
   const model = isObj(ctx) ? ctx.model : {};
   const cols = isObj(ctx) ? ctx.cols : 100;
   const totals = safe(() => model.runningTotalsAt(playhead(ctx)), {}) || {};
-  const roll = rollupsOf(model);
-  const tokens = typeof roll.tokens === 'number' && Number.isFinite(roll.tokens) ? roll.tokens : num(totals.tokens);
-  const cost = typeof roll.cost_usd === 'number' && Number.isFinite(roll.cost_usd) ? roll.cost_usd : num(totals.cost_usd);
+  const tokens = num(totals.tokens);
+  const cost = num(totals.cost_usd);
   return [
     header('tokens', cols),
     clip(
@@ -140,7 +141,8 @@ function decisionsPanel(ctx) {
 function latencyPanel(ctx) {
   const model = isObj(ctx) ? ctx.model : {};
   const cols = isObj(ctx) ? ctx.cols : 100;
-  const per = rollupsOf(model).per_station;
+  // Only segments that have ended by the playhead; nothing from later in the run.
+  const per = safe(() => model.stationLatencyAt(playhead(ctx)), null);
   const out = [header('latency', cols)];
   if (!isObj(per) || Object.keys(per).length === 0) {
     out.push(clip([[' p50/p95 —', 'dim']], cols));

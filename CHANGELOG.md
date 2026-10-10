@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sandbox M6 content loader (stacked on M0): `mailroom_reloaded.sandbox.content` (loader, compat check, `sandbox/content.lock` + bundle sha256 verifier, bundle extraction), `mailroom sandbox content pull|validate|build|bump|status`, committed smoke fixtures under `src/mailroom_reloaded/sandbox/fixtures/smoke/` (content v0.5.0) and `sandbox/content.lock` pinning v0.5.0 (tag not yet published).
 - Sandbox M0 contracts: top-level `schemas/` (scenario v2, registry v1, overlay v1, gen_spec v1, persona_behavior v1, content-file schemas copied from content v0.5.0; new relation-kind, signal-kind and event-kind enum schemas), `docs/SANDBOX_CONTENT.md` (IDs, vocabulary, schema-major compat policy), `sandbox` extra (`jsonschema`) and example-validation tests.
 
+### Fixed
+
+- Replay viewer no longer shows data from after the playhead: first-pass, document outcome fields, document counts ("started of total"), generations and the metrics, tokens and latency panels now read only what has happened by `t` (`model.firstPassAt`, `docAt`, `stationLatencyAt`).
+- `/tui` declares an inline favicon, so the page makes no failing `/favicon.ico` request.
+- `scripts/tui_dev.sh` seeds a replayable run (`scripts/tui_seed_replay/seed_replay.py`, pinned `run:7e57d0c0ffee`); the seeder refuses to run unless the span store resolves under `MAILROOM_BASE_DIR`.
+- Uploads are published atomically (hard link from a dot-prefixed staging file), so the watcher can never claim a partial file; Gmail attachments use the same path and listings page past already-processed messages.
+- Uploads the clerk cannot parse are rejected with 400 before queueing: the accepted set is now exactly `.txt .md .text .pdf .docx .png .jpg .jpeg` (`.rtf`, `.html` and `.htm` were accepted before but always failed in the clerk).
+- Pipeline: arbiter-requested re-extraction is bounded by `retry_max`, boss reassignment to one re-extraction per document, the manifest is checkpointed before ingest so an early crash can resume, the LLM call count is carried across resumes, and `kickoff_async` runs the synchronous driver off the event loop.
+- Review: a correction without a valid `doc_type` is rejected with 422, and a reviewer's correction is persisted before re-extraction. Ingest: `.docx` text is extracted in document order including tables, and PNG/JPEG attachments are transcribed through vision.
+- Tests salvaged from CodeRabbit branches (API/CLI/telemetry/dataset/runbook coverage) and function-contract docstrings across `src/`.
+
 ## [0.2.0] - 2026-10-08
 
 Everything since `main`'s "CrewAi Enhancements" commit (`ce1c1ff`): the
