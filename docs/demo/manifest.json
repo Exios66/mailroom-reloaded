@@ -161,6 +161,14 @@
       "sha256": "03b9575c665254944b3f9ba48ab650f87880a1f335d5d38d959ded7246224bd4",
       "size_bytes": 211700,
       "viewport": "1200x800"
+    },
+    {
+      "file": "21-tui-status-links.png",
+      "caption": "The /tui status bar (top of the terminal window) with both outbound links: `ui ↗` (/ui, same tab) and `inbox ↗` (the sandbox ingress simulator, new tab).",
+      "command": "open /tui, wait for boot; GET /links supplies sandbox_url",
+      "sha256": "e59d6e0c598108d9e8f5702dedf9177c4f913fa04a273454ff4c9fcc21a87796",
+      "size_bytes": 232245,
+      "viewport": "1200x800"
     }
   ]
 }

@@ -27,6 +27,7 @@ viewport; its `source_commit` is the commit of the code that was running (`git r
 | [`18-sandbox-pending-review.png`](18-sandbox-pending-review.png) | Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture). | 197 KB |
 | [`19-tui-inbox-command.png`](19-tui-inbox-command.png) | The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link. | 207 KB |
 | [`20-sandbox-inbox-deeplink.png`](20-sandbox-inbox-deeplink.png) | Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail. | 207 KB |
+| [`21-tui-status-links.png`](21-tui-status-links.png) | The /tui status bar (top of the terminal window) with both outbound links: `ui ↗` (/ui, same tab) and `inbox ↗` (the sandbox ingress simulator, new tab). | 227 KB |
 
 Not shown: the sandbox `deciding` resume hint ("decision ... was recorded but not finished: press the same
 button to resume"). It needs a decision that failed half way and no supported way to cause that offline was
