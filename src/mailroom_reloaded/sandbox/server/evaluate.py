@@ -217,6 +217,7 @@ def compare_scenario(
         rels = [r for lst in rels_by_msg.values() for r in lst]
 
         def names(ref: str) -> set[str]:
+            """Resolve an attachment or message ref to delivered names, falling back to the ref."""
             if ref in att_by_ref:
                 return {att_by_ref[ref]}
             if ref in msg_by_ref:

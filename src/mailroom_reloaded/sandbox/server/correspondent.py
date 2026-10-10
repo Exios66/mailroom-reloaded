@@ -356,6 +356,10 @@ def _matrix_drafts(row: dict) -> bool:
 
 
 def _non_english(text: str) -> bool:
+    """Flag text with at least eight tokens and under 12% English stop words.
+
+    This is a language heuristic; shorter text always returns ``False``.
+    """
     toks = re.findall(r"[a-zA-Z\u00c0-\u024f']+", text.lower())
     if len(toks) < 8:
         return False
@@ -1051,6 +1055,7 @@ class StandInCorrespondent:
             )
 
         def extra(kind: str, priority: str) -> None:
+            """Add a pending signal only if that kind is not already present."""
             if all(x["kind"] != kind for x in signals):
                 signals.append({"kind": kind, "priority": priority, "state": "pending"})
 

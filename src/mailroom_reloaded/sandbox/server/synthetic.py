@@ -18,6 +18,11 @@ __all__ = ["materialise_draw", "matter_ref_for", "synthetic_pdf"]
 
 
 def matter_ref_for(spec: dict) -> str:
+    """Derive a synthetic matter reference from a dataset draw.
+
+    Groups such as ``cr_0577`` become ``CR-2026-0577``. Otherwise derive a
+    four-digit suffix from class, stratum, and ref; uniqueness is not guaranteed.
+    """
     group = str(spec.get("group") or "")
     m = re.fullmatch(r"([a-z]{1,4})_(\d{2,6})", group)
     if m:
@@ -29,6 +34,7 @@ def matter_ref_for(spec: dict) -> str:
 
 
 def _esc(s: str) -> str:
+    """Escape backslashes and parentheses for a PDF literal string."""
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 

@@ -73,6 +73,10 @@ def _local_name(addr: str) -> str:
 
 
 def _entry_for(path: Path, name: str, **extra: Any) -> dict:
+    """Read attachment bytes into wire metadata (size, sha256, doc_id, path, resolved=True).
+
+    ``extra`` can override metadata fields. Filesystem errors propagate.
+    """
     data = path.read_bytes()
     return {
         "name": name,
