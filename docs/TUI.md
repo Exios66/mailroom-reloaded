@@ -226,6 +226,85 @@ restart (`down`, `up`) after editing them.
 8. Mobile preset (375px): only essential status items, 12px base, no horizontal scroll; `createAmbient(..., {reducedMotion: true})` spawns no spark nodes.
 9. Console has no errors.
 
+## Modules and the plugin boundary
+
+`tui/plugins.js` is the one way a module adds to the terminal. `main.js` keeps a
+`MODULES` list (`pipeline`, `ledger`, `replay`, `sandbox`, `shell`) and
+`registerAll` registers each through `createModuleHost(registry)`:
+
+```js
+host.registerModule({
+  id: 'trace',                       // 1-32 chars: lowercase letter, then [a-z0-9_-]
+  commands: [spec, ...],             // or a register function (registry, deps) => void
+  panels: [{ id, title, render }],   // replay panels (reached with `p`)
+  onInit: async (ctx) => {},         // optional; runs after the terminal exists
+});
+```
+
+- **Ids.** Reserved ids (`core`, `engine`, `terminal`, `tui`, `boot`, `plugins`)
+  and malformed ids are rejected; a duplicate module id throws.
+- **All or nothing.** Commands are staged first. A command without a `name`/`run`,
+  or one whose name clashes with a registered command or another in the same
+  module, rejects the whole module and registers none of it. A register function
+  still sees the real registry for reads (`get`, `names`, `complete`), so `help`
+  and `man` keep looking commands up lazily.
+- **Panels are sanitised at the boundary.** Every module panel's `render` is
+  wrapped: a throw yields no rows, and the result goes through the grid's
+  `sanitizeRows` (control, zero-width and bidi characters become spaces; unknown
+  classes are dropped; non-rows are skipped). Rows are drawn with `textContent`,
+  so markup stays inert text. Panel ids still go through `registerPanel`, which
+  keeps its own reserved ids (`none`, `inspector`, `ledger`, the shipped panels).
+- **Isolation.** `host.registerAll(list)` logs and skips a module that fails to
+  register; `host.initAll(ctx)` runs each `onInit` and marks a throwing or
+  rejecting one `failed` without stopping the others. `main.js` starts
+  `initAll` without awaiting it, so a bad module never blocks boot.
+  `host.modules()` lists `{id, commands, panels, state}`.
+
+Tests: `tests/tui/js/plugins.test.mjs`.
+
+### Shared helpers (`tui/lib/`)
+
+New commands share these instead of importing each other (sub-plan rule 1). All
+are pure ES modules with injectable `fetch`, timers and `document`.
+
+| File | Exports | Notes |
+| --- | --- | --- |
+| `lib/http.js` | `createHttp`, `httpFor(ctx)`, `HttpError`, `errorHint`, `HTTP_TIMEOUT_MS` | JSON client with a 2 s default timeout; same-origin paths only; the bearer token comes from `ctx.api.authHeaders()` (still only in session storage). Typed `kind`: `offline`, `timeout`, `unauthorized`, `forbidden`, `not_found`, `http`, `parse`, `aborted`. `errorHint` maps 401 to `run 'auth <token>'`. Uploads and replay keep `api.js` and its longer timeout. |
+| `lib/table.js` | `renderTable(rows, columns)`, `cell` | Aligned plain-text lines (header, rule, rows); per-column `align`, `max` (ellipsis) and `format`; control/bidi characters become spaces. |
+| `lib/poll.js` | `createPoller(fn, {intervalMs, signal, onError})` | Non-overlapping ticks; skips while `document.hidden` and resumes on `visibilitychange`; aborting the signal or `stop()` cancels the pending tick and aborts the in-flight one. |
+| `lib/fmt.js` | `bytes`, `duration`, `usd` | `1.5 KiB`; `850 ms`, `1.2 s`, `3m 05s`, `2h 03m`, `1d 04h`; `$0.0042` under a dollar, `$12.35` above. Non-finite input prints `—`. |
+| `lib/links.js` | see the file map | `GET /links` helpers (unchanged). |
+
+Tests: `tests/tui/js/lib-http.test.mjs`, `lib-table.test.mjs`, `lib-poll.test.mjs`,
+`lib-fmt.test.mjs`.
+
+## Readiness: `GET /ready`
+
+`GET /ready` (`src/mailroom_reloaded/api/routes/ready.py`, the first router in the
+new `api/routes/` package) probes each backend concurrently with a 2 s budget and
+reports `ok | degraded | down | unconfigured` with `latency_ms`:
+
+```json
+{"schema_version": 1, "status": "ok",
+ "components": [{"name": "db", "status": "ok", "latency_ms": 1.2}, ...]}
+```
+
+- Components, in order: `db`, `ledger`, `span_store`, `collector`, `phoenix`,
+  `prometheus`, `grafana`, `llm_provider`, `watcher`. `collector` (#67),
+  `phoenix`/`prometheus`/`grafana` (#66) and `llm_provider` (#70) report
+  `unconfigured` until their owning issue wires a probe; `watcher` is
+  `unconfigured` without the embedded watcher.
+- A probe that times out is `degraded`; one that raises is `down` with only the
+  exception type in `detail`. Neither is a 500.
+- The aggregate is `down` (HTTP 503) only when `db` or `ledger` is down; any other
+  down or degraded component makes it `degraded` (HTTP 200).
+- The status code and aggregate are public like `/health`. `components` is
+  returned only when no token is configured or the request carries the bearer
+  token. `Cache-Control: no-store`.
+- No TUI command reads it yet; `ready` (B2) lands with #64.
+
+Tests: `tests/api/test_ready_route.py`.
+
 ## Non-goals
 
 `mail` compose (the app has no send path), `sound`, a corpus command, Gmail
@@ -237,7 +316,8 @@ light scheme beyond a selectable theme.
 | Path | Role |
 | --- | --- |
 | `src/mailroom_reloaded/api/tui/index.html` | Shell page. |
-| `.../tui/main.js` | Wiring. |
+| `.../tui/main.js` | Wiring; the `MODULES` list. |
+| `.../tui/plugins.js` | Plugin boundary: `createModuleHost`, `registerModule`, isolated `registerAll`/`initAll`. |
 | `.../tui/engine.js` | Parse, registry, history, completion (pure). |
 | `.../tui/terminal.js` | DOM rendering and key handling (`textContent` only). |
 | `.../tui/api.js` | Fetch wrapper and token storage. |
@@ -246,6 +326,8 @@ light scheme beyond a selectable theme.
 | `.../tui/commands/shell.js`, `pipeline.js`, `ledger.js`, `replay.js`, `sandbox.js` | Commands (each carries its man page). |
 | `.../tui/replay/` (`clock.js`, `model.js`, `grid.js`, `stations.js`, `panels.js`, `live.js`) | Pure viewer core: playback clock, timeline model, character-grid renderer, station table, the pluggable panel registry and the follow-live SSE reader. |
 | `.../tui/lib/links.js` | Shared `GET /links` helpers: URL re-check, Phoenix/Grafana URLs, `inboxUrl` (pure, allow-listed). |
+| `.../tui/lib/http.js`, `table.js`, `poll.js`, `fmt.js` | Shared command helpers (see "Shared helpers"). |
+| `src/mailroom_reloaded/api/routes/ready.py` | `GET /ready` aggregate readiness. |
 | `.../tui/deeplink.js` | `#replay=` and `#inbox` deep-link parsing. |
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |

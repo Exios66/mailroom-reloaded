@@ -85,5 +85,5 @@ uv run pytest -m docker tests/deploy/test_docker_smoke.py   # same, as a pytest 
 - **compose**: `config -q` for every file and profile; a set `MOCK_BASE_URL`/`MAILROOM_ANCHOR` is forwarded to `app` and an unset one is absent.
 - Exit codes: `0` ok, `1` a check failed (the failing step and the last 50 container log lines are printed), `2` a prerequisite is missing (no docker CLI, daemon or registry), so a restricted host reports "skipped", not a pass.
 - Everything is named `mrl-smoke*` and removed on exit, images included (`--keep` keeps them; `--no-build` reuses existing `mrl-smoke:*` images and leaves them). The build cache is not pruned; run `docker builder prune` yourself on a small disk.
-- `.github/workflows/docker-smoke.yml` runs it on pull requests that touch `deploy/`, `src/`, `schemas/`, `pyproject.toml`, `uv.lock` or the script, and on `workflow_dispatch`; container logs are uploaded on failure (`DOCKER_SMOKE_LOG_DIR`).
+- It runs locally only; there is no GitHub Actions workflow (removed 2026-10-10). Set `DOCKER_SMOKE_LOG_DIR` to keep container logs from a failed run.
 - The always-on static guards in `tests/deploy/test_docker_smoke.py` (every project Dockerfile copies `schemas/`; the runtime install is `--no-editable`) run in the normal pytest invocation.

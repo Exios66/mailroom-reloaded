@@ -4,6 +4,11 @@
  "additionalProperties": false,
  "description": "Scenario file format v2 (addendum v2 \u00a74.8). One YAML file per scenario under scenarios/<Series>/.",
  "properties": {
+  "contrast": {
+   "description": "Reason this scenario is exempt from contradiction comparisons",
+   "pattern": "\\S",
+   "type": "string"
+  },
   "expect": {
    "additionalProperties": false,
    "properties": {
