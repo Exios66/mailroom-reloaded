@@ -249,33 +249,10 @@ async def upload_document(file: UploadFile = File(...)) -> dict:  # noqa: B008
     if not content:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Compute doc_id from content before enqueue; validate it matches the stored file
+    # The doc_id hashes the exact bytes enqueue() writes; the file is not re-read
+    # afterwards because the watcher may already have claimed it out of inbox/.
     doc_id = hashlib.sha256(content).hexdigest()[:16]
     dest = _bins().enqueue(content, filename)
-    # Verify that the enqueued file's content matches by re-hashing (defensive)
-    try:
-        stored_hash = hashlib.sha256()
-        with dest.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                stored_hash.update(chunk)
-        stored_id = stored_hash.hexdigest()[:16]
-        if stored_id != doc_id:
-            logger.error(
-                "upload_hash_mismatch",
-                doc_id=doc_id,
-                stored_id=stored_id,
-                file=dest.name,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Upload verification failed; file content mismatch",
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("upload_verify_failed", file=dest.name, error=str(exc))
-        raise HTTPException(status_code=500, detail="Upload verification failed") from exc
-
     logger.info("document_uploaded", doc_id=doc_id, file=dest.name, size=len(content))
     return {"doc_id": doc_id, "file": dest.name, "status": "accepted"}
 

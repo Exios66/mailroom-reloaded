@@ -83,15 +83,21 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """Isolate the base directory and reset settings and SQLite state per test."""
-    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    """Isolate the base directory and reset settings, ledger and SQLite state per test."""
     from mailroom_reloaded import settings
+    from mailroom_reloaded.storage.ledger import reset_ledger
 
+    # A ledger writer thread left by an earlier run_eval can call get_settings()
+    # while the environment is unset and re-cache the default base_dir after our
+    # cache_clear(); stop it before and after each test.
+    reset_ledger()
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     settings.get_settings.cache_clear()
     monkeypatch.setattr(db, "_default_engine", None)
     try:
         yield tmp_path
     finally:
+        reset_ledger()
         if db._default_engine is not None:
             db._default_engine.dispose()
         db._default_engine = None
@@ -612,3 +618,213 @@ def test_specialist_cell_documents_are_recorded(env, monkeypatch):
     roles = {r for e in docs for r in e.payload["usage_by_role"]}
     assert roles and all(r.endswith("_specialist") for r in roles)
     assert ledger.verify(run_id).ok
+
+
+# --------------------------------------------------------------------------- overlap check
+
+
+def _get_run_metadata(run_id):
+    """Fetch the overlap check metadata from the eval_runs table."""
+    engine = db.get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT overlap_check FROM eval_runs WHERE run_id = :run"),
+            {"run": run_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        metadata_json = row[0]
+        if metadata_json is None:
+            return None
+        return json.loads(metadata_json)
+
+
+def test_overlap_check_fires_with_overlapping_manifest(env, monkeypatch, tmp_path):
+    """Verify the overlap check detects and records overlapping documents."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    docs, gts = _load_mini()
+    sampled = sample(docs, gts, per_class=1, seed=42)
+
+    # Create a manifest that includes the first document
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    first_doc = sampled[0]
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "filename": first_doc.filename,
+                "content_sha256": first_doc.content_sha256,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that overlap was recorded
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "completed"
+    assert metadata["overlapping_count"] > 0
+    assert len(metadata.get("overlapping_samples", [])) > 0
+    assert first_doc.filename in {s["filename"] for s in metadata["overlapping_samples"]}
+
+
+def test_overlap_check_no_overlap_with_clean_manifest(env, monkeypatch, tmp_path):
+    """Verify the overlap check reports no overlaps when manifest is clean."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+
+    # Create a manifest with documents not in our sample
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "filename": "nonexistent_doc.txt",
+                "content_sha256": sha256_text("completely different content"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that no overlaps were recorded
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "completed"
+    assert metadata["overlapping_count"] == 0
+    assert len(metadata.get("overlapping_samples", [])) == 0
+
+
+def test_overlap_check_skipped_when_manifest_absent(env, monkeypatch):
+    """Verify the overlap check is skipped when the manifest does not exist."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+
+    # No explicit manifest and nothing at <base_dir>/models/bert_manifest.jsonl.
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that the check was skipped
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "skipped"
+    assert metadata["reason"] == "manifest_not_found"
+
+
+def test_overlap_check_uses_base_dir_manifest_fallback(env, monkeypatch):
+    """Without ``bert_manifest``, ``<base_dir>/models/bert_manifest.jsonl`` is used."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    docs, gts = _load_mini()
+    sampled = sample(docs, gts, per_class=1, seed=42)
+    manifest_file = env / "models" / "bert_manifest.jsonl"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    manifest_file.write_text(
+        json.dumps({"content_sha256": sampled[0].content_sha256}) + "\n", encoding="utf-8"
+    )
+
+    run_id = run_eval(
+        EvalConfig(local_dir=FIXTURES, per_class=1, seed=42, judge_sample_rate=0.0)
+    )
+
+    metadata = _get_run_metadata(run_id)
+    assert metadata["status"] == "completed", metadata
+    assert metadata["overlapping_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [("{not json\n", "skipped"), ("", "completed")],
+    ids=["malformed_manifest_records_check_error", "empty_manifest_completes"],
+)
+def test_overlap_check_manifest_read_outcomes(env, monkeypatch, tmp_path, content, expected):
+    """A malformed manifest is a check error; a readable empty one is a clean check."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    manifest_file.write_text(content, encoding="utf-8")
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    metadata = _get_run_metadata(run_id)
+    assert metadata["status"] == expected
+    if expected == "skipped":
+        assert metadata["reason"] == "check_error"
+    else:
+        assert metadata["overlapping_count"] == 0
+
+
+def test_load_manifest_sha256_strict_raises_but_default_skips(tmp_path):
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("{not json\n", encoding="utf-8")
+    assert load_manifest_sha256(bad) == set()
+    with pytest.raises(ValueError):
+        load_manifest_sha256(bad, strict=True)

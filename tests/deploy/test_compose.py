@@ -18,7 +18,7 @@ COMPOSE = DEPLOY / "docker-compose.yml"
 
 @pytest.mark.parametrize(
     "profiles",
-    [[], ["local-llm"], ["gpu"], ["split-watcher"], ["local-llm", "gpu"]],
+    [[], ["mock"], ["local-llm"], ["gpu"], ["split-watcher"], ["local-llm", "gpu"]],
     ids=lambda p: "+".join(p) or "default",
 )
 def test_compose_config_valid(profiles):
@@ -67,6 +67,7 @@ def test_compose_services_profiles_and_volumes():
         "prometheus": None,
         "grafana": None,
         "vllm-targets": None,
+        "mock": ["mock"],
         "watcher": ["split-watcher"],
         "llamafile": ["local-llm"],
         "vllm": ["gpu"],
@@ -84,6 +85,10 @@ def test_compose_services_profiles_and_volumes():
         "grafana_data",
         "otel_targets",
     }
+    # Verify mock service has healthcheck and no published ports
+    assert svc["mock"]["healthcheck"] is not None
+    assert "ports" not in svc["mock"] or not svc["mock"]["ports"]
+    # Verify vllm service properties
     cmd = svc["vllm"]["command"]
     vllm_cmd = cmd if isinstance(cmd, str) else " ".join(str(c) for c in cmd)
     assert "--enable-prefix-caching" in vllm_cmd

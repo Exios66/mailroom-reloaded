@@ -324,12 +324,14 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- §5 manifest
 
 
-def load_manifest_sha256(manifest: Any) -> set[str]:
+def load_manifest_sha256(manifest: Any, *, strict: bool = False) -> set[str]:
     """Content hashes from a local BERT-training ``documents`` manifest.
 
     Accepts a JSONL file or a directory of JSONL files (the training set's
     ``documents`` export). Best-effort and offline by design: unreadable or
     malformed inputs are skipped, and no Hub network access is attempted.
+    ``strict=True`` raises those read and parse errors instead (a readable
+    empty manifest still yields an empty set).
     """
     base = Path(manifest)
     if base.is_file():
@@ -343,6 +345,8 @@ def load_manifest_sha256(manifest: Any) -> set[str]:
         try:
             rows = _read_jsonl(path)
         except (OSError, ValueError):
+            if strict:
+                raise
             continue
         for row in rows:
             sha = _row_get(row, _SHA_KEYS)
@@ -351,15 +355,18 @@ def load_manifest_sha256(manifest: Any) -> set[str]:
     return shas
 
 
-def bert_manifest_overlap(docs: list[BlindDoc], manifest: Any) -> dict[str, bool]:
+def bert_manifest_overlap(
+    docs: list[BlindDoc], manifest: Any, *, strict: bool = False
+) -> dict[str, bool]:
     """Report which blind documents appear in the BERT training manifest.
 
     Spec §5 leakage check: a ``True`` entry means the document's
     ``content_sha256`` is in ``TRAINING_REPO``'s ``documents`` set, so its
     fast-path accuracy must be excluded from the KPIs. ``manifest`` is a
-    local JSONL file/dir; an unreadable manifest yields all-``False``.
+    local JSONL file/dir; an unreadable manifest yields all-``False`` unless
+    ``strict``, which raises the read or parse error.
     """
-    known = load_manifest_sha256(manifest)
+    known = load_manifest_sha256(manifest, strict=strict)
     return {doc.filename: doc.content_sha256 in known for doc in docs}
 
 
