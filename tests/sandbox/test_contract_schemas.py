@@ -49,6 +49,27 @@ def test_yaml_examples_validate(schema, example):
     validator(schema).validate(yml(example))
 
 
+def test_scenario_contrast_is_optional_and_accepts_nonblank_reason():
+    """Accept scenarios with no contrast or a nonblank exemption reason."""
+    scenario = yml("scenario_A1.yaml")
+    scenario.pop("contrast", None)
+    check = validator("scenario.v2.json")
+    check.validate(scenario)
+    scenario["contrast"] = "  Different expected reply behavior.  "
+    check.validate(scenario)
+
+
+@pytest.mark.parametrize("contrast", ["", " ", "\t\n\r "])
+def test_scenario_contrast_rejects_blank_reason(contrast):
+    """Reject blank contrast reasons at the contrast pattern constraint."""
+    scenario = yml("scenario_A1.yaml")
+    scenario["contrast"] = contrast
+    with pytest.raises(jsonschema.ValidationError) as exc:
+        validator("scenario.v2.json").validate(scenario)
+    assert list(exc.value.path) == ["contrast"]
+    assert exc.value.validator == "pattern"
+
+
 def test_overlay_example_validates():
     """Validate the first record in the example overlay stream."""
     line = (EX / "overlay.jsonl").read_text().splitlines()[0]
@@ -231,6 +252,16 @@ def test_generation_spec_rejects_invalid_contract_fields(field, value):
     document[field] = value
     with pytest.raises(jsonschema.ValidationError):
         validator("gen_spec.v1.json").validate(document)
+
+
+def test_generation_spec_rejects_unknown_expected_attack_class():
+    """Reject unknown expected attack classes at the nested enum constraint."""
+    document = yml("gen_spec.yaml")
+    document["expect"]["attack_class"] = "unknown"
+    with pytest.raises(jsonschema.ValidationError) as exc:
+        validator("gen_spec.v1.json").validate(document)
+    assert list(exc.value.path) == ["expect", "attack_class"]
+    assert exc.value.validator == "enum"
 
 
 @pytest.mark.parametrize("patience,valid", [(0, True), (0.5, True), (-0.1, False)])
