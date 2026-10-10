@@ -1,6 +1,7 @@
 """Offline dataset validation and sampling boundary cases."""
 
 import json
+import sys
 
 import pytest
 
@@ -8,6 +9,7 @@ from mailroom_reloaded.eval.dataset import (
     BlindDoc,
     DatasetIntegrityError,
     GroundTruth,
+    _ground_truth_from_row,
     load_split,
     sample,
     sha256_text,
@@ -66,6 +68,114 @@ def test_loader_aliases_unicode_hashes_and_ground_truth_json(tmp_path):
         maud_clause_labels=["single label"],
         retry_expected=False,
     )
+
+
+def test_ground_truth_parses_hub_string_flags():
+    """The Hub serves the escalation flags as ``"true"``/``"false"`` strings."""
+    gt = _ground_truth_from_row(
+        {
+            "filename": "a.txt",
+            "retry_expected": "true",
+            "review_expected": "false",
+            "expected_stage": "archived",
+        }
+    )
+    assert gt.retry_expected is True
+    assert gt.review_expected is False
+
+
+def test_ground_truth_derives_flags_from_richer_columns():
+    """Richer columns win over the degenerate all-false booleans (issue #14)."""
+    review = _ground_truth_from_row(
+        {
+            "filename": "r.txt",
+            "retry_expected": "false",
+            "review_expected": "false",
+            "expected_stage": "review",
+            "review_reason": "low_confidence",
+        }
+    )
+    assert review.review_expected is True
+
+    retry = _ground_truth_from_row(
+        {
+            "filename": "t.txt",
+            "retry_expected": "false",
+            "review_expected": "false",
+            "expected_stage": "archived",
+            "expected_post_retry_state": "human_review",
+        }
+    )
+    assert retry.retry_expected is True
+
+
+@pytest.mark.parametrize("stage_fields", [
+    {"expected_stage": "archived"}, {}, {"expected_stage": None}, {"expected_stage": ""},
+])
+@pytest.mark.parametrize("flag_fields, expected", [
+    ({"review_expected": "false"}, False), ({}, None), ({"review_expected": "true"}, True),
+])
+def test_ground_truth_review_reason_alone_is_not_a_review(stage_fields, flag_fields, expected):
+    """A reason alone preserves false, unknown, and true explicit review labels."""
+    gt = _ground_truth_from_row(
+        {
+            "filename": "a.txt",
+            **stage_fields,
+            **flag_fields,
+            "review_reason": "ambiguous",
+        }
+    )
+    assert gt.review_expected is expected
+
+
+def test_load_split_labeled_config_computes_missing_hash(monkeypatch):
+    """A self-contained labeled config (fixtures) needs no declared sha256."""
+    from types import SimpleNamespace
+
+    from mailroom_reloaded.eval import dataset as ds
+
+    rows = [
+        {
+            "filename": "fx.txt",
+            "doc_text": "hello",
+            "expected": "contract",
+            "retry_expected": "true",
+            "expected_stage": "archived",
+            "expected_post_retry_state": "human_review",
+        }
+    ]
+    fake = SimpleNamespace(load_dataset=lambda *a, **k: rows)
+    monkeypatch.setitem(sys.modules, "datasets", fake)
+
+    docs, gts = ds.load_split(
+        revision="rev", split="train", repo="org/repo", config="fixtures"
+    )
+    assert docs[0].content_sha256 == sha256_text("hello")
+    assert gts["fx.txt"].retry_expected is True
+
+
+@pytest.mark.parametrize("config", ["fixtures", "bundles"])
+@pytest.mark.parametrize("duplicate_name", ["fx.txt", " fx.txt "])
+def test_labeled_loader_rejects_duplicate_filenames(monkeypatch, config, duplicate_name):
+    """Reject repeated normalized filenames before validating labeled content."""
+    from types import SimpleNamespace
+
+    rows = [
+        {"filename": "fx.txt", "doc_text": "hello", "expected": "contract"},
+        {
+            "filename": duplicate_name,
+            "doc_text": "different",
+            "expected": "correspondence",
+            # Duplicate identity must be rejected before validating the document.
+            "content_sha256": sha256_text("hello"),
+        },
+    ]
+    monkeypatch.setitem(
+        sys.modules, "datasets", SimpleNamespace(load_dataset=lambda *a, **k: rows)
+    )
+
+    with pytest.raises(DatasetIntegrityError, match=r"Duplicate ground truth filename: fx\.txt"):
+        load_split(config=config)
 
 
 @pytest.fixture
@@ -167,3 +277,36 @@ def test_join_rejects_unmatched_filenames(blind_names, truth_names):
     truth = [{"filename": name, "expected": "contract"} for name in truth_names]
     with pytest.raises(DatasetIntegrityError, match="Filename mismatch"):
         _join(blind, truth)
+
+
+@pytest.mark.parametrize('metadata_json', [False, True])
+@pytest.mark.parametrize('valid', [False, True])
+def test_labeled_metadata_hash_is_verified(monkeypatch, metadata_json, valid):
+    """Verify labeled configs enforce hashes from mapping or JSON metadata."""
+    from types import SimpleNamespace
+
+    metadata = {'content_sha256': sha256_text('hello' if valid else 'different')}
+    row = {'filename': 'fx.txt', 'doc_text': 'hello',
+           'metadata': json.dumps(metadata) if metadata_json else metadata}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    if valid:
+        docs, _ = load_split(config='fixtures')
+        assert docs[0].content_sha256 == sha256_text('hello')
+    else:
+        with pytest.raises(DatasetIntegrityError, match='content_sha256 mismatch'):
+            load_split(config='fixtures')
+
+
+@pytest.mark.parametrize('declared', [sha256_text('hello'), sha256_text('wrong')])
+def test_labeled_top_level_hash_takes_precedence(monkeypatch, declared):
+    """Prefer a top-level declared hash over conflicting metadata."""
+    from types import SimpleNamespace
+
+    row = {'filename': 'fx.txt', 'doc_text': 'hello', 'content_sha256': declared,
+           'metadata': {'content_sha256': sha256_text('different')}}
+    monkeypatch.setitem(sys.modules, 'datasets', SimpleNamespace(load_dataset=lambda *a, **k: [row]))
+    if declared == sha256_text('hello'):
+        assert load_split(config='fixtures')[0][0].content_sha256 == declared
+    else:
+        with pytest.raises(DatasetIntegrityError, match='content_sha256 mismatch'):
+            load_split(config='fixtures')

@@ -20,12 +20,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, inspect, text
 
 from mailroom_reloaded.agents.specialists import ExtractResult
 from mailroom_reloaded.agents.specialists import extract as _extract
 from mailroom_reloaded.eval.dataset import (
     DEFAULT_REVISION,
+    REPO,
     BlindDoc,
     EvalContext,
     GroundTruth,
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS eval_docs (
     run_id TEXT NOT NULL,
     filename TEXT NOT NULL,
     doc_id TEXT,
+    content_sha256 TEXT,
     mode TEXT,
     status TEXT,
     doc_type TEXT,
@@ -79,6 +81,7 @@ _COLUMNS = (
     "run_id",
     "filename",
     "doc_id",
+    "content_sha256",
     "mode",
     "status",
     "doc_type",
@@ -126,6 +129,8 @@ class EvalConfig:
     judge_sample_rate: float = 1.0
     split: str = "test"
     local_dir: Path | None = None
+    dataset_repo: str | None = None
+    dataset_config: str | None = None
     gpu_usd_per_hour: float = 0.80
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -160,9 +165,43 @@ def _engine() -> Engine:
 
 
 def _ensure_table(engine: Engine) -> None:
-    """Create the evaluation results table if it does not already exist."""
+    """Create run tables and add the content identity column to older databases.
+
+    Issue #14's fixtures exports match labels to the evaluated content hash.
+    Existing databases need this column before new evaluations can record it;
+    legacy rows retain NULL and cannot pass the export identity check.
+    """
     with engine.begin() as conn:
         conn.execute(text(_EVAL_DDL))
+        if "content_sha256" not in {c["name"] for c in inspect(conn).get_columns("eval_docs")}:
+            conn.execute(text("ALTER TABLE eval_docs ADD COLUMN content_sha256 TEXT"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eval_runs (
+                run_id TEXT PRIMARY KEY,
+                dataset_repo TEXT NOT NULL,
+                dataset_config TEXT,
+                revision TEXT NOT NULL,
+                split TEXT NOT NULL,
+                local_dir TEXT
+            )
+        """))
+
+
+def _record_dataset(engine: Engine, run_id: str, cfg: EvalConfig) -> None:
+    """Persist the dataset selection before processing any run documents."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO eval_runs
+                (run_id, dataset_repo, dataset_config, revision, split, local_dir)
+            VALUES (:run_id, :repo, :config, :revision, :split, :local_dir)
+        """), {
+            "run_id": run_id,
+            "repo": cfg.dataset_repo or REPO,
+            "config": cfg.dataset_config,
+            "revision": cfg.revision,
+            "split": cfg.split,
+            "local_dir": str(cfg.local_dir.resolve()) if cfg.local_dir is not None else None,
+        })
 
 
 def _insert(engine: Engine, row: dict[str, Any]) -> None:
@@ -269,6 +308,7 @@ def _base_row(
         "run_id": run_id,
         "filename": doc.filename,
         "doc_id": doc_id_for_sha(doc.content_sha256),
+        "content_sha256": doc.content_sha256,
         "mode": mode,
         "status": "error",
         "doc_type": None,
@@ -525,13 +565,20 @@ def run_eval(cfg: EvalConfig) -> str:
     Raises ``RuntimeError`` if called from a thread with a running event loop.
     """
     run_id = uuid.uuid4().hex[:12]
-    docs, gts = load_split(cfg.revision, cfg.split, local_dir=cfg.local_dir)
+    docs, gts = load_split(
+        cfg.revision,
+        cfg.split,
+        local_dir=cfg.local_dir,
+        repo=cfg.dataset_repo,
+        config=cfg.dataset_config,
+    )
     selected = sample(
         docs, gts, per_class=cfg.per_class, seed=cfg.seed, classes=cfg.classes
     )
     graded = select_graded(selected, cfg.judge_sample_rate, cfg.seed)
     engine = _engine()
     _ensure_table(engine)
+    _record_dataset(engine, run_id, cfg)
     # asyncio tasks (and to_thread) copy this context, so every eval document inherits the scope
     ledger = run_ledger.ledger_for(None)
     run_ledger.open_run(
