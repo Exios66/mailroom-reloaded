@@ -94,7 +94,7 @@ function commonPrefix(strings) {
 
 /**
  * Registry of commands. `spec` is
- * {name, summary, usage, man, run(ctx, args, flags), complete?(ctx, args)}.
+ * {name, summary, usage, man, run(ctx, args, flags)}.
  */
 export function createRegistry() {
   const specs = new Map();

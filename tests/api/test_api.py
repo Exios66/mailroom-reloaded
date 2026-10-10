@@ -271,6 +271,7 @@ def test_ui_served(client):
     assert "ev.stopPropagation()" in text  # the link must not also open the cards
     assert "/d/mailroom-quality?var-run_id=" in text  # per-run Grafana link expression
     assert "phoenix ↗" in text  # per-run Phoenix link
+    assert "td a { color:var(--accent)" in text  # run links in table cells are styled
     assert "/links" in text  # the header links are refreshed from the public config
 
 
@@ -485,6 +486,47 @@ PUSH_ENVELOPE = {
         ).decode()
     }
 }
+
+
+@pytest.mark.parametrize(
+    "argv", [["uvicorn", "x:app", "--host", "0.0.0.0"], ["uvicorn", "x:app", "--host=0.0.0.0"]]
+)
+def test_bind_policy_sees_uvicorn_host_argument(env, monkeypatch, argv):
+    """``uvicorn --host 0.0.0.0`` without MAILROOM_API_HOST must not bypass the guard."""
+    import importlib
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    from mailroom_reloaded import settings
+
+    monkeypatch.delenv("MAILROOM_API_HOST", raising=False)
+    monkeypatch.delenv("UVICORN_HOST", raising=False)
+    monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", raising=False)
+    settings.get_settings.cache_clear()
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit):
+        app_mod._enforce_bind_policy()
+    monkeypatch.setattr("sys.argv", ["uvicorn", "x:app", "--host", "127.0.0.1"])
+    app_mod._enforce_bind_policy()
+
+
+def test_bind_policy_literal_host_beats_uvicorn_host_env(env, monkeypatch):
+    """A literal ``--host 127.0.0.1`` wins over UVICORN_HOST, as in uvicorn itself."""
+    import importlib
+
+    app_mod = importlib.import_module("mailroom_reloaded.api.app")
+    from mailroom_reloaded import settings
+
+    monkeypatch.delenv("MAILROOM_API_HOST", raising=False)
+    monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
+    monkeypatch.delenv("MAILROOM_ALLOW_UNAUTHENTICATED_BIND", raising=False)
+    settings.get_settings.cache_clear()
+    monkeypatch.setenv("UVICORN_HOST", "0.0.0.0")
+    monkeypatch.setattr("sys.argv", ["uvicorn", "x:app", "--host", "127.0.0.1"])
+    app_mod._enforce_bind_policy()  # the effective host is loopback
+    monkeypatch.setattr("sys.argv", ["uvicorn", "x:app"])
+    with pytest.raises(SystemExit):  # no literal host: the env value is the effective one
+        app_mod._enforce_bind_policy()
 
 
 def test_bind_policy_enforced_at_startup_without_cli(env, monkeypatch):

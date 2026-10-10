@@ -54,3 +54,5 @@ ul { margin: 4px 0; padding-left: 18px; }
 .mbx-entry.to-boss { border-color: var(--warn); } .mbx-entry.to-corr { border-color: var(--accent); margin-left: 14px; }
 .mbx-sum { color: var(--fg); word-break: break-word; }
 body { padding-bottom: 44px; }
+input.num { width: 4.5em; }
+#tab-body, #trace { overflow-x: auto; }

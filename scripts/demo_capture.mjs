@@ -2,7 +2,7 @@
 // Deterministic demo screenshots for /tui, /ui and (optionally) the sandbox UI.
 //
 //   scripts/tui_dev.sh up
-//   MAILROOM_BASE_DIR=data/tui-dev/base python3 scripts/demo_seed_eval_runs.py   # so /ui lists a run
+//   MAILROOM_BASE_DIR=data/tui-dev/base uv run python scripts/demo_seed_eval_runs.py   # so /ui lists a run
 //   node scripts/demo_capture.mjs                    # writes docs/demo/*.png and docs/demo/manifest.json
 //   MAILROOM_SANDBOX_URL=http://127.0.0.1:8100 scripts/tui_dev.sh up   # so GET /links names the sandbox
 //   SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs   # + sandbox dock shots and the inbox deep link

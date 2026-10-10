@@ -28,13 +28,14 @@ const entry = (id, thread, sender, recipient, extra = {}) => ({ id, seq: 1, thre
 const ENTRIES = [entry("bm00001", "t1", "correspondent", "boss"), entry("bm00002", "t2", "auditor", "boss"), entry("bm00003", "t1", "boss", "correspondent")];
 
 /** Boot app.js in a stub browser; opts.hash seeds location, opts.bare removes location/history. */
-async function boot({ hash = "", bare = false } = {}) {
+async function boot({ hash = "", bare = false, noRoute = false } = {}) {
+  const warns = [];
   const els = new Map();
   const calls = [];
   const timers = [];
   const status = { content: { kind: "smoke", scenarios: 0, valid: true, policy_source: "x" }, network_guard: { blocked_attempts: 0 }, egress: { profile: "closed", transmitted: 0 }, messages: {}, queue_pending: 0 };
   const ctx = {
-    console: { log() {} }, alert() {}, confirm: () => true, setInterval: (f) => timers.push(f),
+    console: { log() {}, warn: (m) => warns.push(String(m)) }, alert() {}, confirm: () => true, setInterval: (f) => timers.push(f),
     sessionStorage: { getItem: (k) => (k === "sbx_token" ? "sbx-secret-token" : null), setItem() {} },
     document: {
       getElementById: (id) => { if (!els.has(id)) els.set(id, new N("#" + id)); return els.get(id); },
@@ -59,10 +60,10 @@ async function boot({ hash = "", bare = false } = {}) {
   vm.createContext(ctx);
   els.set("stagger", Object.assign(new N("input"), { value: "120" }));
   els.set("fl-corr", Object.assign(new N("input"), { checked: true }));
-  for (const f of ["route.js", "mailbox.js", "app.js"]) vm.runInContext(read(f), ctx);
+  for (const f of noRoute ? ["mailbox.js", "app.js"] : ["route.js", "mailbox.js", "app.js"]) vm.runInContext(read(f), ctx);
   const settle = async () => { for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r)); };
   await settle();
-  return { ctx, els, calls, replaced, timers, status, listeners, settle, get: (expr) => vm.runInContext(expr, ctx) };
+  return { warns, ctx, els, calls, replaced, timers, status, listeners, settle, get: (expr) => vm.runInContext(expr, ctx) };
 }
 
 test("canonical inbox link selects the tab, opens the dock and filters to the correspondent", async () => {
@@ -142,4 +143,21 @@ test("the poll re-renders the active tab when mail arrives from outside the page
   b.status.messages = { admitted: 1 };
   await tick(); await b.settle();
   assert.ok(loads() > before, "a changed message count re-renders without a reload or inject click");
+});
+
+test("a missing route.js warns visibly and the app still boots", async () => {
+  const b = await boot({ noRoute: true, hash: "#tab=events" });
+  assert.ok(b.warns.some((w) => /route\.js is missing/.test(w)));
+  assert.equal(b.get("state.tab"), "messages");
+  assert.deepEqual((await boot()).warns, []);
+});
+
+test("the deciding resume hint needs a committed decision and a decision button", async () => {
+  const b = await boot();
+  const card = { message_id: "m0001", state: "deciding", decision: "legitimate", decided_by: "boss", attack_classes: [], attachments: [], category: "other", priority: "p1" };
+  const text = (c, buttons) => b.ctx.reviewCard(c, buttons).text;
+  assert.match(text({ ...card, decision_entry_id: "bm00002" }, true), /press the same button to resume/);
+  assert.match(text({ ...card, decision_entry_id: "bm00002" }, false), /decision in progress/);
+  assert.match(text({ ...card, decision_entry_id: null }, true), /decision in progress/);
+  assert.doesNotMatch(text({ ...card, decision_entry_id: null }, true), /resume/);
 });

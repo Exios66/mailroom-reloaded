@@ -12,13 +12,13 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-10 (status refreshed against `main` @ `9c7f22a`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
+**As of:** 2026-10-10 (status refreshed against `main` @ `093ee2e` plus open PR #80; the full day's progress is logged in Section 3.5; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
 row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
 the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `9c7f22a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in a docstring-only PR), so no PR is open |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `093ee2e`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open:** #80 (`claude/scan-fixes`, head `7177db5`: first-scan bug fixes, Dockerfile/compose/bind-guard fixes, CodeRabbit threads resolved; awaiting the owner's merge call) |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -139,7 +139,7 @@ Dependabot alerts open (`uv.lock:368`, R-09).
 
 DONE: Tasks 1-7 (serve, engine, api client, terminal, boot, pipeline + shell
 commands). Task 8 PARTIAL: R-10 (nine-point live browser checklist re-run with
-committed evidence; still open 2026-10-10, no `docs/evidence/` exists). `feat/tui-brand-theme` is fully merged (PR #13); nothing
+committed evidence; partly done 2026-10-10, see R-10 and `docs/evidence/2026-10-10-tui-live-check/`). `feat/tui-brand-theme` is fully merged (PR #13); nothing
 stranded. `docs/TUI.md` matches code (22 commands, 6 themes; file map completed by R-11). Out-of-plan
 additions that exist and are accepted: `ledger`, `replay`, `jev` commands,
 `/ui` replay links (broader than the "one link" constraint; accepted).
@@ -168,7 +168,24 @@ DONE: phases 1.1-1.7, 2.1-2.5, CD19 (no GitHub Actions; local `tools/ci.sh`).
 Verified: `bash tools/ci.sh` exit 0 on `f650cfd`. 88 scenarios (A17 B8 C11 D6 E13 F5 G12 S10 T6);
 30 `review`, 57 `draft`, 1 deprecated, **0 frozen**. Smoke set matches reloaded's
 `sandbox/fixtures/smoke/manifest.json` (A1, A3, B1, D1, E1, F1).
-Open: 1.8 and 2.6 (no tag or release exists, but `content.lock` already pins `v0.5.0`), phase 3.
+Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
+
+### 3.5 Progress log, 2026-10-10 (reloaded; newest last)
+
+| PR / issue | What landed | Evidence |
+| --- | --- | --- |
+| #54-#57, #60 | Outbound links, live SSE follow, panels, lucid salvage, 11 follow-up fixes | Section 3.3 and Phase 3 |
+| #58, #59 | Governance (issue forms, PR template, `AGENTS.md`), OTLP import and `mailroom replay` CLI | Governance block |
+| #61 | Phase 6 sub-plan (`2026-10-10-pipeline-tui-wiring.md`) | file in tree |
+| #62 | Browser checks run by script (`scripts/tui_replay_check.mjs`, nine-point checklist), committed evidence in `docs/evidence/2026-10-10-tui-live-check/`, staged screenshots and manifest in `docs/demo/`, release-notes tool `scripts/demo_release_notes.py` | R-10 |
+| #77 | 16 missing sandbox docstrings ported from #23 (docstring-only; AST-checked against `main`) | R-03 |
+| #78 | `inbox` TUI command (B11), `/tui#inbox` deep link, `GET /links` `sandbox_url` (`MAILROOM_SANDBOX_URL`), sandbox UI hash routes (`ui/route.js`), Correspondent-filtered Boss mailbox dock, live Ingress-table browser check (`scripts/tui_inbox_check.mjs`), demo shots 19-20 | sandbox JS tests, browser check |
+| #23 | Closed with an explanatory comment (D1) | R-03 |
+| #80 (open) | See "Scan fixes and Docker verification" under Phase 3 | local gates; Docker builds NOT run |
+| #81-#84 | Issues for the Docker work that could not be done here (app image, compose stack, sandbox container, smoke automation) | Phase 3 |
+| #63-#76 | One tracking issue per remaining Phase 6 / R-series item (see Phase 3 and Phase 6) | issue tracker |
+
+Counts last measured (this machine): `ruff` clean; `pytest` full run green except the 6 environmental root-user `tests/sandbox/test_server_deploy.py::test_startup_bind_policy` cases that also fail on `main`; one flaky test seen once (`tests/storage/test_span_store.py::test_concurrent_writers_share_the_wal_file`). There is no CI (`.github/workflows` does not exist), so PRs carry no statuses; gates are local.
 
 ---
 
@@ -192,9 +209,9 @@ Steps are checkboxes; tick them in this file as part of the PR that completes th
 #### X-01: Release and H-series sequence (both repos). Needs: D2
 Content `feat/heldout-h-series` (PR #5) adds scenarios H1-H28 (116 total), 27 templates, changes the name
 pattern to `^[A-HST]...`; reloaded PR #44 changes the same pattern and adds `mailroom sandbox conformance --heldout`.
-`content.lock` pins `v0.5.0` at `f650cfd`, which is **not published**, so `mailroom sandbox content pull` fails today.
-Recommended order (so `v0.5.0` still means `f650cfd`):
-- [ ] Content: **K-01 first** (the sha256 changes with the `zstandard` version; only 0.25.0 reproduces the lock). Then on clean `main` run `tools/release.sh --push` to publish `v0.5.0` + bundle; confirm the sha256 equals the lock's `7a32e86e...`.
+`content.lock` pins `v0.5.0` at `f650cfd`, which is published (asset sha256 `7a32e86e...` matches the lock).
+Recommended order:
+- [x] Content: `v0.5.0` published from `f650cfd`; the asset sha256 equals the lock's `7a32e86e...`. (K-01 still matters for rebuilding other tags: the sha256 changes with the `zstandard` version; only 0.25.0 reproduces the lock.)
 - [ ] Content: merge PR #5 (H-series); in its own PR bump `content.json` version to `0.6.0`, run `tools/release.sh --push`.
 - [x] Reloaded: merge PR #44 (done, `8e8522a`); then `mailroom sandbox content bump --tag v0.6.0` in its own PR (updates `sandbox/content.lock`).
 - [ ] Verify: `mailroom sandbox content pull && mailroom sandbox content validate && mailroom sandbox conformance --content smoke` all pass.
@@ -211,7 +228,7 @@ operating points in `eval/jev_calibration.py`; `--dataset-repo/--config` flags; 
 #### R-03: Decide and resolve the two Correspondent/Boss mailbox PRs. Needs: D1
 PR #44 and PR #23 implement near-identical mailbox code (`sandbox/server/mailbox.py`, `ui/mailbox.js`, `tests/sandbox/js/mailbox.test.mjs`).
 PR #23 is CONFLICTING (CHANGELOG.md, `agents/judge.py`, `ingest/clerk.py`, `llm/retry.py`), its 3-dot diff touches 61 files despite saying "no pipeline changes", and it still carries the Correspondent-v2 triage (53/88 scenarios pass alone; author calls the LOFO numbers optimistic).
-**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). **Closed 2026-10-10** (owner decision D1): its content was already re-cut into #44 (`5c1bb7f`, `92e1fef`, `19b81dc`, `cdcec60`); the leftover sandbox docstrings were ported in a docstring-only PR and #23 was closed with an explanatory comment. The 88-scenario baselines were not carried over (not reproducible against the unpublished `v0.5.0` pack and older than `main`'s fixes).
+**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). **Closed 2026-10-10** (owner decision D1): its content was already re-cut into #44 (`5c1bb7f`, `92e1fef`, `19b81dc`, `cdcec60`); the leftover sandbox docstrings were ported in a docstring-only PR (#77) and #23 was closed with an explanatory comment. The 88-scenario baselines were not carried over (not reproducible against the smoke fixture, as the `v0.5.0` pack was not yet published then and older than `main`'s fixes).
 Recommended:
 - [x] Land #44 (fresh from `main`, mailbox + held-out harness + `AGENTS.md` + `docs/HELD_OUT_SCENARIOS.md`).
 - [x] Re-cut #23's triage v2 as a new PR on top of #44 (already on `main` through #44; only docstrings were left, ported separately) (rebase, then diff against `main` to separate real changes from formatting; no pipeline files unless justified).
@@ -237,7 +254,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 - **R-09 chromadb alerts.** [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
 
 #### `/tui`
-- **R-10 Live checklist.** PARTLY DONE 2026-10-10 (evidence: `docs/evidence/2026-10-10-tui-live-check/README.md`, screenshots `docs/demo/`). [x] Ran `scripts/tui_replay_check.mjs` (default run, seeded run, token variant: all checks passed) and the nine-point checklist by script against `scripts/tui_dev.sh`; points 1-5, 7, 8, 9 passed. [x] Committed screenshots/output to `docs/evidence/2026-10-10-tui-live-check/` and `docs/demo/`. [ ] Point 6 only partly evidenced: mid-session kill passes, but "reload shows `mailroom closed`" needs a served page with a dead API, so it was simulated by blocking `/v1`; reword the `docs/TUI.md` item. [ ] Walk was headless and scripted, not done by hand on a physical keyboard or in a headed browser; leave Task 8 Step 3 unticked until a person has done that once.
+- **R-10 Live checklist.** PARTLY DONE 2026-10-10 (evidence: `docs/evidence/2026-10-10-tui-live-check/README.md`, screenshots `docs/demo/`). [x] Ran `scripts/tui_replay_check.mjs` (default run, seeded run, token variant: all checks passed) and the nine-point checklist by script against `scripts/tui_dev.sh`; points 1-5, 7, 8, 9 passed. [x] Committed screenshots/output to `docs/evidence/2026-10-10-tui-live-check/` and `docs/demo/`. [x] Point 6 only partly evidenced: mid-session kill passes, but "reload shows `mailroom closed`" needs a served page with a dead API, so it was simulated by blocking `/v1`; the `docs/TUI.md` item is reworded (PR #80). Tracked by issue #73. [ ] Walk was headless and scripted, not done by hand on a physical keyboard or in a headed browser; leave Task 8 Step 3 unticked until a person has done that once.
 - **R-11 Doc drift.** DONE (#57; `docs/TUI.md` file map lists `ledger.js`, `replay.js`, `deeplink.js`, `replay/`). [x] Add `ledger.js`, `replay.js`, `deeplink.js`, `replay/` to the `docs/TUI.md` file map.
 
 #### Trace replay
@@ -256,6 +273,24 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
   - [x] Replay viewer: the inspector shows the run's `phoenix ↗` / `grafana ↗`; `o` / `g` open them (noopener).
   - [x] Tests: `tests/api/test_api.py` (`/links` + per-run links), `tests/tui/js/replay-command.test.mjs` (viewer links/keys); docs + CHANGELOG.
   - Decisions (assumed unless the owner says otherwise): link-out (not embed); Grafana target dashboard `mailroom-quality`; URLs from env with localhost defaults.
+
+#### Scan fixes and Docker verification (PR #80, issues #81-#84)
+
+Source: a first-scan audit of the repo plus a worker-run check of the Dockerfile and compose findings. Each fix below has a regression test unless marked.
+- [x] **Ledger shutdown gate.** `Ledger.close()` / `reset_ledger()` report whether the writer thread stopped; the sandbox `_repoint()` refuses to dispose the database if it did not. A late write after `rmtree` used to land silently in the fresh DB file, so only an `rmtree`-spy test proves it (verified to fail without the fix). Files: `storage/ledger.py`, `sandbox/server/pipeline_runner.py`.
+- [x] **Bind guard sees uvicorn's own `--host`.** `uvicorn ... --host 0.0.0.0` with no token used to start unauthenticated (reproduced before and after). Precedence: a literal `--host` beats `UVICORN_HOST`; `MAILROOM_API_HOST` is always checked; `mailroom serve` exports both. `mailroom serve --host 0.0.0.0` already refused (finding refuted).
+- [x] **Sandbox UI:** no inline `style=` (CSP has no `style-src`), `.num` class, horizontal overflow, `deciding` hint only when the decision entry exists, `console.warn` if `route.js` is missing.
+- [x] **Dev seed:** `scripts/tui_dev.sh` runs the eval seed; `scripts/demo_seed_eval_runs.py` reuses `init_db` and the eval runner's table helper. Dead `inbox` `complete` hook removed.
+- [x] **Docker (static, CONFIRMED):** `deploy/Dockerfile` never copied `schemas/` so the install failed with "Forced include not found" (replayed with `uv`); the runtime image copies only `/opt/venv`, so the install is now `uv sync --no-editable`. `Dockerfile.dev` copies `schemas/` too.
+- [x] **Compose env passthrough:** documented variables were dropped (`MOCK_BASE_URL`, `MAILROOM_TRACE_KEEP`, `MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `JEV_API_KEY`, `TYPESAFE_API_KEY`); now null-valued passthroughs, checked with `docker compose config`. Header notes on `.env` location (compose reads `.env` next to the `-f` file; use `--env-file .env`) and `deploy/README.md` "Compose notes".
+- [x] **Collector** stays `user: "0:0"`: non-root works only with the Docker socket gid as `group_add` (permission denied otherwise); recipe documented, change reverted as a regression risk.
+- [x] CodeRabbit's four threads on #80 fixed, replied to and resolved. The docstring-coverage warning (77.78% vs 80%) was not acted on (see D4).
+- [ ] **NOT VERIFIED (blocked: the egress proxy returns 403 for `ghcr.io/astral-sh/uv:0.8.22`, so no image can be built here; Docker Hub pulls work and dockerd runs):** both app image builds (lean, ML), importing the package from `/opt/venv`, uid 10001, `/data` writes, `HEALTHCHECK`, the in-container bind-guard refusal, `compose up`, the sandbox image. The mock-provider/`MOCK_BASE_URL` requirement is from reading `llm/client.py:113-116` only.
+- [ ] Issue #81: build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
+- [ ] Issue #82: launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
+- [ ] Issue #83: sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
+- [ ] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
+- [ ] **Audit items deliberately not fixed (all low severity, unrequested):** upload size cap enforced after spooling; ledger thread start/close race; `metrics._merge`; anchor retry blocking; `audit_log.append` chain read and dead retry; `jev_config` ValueError; `_jev_api_key` fallback for the `local` provider. Open one `follow-up` issue per item when the owner wants them.
 
 #### Deferred follow-ups from PRs #54-#57
 
@@ -291,7 +326,7 @@ Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, 
 Added 2026-10-09 after a fault-injection and integration audit. Design, evidence and
 rejected options: [`../specs/2026-10-09-content-pack-hardening-design.md`](../specs/2026-10-09-content-pack-hardening-design.md).
 Every number below was measured on content `f650cfd` / reloaded `df249e2` unless it says "reported".
-Order: K-00 first; K-01 gates X-01 (do it before publishing `v0.5.0`); K-02..K-06 in any order, each its own PR; K-08 rides with R-03.
+Order: K-00 first; K-01 still matters for rebuilding other tags (`v0.5.0` is already published); K-02..K-06 in any order, each its own PR; K-08 rides with R-03.
 K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh` must pass; paste the result line in the PR). K-08 is reloaded-side.
 
 #### K-00: Reconcile with work already in flight. Do this first.
@@ -302,13 +337,13 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 - [ ] Re-run `git fetch --all --prune` in both repos; update this block if PR state changed.
 
 #### K-01: Make the bundle sha256 reproducible. Blocks X-01.
-**Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the lock's own comment says the pin is of a *local* build that is not published.
+**Why (measured):** `tools/build_bundle.py` is documented as "same commit, same sha256", but the digest depends on the `zstandard` version. Same commit `f650cfd`, same tar: zstandard 0.25.0 gives `7a32e86e...` (the value pinned in `sandbox/content.lock`); zstandard 0.23.0 gives `c6dafadb...`. Anyone rebuilding with another version cannot reproduce the pin, and the pin was first taken from a local build (the pack has since been published with the same sha256).
 **Where:** content `tools/build_bundle.py`, `tools/release.sh`, new `tools/requirements.txt`, `CONTENT_SPEC.md` section on releases.
 - [ ] Pin `zstandard==0.25.0` in `tools/requirements.txt`; `build_bundle.py` always prints the version and, under `--release` (passed by `release.sh` only; unit tests build without it), refuses any other version with a clear message.
 - [x] Also write `tar_sha256` (digest of the uncompressed deterministic tar, which does not depend on zstd) to a separate `BUILD_INFO` release asset with the `zstandard` version, so reproducibility can be checked across compressor versions. `SHA256SUMS` stays two lines (an extra line would break `sha256sum -c`). Do **not** change the lock's six fields (the schema in `sandbox/content/lock.py` rejects extras). Done in content `840e4e8` (pinned `zstandard==0.25.0` in `tools/requirements.txt`; `--release` refuses other versions).
 - [ ] Test: build twice, same bytes; build with a wrong zstandard version, expect a refusal (unittest with the version string patched).
 - [ ] Doc: state that the **published asset's bytes** are the verification authority for a download; rebuilds are an audit.
-- [ ] After merge, X-01 publishes `v0.5.0` from `f650cfd` **using the pinned version**; confirm the asset sha256 equals `7a32e86e...` before touching the lock.
+- [x] `v0.5.0` is already published from `f650cfd` and its asset sha256 equals the lock's `7a32e86e...`; any rebuild must use the pinned `zstandard` version and be compared against that sha256 before touching the lock.
 
 #### K-02: Content tooling must never crash or silently accept bad data
 **Why (measured):** 28 faults injected into a copy of the repo, `tools/validate.py --strict-coverage` run on each: 21 fail cleanly, **4 crash with a traceback**, **2 corrupt data are accepted**, and **1 oversized scenario is accepted** (informational: no size cap), totaling 28 faults. The harness also includes a valid CRLF control: 29 cases = 21 CLEAN-FAIL + 4 CRASH + 4 MISSED (the two corrupt inputs, oversized scenario and CRLF control):
@@ -362,7 +397,7 @@ C-01 to C-07 above remain the content-completeness list. K-series items do not r
 #### K-08: Reloaded-side hardening that the pack cannot fix
 - [x] **Loader reports instead of raising.** `sandbox/content/loader.py` records per-file content read and JSON/YAML parse failures in `ValidationReport.errors` with the file path, including smoke manifest digest reads. `CompatError` still raises. `mailroom sandbox content validate` and the initial `build` load surface the report and exit 1. Regression coverage: `tests/sandbox/test_content_validation.py` and `tests/sandbox/test_content_cli.py`.
 - [ ] **Boss decision lifecycle must be recoverable.** PARTLY DONE in #44's review fixes: a decision is recorded in a persisted `deciding` state, retries resume the remaining steps and conflicting retries get 409; a crash between queuing a draft and recording its id can still duplicate one draft. Both CodeRabbit reviews (#23, #44) report that a Boss decision can be marked terminal before its effects (attachment actions, drafting) finish, and that restart does not reconcile mailbox, review state and attachment state. Already recorded as follow-up in #44; when R-03 re-cuts the work, require an idempotent, decision-keyed apply step and startup reconciliation. Also keep hard quarantine distinct from a soft review hold (the same reviews flag that a `legitimate` decision can release a hard-quarantined handoff).
-- [ ] Docstring coverage warnings on #23 and #44 (63.9% and 77.9% against 80%) are cosmetic but block the pre-merge check; handle with the R-18 docstring decision (D4).
+- [ ] Docstring coverage warnings on #23, #44 and #80 (63.9%, 77.9%, 77.78% against 80%) are cosmetic but block the pre-merge check. The 16 sandbox docstrings from #23 landed in #77; a repo-wide pass is the R-18 docstring decision (D4) and is not started.
 
 ### Phase 5: cross-repo contract and hygiene
 
@@ -371,7 +406,7 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 - [ ] Do K-05. Reloaded's root `schemas/` remains the contract owner (content-plan CD8).
 
 #### X-02: Retire merged and dead branches (destructive; needs owner approval, D4)
-_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`. `feat/sandbox-correspondent-tuning` (#23, now closed, not merged) is deletable too; same 403 block._
+_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`. `feat/sandbox-correspondent-tuning` (#23, now closed, not merged) is deletable too; same 403 block. Also deletable once merged: `claude/sandbox-docstrings` (#77), `claude/inbox-deeplink` (#78), `claude/demo-evidence` (#62), `claude/plan-pipeline-wiring` (#61) and, after the owner merges #80, `claude/scan-fixes`._
 - [ ] Safe (fully merged): reloaded `docs/mailroom-reloaded-design`, `feat/mailroom-reloaded-completion`, `feat/tui-brand-theme`, all 12 `claude/trace-replay-*`.
 - [ ] After R-18 is done: `claude/mailroom-reloaded-build`, `coderabbit/*` (all four).
 - [ ] After D5: `revert-26-claude/mailroom-trace-replay-plan-5nj1nk` (reverts rev 4 of the old plan; conflicts with main, which built on it; no PR).
@@ -387,7 +422,7 @@ _Status 2026-10-10: every branch below was verified (merged into `origin/main`, 
 
 ### Phase 6: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring
 
-Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. R-04, R-07 and the live Grafana/Modal checks still need Docker or owner credentials and stay unticked until evidenced under `docs/evidence/`.
+Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. **Status 2026-10-10:** B11 `inbox` is shipped (#78). Docker groundwork in #80 (Dockerfile `schemas/` and `--no-editable`, compose env passthrough, bind-guard fix) is static-verified only. Tracking issues: #63 (P6-A), #64 (B1-B4), #65 (B5-B10), #66 (C1-C5, R-05), #67 (D1-D6, R-04), #68 (E1-E6, R-07), #69 (F1-F4), and #81-#84 for building and launching the Docker images. R-04, R-07 and the live Grafana/Modal checks still need Docker (with ghcr access) or owner credentials and stay unticked until evidenced under `docs/evidence/`.
 
 ---
 
@@ -414,10 +449,11 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 ## 6. Definition of done for this plan
 
 - [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [x] Re-run on `main` plus #44/#59 changes 2026-10-10: reloaded `ruff` clean, `pytest --ignore=tests/sandbox` 1520 passed, `node --test tests/tui/js` 235 pass, `tests/sandbox` 745 passed with 6 root-user `test_startup_bind_policy` failures (environmental). Content repo not re-run.
-- [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
-- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10); no open PR without an owner.
+- [x] `v0.5.0` published. [ ] `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
+- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [ ] PR #80 merged (open, owner call pending).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
+- [ ] Docker images build and the compose stack launches with evidence under `docs/evidence/` (issues #81-#84, P6-D4); until then every Docker claim in this plan is static-only.
 - [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).

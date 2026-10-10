@@ -1,6 +1,6 @@
 # Plan: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring (Phase 6)
 
-> Parent: `2026-10-09-mailroom-core-plan.md` (Phase 6). Status of this file: **draft for owner review**, written 2026-10-10 against `main` @ `502995a`. Nothing here is implemented yet. Items are checkboxes; tick them in the PR that ships them, and cite the evidence path.
+> Parent: `2026-10-09-mailroom-core-plan.md` (Phase 6). Status of this file: **draft for owner review**, written 2026-10-10 against `main` @ `502995a`. **Progress 2026-10-10:** only B11 `inbox` is implemented (#78); the Docker groundwork in PR #80 (Dockerfile `schemas/` and `--no-editable`, compose env passthrough, bind guard) is statically verified, with image builds and `compose up` still unrun (issues #81-#84). Tracking issues per phase: #63 (A), #64 (B1-B4), #65 (B5-B10), #66 (C), #67 (D), #68 (E), #69 (F). Items are checkboxes; tick them in the PR that ships them, and cite the evidence path.
 
 ## 0. Goal
 
@@ -68,6 +68,7 @@ Each command is read-only unless marked (control).
 - [ ] **D4 compose smoke (R-04)**: run on a host with Docker: bring the stack up, hit `/ready`, run one sample document through, confirm a trace in Phoenix and a series in Prometheus, capture `docs/evidence/<date>-compose-smoke/` (command log, `docker compose ps`, `/ready` JSON, screenshots of the TUI, Phoenix and Grafana). **Needs an owner or CI runner with Docker.**
 - [ ] **D5 CI job** `compose-smoke` (workflow_dispatch + nightly) running D4 headlessly; uploads evidence as an artifact.
 - [ ] **D6 `docs/OPERATIONS.md`**: one runbook for ports, volumes, backups, upgrade, reset, and how each `ready` state maps to a fix.
+- Groundwork already in PR #80 (static only, not yet run): Dockerfile `schemas/` copy and `--no-editable`, compose passthrough of documented env vars, `.env` location notes. Build and launch verification: issues #81-#84.
 
 ### P6-E: Modal infrastructure
 - [ ] **E1 `deploy/modal_vllm.py` hardening**: pin image tags, health route used by the app, `MODAL_*` knobs documented in one table, scaledown and max-containers defaults chosen for cost.

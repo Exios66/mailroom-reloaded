@@ -5,6 +5,11 @@
 #   docker compose -f deploy/docker-compose.yml --profile split-watcher up -d      # standalone watcher
 #       (set MAILROOM_EMBED_WATCHER=0 so `app` does not also run a watcher)
 # MAILROOM_API_TOKEN is required: the app binds 0.0.0.0 and refuses to start without it.
+# NOTE: compose reads `.env` from the directory of the -f file (deploy/), not the repo
+# root. With a root-level .env, pass `--env-file .env`.
+# DEFAULT_PROVIDER=mock needs MOCK_BASE_URL (an OpenAI-compatible fake; see
+# docker-compose.dev.yml) or the first model call raises; set DEFAULT_PROVIDER=vllm,
+# llamafile or openrouter for a real deployment.
 
 x-app-env: &app-env
   MAILROOM_BASE_DIR: /data
@@ -18,6 +23,24 @@ x-app-env: &app-env
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_SERVICE_NAME: mailroom
   HF_HOME: /hf_cache
+  # Optional passthroughs: forwarded only when set in the compose environment (or
+  # `--env-file`), so app defaults are untouched. Each is read by src/mailroom_reloaded.
+  MOCK_BASE_URL:
+  MAILROOM_TRACE_KEEP:
+  MAILROOM_ANCHOR:
+  MAILROOM_ANCHOR_URL:
+  MAILROOM_ANCHOR_KEY:
+  MAILROOM_ANCHOR_KEY_FILE:
+  MAILROOM_JEV_PROVIDER:
+  MAILROOM_JEV_MODEL:
+  MAILROOM_JEV_BASE_URL:
+  MAILROOM_JEV_API_KEY:
+  JEV_API_KEY:
+  TYPESAFE_API_KEY:
+  MAILROOM_JEV_ACCEPT_THRESHOLD:
+  MAILROOM_JEV_MAX_RETRIES:
+  MAILROOM_JEV_TEMPERATURE:
+  MAILROOM_JEV_TIMEOUT_S:
 
 x-app-build: &app-build
   context: ..
@@ -61,7 +84,9 @@ services:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
     command: ["--config=/etc/otelcol/config.yaml"]
-    # docker_stats needs the Docker socket (read-only) and a matching group.
+    # docker_stats needs the Docker socket (read-only) and a matching group. Root keeps
+    # this working on every host; to run non-root instead (verified with the collector
+    # image), use `user: "10001:10001"` plus `group_add: ["<gid of /var/run/docker.sock>"]`.
     user: "0:0"
     environment:
       VLLM_METRICS_SCHEME: ${VLLM_METRICS_SCHEME:-http}

@@ -35,6 +35,7 @@ RUN apt-get update \
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --extra dev --no-install-project
 COPY src ./src
+COPY schemas ./schemas
 RUN uv sync --frozen --extra dev
 
 ARG APP_UID=1000

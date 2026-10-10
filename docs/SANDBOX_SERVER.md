@@ -219,10 +219,9 @@ between, so ingress admission control cannot hide results; the ingress policy it
 untouched), prints a per-scenario table, the per-fold report and the failed-check counts.
 No scenario was shed when run alone. Committed baselines: `tests/sandbox/conformance_baseline.json`
 and `tests/sandbox/lofo_baseline.json`. They were regenerated on this branch from the committed
-smoke fixture (6 scenarios), because the v0.5.0 bundle that `content.lock` pins is not published
-and could not be pulled. They are **not** the 88-scenario pack figures quoted below. The LOFO
+smoke fixture (6 scenarios), not from the published v0.5.0 bundle that `content.lock` pins. They are **not** the 88-scenario pack figures quoted below. The LOFO
 macro of 1.000 on six tuning scenarios is not a generalisation measure. Regenerate both files with
-`scripts/sandbox_lofo.sh <real pack dir>` once v0.5.0 is published.
+`scripts/sandbox_lofo.sh <real pack dir>` against the v0.5.0 pack.
 
 The committed `conformance_baseline.json` is not the raw `--slim` output: its two
 positional-split scenarios are relabelled under a hand-added `positional_smoke_fixture` key
@@ -280,8 +279,8 @@ diagnostics: all six scenarios were used for tuning, and no frozen-set commit SH
 or unchanged-since point is available. They are not official held-out results or evidence
 of generalisation.
 
-The tables and figures below were reported by PR #23 for the v0.5.0 pack (88 scenarios). That
-bundle is not published, so they were **not reproduced** on this branch; they are kept as that
+The tables and figures below were reported by PR #23 for the v0.5.0 pack (88 scenarios). They were
+**not reproduced** on this branch (the baselines here come from the smoke fixture); they are kept as that
 PR's record, labelled as such.
 
 PR #23, v0.5.0 pack, each scenario run alone (not reproduced here):

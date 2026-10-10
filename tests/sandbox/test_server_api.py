@@ -33,6 +33,11 @@ def test_health_ui_and_static_are_offline(live):
     assert (
         "http://" not in page and "https://" not in page
     )  # no external fetches at all
+    # the CSP forbids inline styles: no style attribute in the markup, no DOM style writes in JS
+    assert "style=" not in ui.text
+    for js in ("/ui/app.js", "/ui/mailbox.js", "/ui/route.js"):
+        src = client.get(js).text
+        assert ".style" not in src and "cssText" not in src, js
 
 
 def test_status_scenarios_policy(live):
