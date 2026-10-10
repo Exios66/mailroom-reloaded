@@ -10,6 +10,9 @@ import typer
 
 from mailroom_reloaded.sandbox.content.cli import sandbox_app
 
+#: UI deep link to the Ingress queue with the Boss mailbox dock open on the Correspondent's mail.
+INBOX_FRAGMENT = "#tab=messages&mailbox=open&role=correspondent"
+
 
 @sandbox_app.command("serve")
 def serve(
@@ -122,9 +125,9 @@ def serve(
     typer.echo(
         f"mailroom sandbox: content={loaded.kind} {root} data={data_dir.resolve()} (offline: network guard on)"
     )
-    typer.echo(
-        f"mailroom sandbox: UI http://{'127.0.0.1' if host in {'0.0.0.0', '::'} else host}:{port}/ui"
-    )
+    ui_url = f"http://{'127.0.0.1' if host in {'0.0.0.0', '::'} else host}:{port}/ui"
+    typer.echo(f"mailroom sandbox: UI {ui_url}")
+    typer.echo(f"mailroom sandbox: Inbox {ui_url}{INBOX_FRAGMENT}")
     uvicorn.run(create_sandbox_app(service), host=host, port=port, log_level="info")
 
 

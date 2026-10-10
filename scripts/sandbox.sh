@@ -17,6 +17,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT/deploy/docker-compose.sandbox.yml"
 PORT="${SANDBOX_PORT:-8100}"
 BASE="${SANDBOX_URL:-http://127.0.0.1:${PORT}}"
+# UI deep link: Ingress queue tab with the Boss mailbox dock open on the Correspondent's mail.
+INBOX_FRAGMENT="#tab=messages&mailbox=open&role=correspondent"
 
 usage() {
   sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -64,8 +66,9 @@ case "$cmd" in
     docker compose -f "$COMPOSE_FILE" up -d --build
     echo
     echo "mailroom sandbox is starting (offline: mock LLM, rule-based Correspondent stand-in, mail captured only):"
-    echo "  UI   ${BASE}/ui"
-    echo "  API  ${BASE}/api/sandbox/v1/status"
+    echo "  UI    ${BASE}/ui"
+    echo "  Inbox ${BASE}/ui${INBOX_FRAGMENT}"
+    echo "  API   ${BASE}/api/sandbox/v1/status"
     echo "Run 'scripts/sandbox.sh status' once healthy."
     ;;
   down)
@@ -85,6 +88,7 @@ case "$cmd" in
     code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$BASE/health" 2>/dev/null || true)"
     if [[ "$code" =~ ^2 ]]; then
       echo "OK    health $BASE/health -> $code"
+      echo "      Inbox ${BASE}/ui${INBOX_FRAGMENT}"
       curl -fsS --max-time 5 -H "$(auth_header)" "$BASE/api/sandbox/v1/status" \
         | python3 -c 'import json,sys; d=json.load(sys.stdin); print("      content", d["content"]["kind"], d["content"]["version"], "| messages", d["messages"], "| transmitted mail", d["egress"]["transmitted"], "| guard blocked", d["network_guard"]["blocked_attempts"])' \
         || echo "      (status needs MAILROOM_API_TOKEN)"

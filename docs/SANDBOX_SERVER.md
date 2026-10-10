@@ -56,6 +56,31 @@ scripts/sandbox.sh status | logs | down | reset
 | `--autonomy` | `human` | `human`: drafts wait for Approve. `sandbox`: Boss Desk auto-approves into the sink. |
 | `--expected / --no-expected` | on | Show scenario expected outcomes and ground-truth labels next to actual |
 
+## Deep links / view it live
+
+The UI mirrors its view into the URL fragment, so a reload or a copied URL reproduces it.
+The canonical inbox link opens the Ingress queue with the Boss mailbox dock open and
+labelled as the Correspondent's view (`serve` and `scripts/sandbox.sh status|up` print it). The mailbox only holds Correspondent/Boss entries, so `role` labels the view and `thread` is what narrows it:
+
+```text
+<sandbox>/ui#tab=messages&mailbox=open&role=correspondent
+```
+
+| key | values |
+| --- | --- |
+| `tab` | `messages` (Ingress queue), `boss`, `outbox`, `events`, `conformance`, `docs`, `policy` |
+| `scenario` | scenario id (`[A-Za-z0-9_.-]`, starting with a letter or digit, up to 64 characters), filters the Ingress queue |
+| `sel` | message id (such as `m0007`) to open in the trace panel |
+| `mailbox` | `open` or `closed`, the Boss mailbox dock |
+| `role` | `correspondent` or `boss`, keeps dock entries sent or received by that role |
+| `thread` | one `thread_id` in the dock |
+
+Unknown keys and malformed values are ignored; the first occurrence of a key wins. A
+filtered dock shows a muted "filter:" line with a "clear filter" button. The API token is
+never put in the fragment: enter it in the page (kept in `sessionStorage`). This opens the
+polling UI (it refreshes every 2 s); there is no push stream. `MAILROOM_SANDBOX_URL` on the
+main API (`GET /links`) tells other tools where the sandbox lives.
+
 ## Pointing at the full content bundle
 
 The server never downloads anything. Materialize the pinned bundle first, then
@@ -178,7 +203,8 @@ not share it with people who should only look.
   (priority is only known after triage); a thread counts as open for 30 simulated
   minutes after its last message. Scheduler windows, the circuit breaker and
   `max_recipients_per_send` are not simulated; Approve captures immediately.
-* No SSE stream, pause/resume or clock speed: the UI polls every 2 s; time is virtual
+* No SSE stream, pause/resume or clock speed: the UI polls every 2 s (a deep link opens
+  that polling UI, see above); time is virtual
   per batch (`stagger_seconds` spreads scenarios).
 * One sandbox per process: the pipeline reads its base dir, SQLite DB and endpoint from
   process globals, which `PipelineRunner` repoints at `<data-dir>/pipeline`.

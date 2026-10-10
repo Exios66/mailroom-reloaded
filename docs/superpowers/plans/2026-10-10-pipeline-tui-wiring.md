@@ -40,7 +40,7 @@ Non-goals: replacing Phoenix or Grafana (the TUI links to them and shows a thin 
 
 ### P6-B: Operator commands (TUI ↔ existing API)
 Each command is read-only unless marked (control).
-- [ ] **B1 `links`** prints `/links` and offers `o`/`g`-style open (`links open phoenix|grafana|prometheus`). Reuses the credential-free URL validation from #54.
+- [ ] **B1 `links`** prints `/links` (now including `sandbox_url`) and offers `o`/`g`-style open (`links open phoenix|grafana|prometheus`). Reuses the credential-free URL validation from #54.
 - [ ] **B2 `ready`** (`health --all` alias) renders the `/ready` table with colour-coded status and latency; `watch ready` re-polls.
 - [ ] **B3 `config`** shows non-secret effective settings (`GET /v1/config`): provider, model, base URL host, public URLs, retention, feature flags. Secrets are shown as `set`/`unset` only.
 - [ ] **B4 `replay export <session> [--out file]`** wires `GET /v1/replay/sessions/{id}/export` (browser download). Mirrors CLI `mailroom replay export`.
@@ -50,6 +50,7 @@ Each command is read-only unless marked (control).
 - [ ] **B8 `eval run <suite> [--sandbox] [--scenarios …]` (control)** posts to `/v1/evals`, returns an eval id, then `eval status|log <id>` follows it; finished evals link to `replay` and Phoenix (project filter).
 - [ ] **B9 `metrics`**: queue depth, docs/min, p50/p95 stage latency, error rate, token/cost totals from `/v1/metrics/summary` (5), with sparklines; `g` opens the matching Grafana dashboard.
 - [ ] **B10 `logs [--follow] [--level]`**: tail from `/v1/logs` (bounded ring buffer, SSE for follow). Redaction filter applied server-side.
+- [x] **B11 `inbox [--tab] [--scenario] [--message] [--thread] [--no-mailbox] [--print]`** (shipped): opens the sandbox UI's Correspondent inbox (Ingress queue plus the Boss mailbox dock, `role=correspondent`) in a new tab so a running simulation can be watched live; `/tui#inbox[=tab]` is the inbound link and `MAILROOM_SANDBOX_URL` / `GET /links` `sandbox_url` supplies the base. The sandbox is another origin with no CORS or framing, so the TUI only builds the link (the UI polls every 2 s); the token is never put in the URL. A server-side sandbox proxy for an in-TUI panel stays under D14.
 - Depends on: A1–A4. Acceptance per item in 6.6.
 
 ### P6-C: Phoenix and Grafana wiring

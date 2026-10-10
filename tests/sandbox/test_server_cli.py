@@ -53,6 +53,26 @@ def test_off_loopback_bind_requires_token(monkeypatch):
     assert "MAILROOM_API_TOKEN" in str(res.exception)
 
 
+def test_banner_prints_ui_and_inbox_deep_link(monkeypatch, tmp_path):
+    """Verify the startup banner adds the Inbox deep link next to the UI URL."""
+    import uvicorn
+
+    from mailroom_reloaded.sandbox.server.guard import NetworkGuard
+
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setattr(NetworkGuard, "install", lambda self: self)
+    res = runner.invoke(
+        cli.app,
+        ["sandbox", "serve", "--port", "8123", "--data-dir", str(tmp_path / "s")],
+    )
+    assert res.exit_code == 0, res.output
+    assert "UI http://127.0.0.1:8123/ui\n" in res.output
+    assert (
+        "Inbox http://127.0.0.1:8123/ui#tab=messages&mailbox=open&role=correspondent"
+        in res.output
+    )
+
+
 def test_bad_arguments_exit_nonzero(monkeypatch):
     """Verify missing content and invalid egress profiles return error exit codes."""
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)

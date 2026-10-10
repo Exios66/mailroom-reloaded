@@ -30,8 +30,24 @@
     return entries.filter((e) => e.status === "new" || (e.kind === "hostile_forward" && pend.has(e.message_id))).length;
   }
   /**
+   * Narrow entries client-side: role keeps entries sent or received by that role,
+   * thread keeps one thread_id. A missing filter keeps everything.
+   */
+  function filterEntries(entries, f) {
+    const role = f && f.role, thread = f && f.thread;
+    return entries.filter((e) => (!role || e.sender_role === role || e.recipient_role === role) && (!thread || e.thread_id === thread));
+  }
+  /** Return a muted line naming the active filter with a button that calls onClear, or null without a filter. */
+  function filterLine(o) {
+    if (!o.role && !o.thread) return null;
+    const btn = node("button", "small", "clear filter");
+    btn.addEventListener("click", () => { if (o.onClearFilter) o.onClearFilter(); });
+    return node("div", "muted mbx-filter", "filter: " + [o.role && "role=" + o.role, o.thread && "thread=" + o.thread].filter(Boolean).join(" "), " ", btn);
+  }
+  /**
    * Return a detached mailbox view grouped by thread in first-seen order.
-   * opts.pending is a set of message IDs. Pending forwards offer buttons only
+   * opts.role / opts.thread filter the entries and add a muted line with a clear button
+   * that calls opts.onClearFilter. opts.pending is a set of message IDs. Pending forwards offer buttons only
    * when opts.onDecide exists; clicks pass (messageId, decision, reason) to it.
    * opts.isDeciding reflects the shared request guard, including after a rerender.
    * Rendering does not fetch data or change entry status.
@@ -39,13 +55,14 @@
   function renderMailbox(entries, opts) {
     const o = opts || {};
     const pend = o.pending || new Set();
-    const wrap = node("div", "mbx");
-    if (!entries.length) {
-      wrap.append(node("p", "muted", "The Boss mailbox is empty."));
+    const wrap = node("div", "mbx", filterLine(o));
+    const shown = filterEntries(entries, o);
+    if (!shown.length) {
+      wrap.append(node("p", "muted", entries.length ? "No mailbox entries match the filter." : "The Boss mailbox is empty."));
       return wrap;
     }
     const threads = new Map();
-    for (const e of entries) {
+    for (const e of shown) {
       if (!threads.has(e.thread_id)) threads.set(e.thread_id, []);
       threads.get(e.thread_id).push(e);
     }
@@ -76,5 +93,5 @@
     }
     return wrap;
   }
-  root.sbxMailbox = { renderMailbox, unread, summarize };
+  root.sbxMailbox = { renderMailbox, filterEntries, unread, summarize };
 })(typeof window !== "undefined" ? window : globalThis);

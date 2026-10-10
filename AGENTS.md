@@ -353,7 +353,7 @@ Needs the `gmail` extra; OAuth token/state live under the base dir
 
 - `/tui` is a browser terminal served by the API (`src/mailroom_reloaded/api/tui/`),
   static ES modules, no build step. Commands include `ls`, `inspect`, `audit`,
-  `jev`, `review`, `resolve`, `runs`, `ledger`, `replay`, `cards`, `auth`
+  `jev`, `review`, `resolve`, `runs`, `ledger`, `replay`, `inbox`, `cards`, `auth`
   (`docs/TUI.md`).
 - `/ui` is the vanilla-JS runs/documents page (`api/ui/index.html`).
 - Host harness: `scripts/tui_dev.sh up|down|status` (mock LLM + API + embedded

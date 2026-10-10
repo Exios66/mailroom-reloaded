@@ -271,10 +271,11 @@ class Settings(BaseSettings):
     gpu_usd_per_hour: float = 0.80
     # Public base URLs for the UI's outbound observability links (GET /links). With the
     # ``MAILROOM_`` env prefix these read ``MAILROOM_PUBLIC_URL`` / ``MAILROOM_PHOENIX_URL``
-    # / ``MAILROOM_GRAFANA_URL``. No secret is stored here: each must be a plain http(s) URL without credentials.
+    # / ``MAILROOM_GRAFANA_URL`` / ``MAILROOM_SANDBOX_URL``. No secret is stored here: each must be a plain http(s) URL without credentials.
     public_url: _LinkUrl = "http://localhost:8000"
     phoenix_url: _LinkUrl = "http://localhost:6006"
     grafana_url: _LinkUrl = "http://localhost:3000"
+    sandbox_url: _LinkUrl = "http://localhost:8100"
     #: Phoenix project name echoed by ``GET /links`` (``MAILROOM_PHOENIX_PROJECT``); the tracing
     #: resource attribute ``openinference.project.name`` reads the same variable.
     phoenix_project: str = "mailroom-live"
