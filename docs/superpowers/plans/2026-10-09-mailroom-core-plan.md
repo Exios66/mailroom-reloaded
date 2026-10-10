@@ -289,7 +289,7 @@ Source: a first-scan audit of the repo plus a worker-run check of the Dockerfile
 - [x] Issue #81 (lean; ML build skipped): build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
 - [x] Issue #82 (`mock` profile added; collector kept root): launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
 - [x] Issue #83 (favicon 404 fixed): sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
-- [x] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
+- [x] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests. (The opt-in `.github/workflows/docker-smoke.yml` was removed on 2026-10-10: the owner's account cannot run GitHub Actions.)
 - [ ] **Audit items deliberately not fixed (all low severity, unrequested):** upload size cap enforced after spooling; ledger thread start/close race; `metrics._merge`; anchor retry blocking; `audit_log.append` chain read and dead retry; `jev_config` ValueError; `_jev_api_key` fallback for the `local` provider. Open one `follow-up` issue per item when the owner wants them.
 
 #### Deferred follow-ups from PRs #54-#57

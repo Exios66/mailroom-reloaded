@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `.github/workflows/docker-smoke.yml`, the repository's only GitHub Actions workflow: the owner's account cannot run Actions right now, so every PR showed a failing `docker-smoke` check that never started ("account is locked due to a billing issue"). `scripts/docker_smoke.sh` and `tests/deploy/test_docker_smoke.py` are unchanged and still run locally. References updated in `AGENTS.md` §8.2, `deploy/README.md` and the master plan. Docs/config only; no code change.
+
 ### Added
 
 - Docker smoke automation (issue #84): `scripts/docker_smoke.sh [--no-build] [--keep] [--only app|sandbox|compose]` builds the lean app and sandbox images, runs them and checks the compose files (exit 0 ok, 1 failed, 2 prerequisite missing; prints `DOCKER SMOKE OK`; removes everything named `mrl-smoke*`). `tests/deploy/test_docker_smoke.py` wraps it behind the new `docker` pytest marker (deselected by default) and adds always-on guards that every project Dockerfile copies `schemas/` and the runtime install is `--no-editable`. `.github/workflows/docker-smoke.yml` is the first workflow: opt-in by paths, `contents: read`, actions pinned by SHA. Documented in `deploy/README.md` and `AGENTS.md` sections 6 and 8.2.
