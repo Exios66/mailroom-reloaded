@@ -1,8 +1,15 @@
 # syntax=docker/dockerfile:1
-# mailroom-reloaded runtime image: multi-stage, uv-installed, non-root (uid 10001).
+# mailroom-reloaded runtime image: optimized multi-stage, uv-installed, non-root (uid 10001).
 #
-#   Lean (OpenRouter / vLLM only): docker build -f deploy/Dockerfile --build-arg ML_BUILD_NONE=1 --build-arg UV_EXTRAS= .
-#   Default (ModernBERT bundle):   docker build -f deploy/Dockerfile .
+# Layer strategy:
+#   1. builder: uv + Python deps (heavy, cached unless pyproject.toml/uv.lock change)
+#   2. model: HuggingFace bundle or empty stub (model layer only invalidates on revision)
+#   3. runtime: slim Python + venv + models (small, fast startup, secure)
+#
+# Usage:
+#   Production with BERT:       docker build -f deploy/Dockerfile .
+#   Production lean (OpenRouter/vLLM only): docker build --build-arg ML_BUILD_NONE=1 --build-arg UV_EXTRAS= -f deploy/Dockerfile .
+#
 # Build context is the repository root.
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm

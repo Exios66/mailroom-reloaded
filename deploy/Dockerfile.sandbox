@@ -1,10 +1,15 @@
 # syntax=docker/dockerfile:1
-# mailroom-reloaded SANDBOX image (ingress simulation server, fully offline).
+# mailroom-reloaded SANDBOX image: minimal, self-contained, fully offline.
 #
-# Small on purpose: the `sandbox` extra only (jsonschema, zstandard, jinja2), no
-# ModernBERT, no dev tools, no observability stack. The source is COPIED in (no
-# bind mount) so the image is self-contained and deployable on a dev server.
-# Build context is the repository root.
+# Design:
+#   - Ingress simulation server with no database/audit/production services
+#   - Only `sandbox` extra: jsonschema, zstandard, jinja2 (tiny layer)
+#   - No ModernBERT, no dev tools, no observability stack
+#   - Source COPIED in (no bind mount) — image is fully portable
+#   - Non-root app user; stateless except /state volume
+#
+# Build context: repository root
+# Usage:  docker build -f deploy/Dockerfile.sandbox .
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 

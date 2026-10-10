@@ -1,15 +1,16 @@
 # syntax=docker/dockerfile:1
-# mailroom-reloaded DEV image (spec §9, deploy/docker-compose.dev.yml).
+# mailroom-reloaded DEV image: optimized for hot reload with uvicorn --reload.
 #
-# Differs from deploy/Dockerfile on purpose:
-#   * no ModernBERT model stage and no `bert` extra (dev defaults to the `mock`
-#     provider, so no weights are needed and the build stays CPU-only)
-#   * installs the `dev` extra (pytest, ruff, respx) so the dev suite can run
-#     inside the container if wanted
-#   * expects the repository `src/` to be bind-mounted at /app/src with
-#     PYTHONPATH=/app/src, so `uvicorn --reload` picks up live edits
+# Design:
+#   - python:3.11-slim: minimal base
+#   - uv for fast dependency resolution and caching
+#   - installs `dev` extra (pytest, ruff, respx) for in-container test runs
+#   - expects repository `src/` bind-mounted at /app/src with PYTHONPATH=/app/src
+#   - uvicorn --reload watches the mounted source and reloads on file changes
+#   - non-root app user for security (configurable UID via APP_UID arg)
 #
-# Build context is the repository root.
+# Build context: repository root
+# Usage:  docker build -f deploy/Dockerfile.dev .
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 
