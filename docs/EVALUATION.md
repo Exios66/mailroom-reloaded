@@ -64,9 +64,12 @@ result is stored as JSON in `eval_runs.overlap_check` (`status: completed` with
 `overlapping_count`, up to five `overlapping_samples` and `total_docs`), and a
 warning is logged when the count is non-zero, because fast-path accuracy on
 overlapping documents must be excluded from the KPIs. With no manifest the run
-records `status: skipped, reason: manifest_not_found`; a read error records
-`reason: check_error`. Either way the evaluation proceeds (`_check_overlap` in
-`eval/runner.py`; tests `tests/eval/test_dataset_runner.py -k overlap`).
+records `status: skipped, reason: manifest_not_found` with the `searched` paths; an
+unreadable or malformed manifest records `reason: check_error` (the runner reads it
+with `bert_manifest_overlap(..., strict=True)`; the helper's default stays
+best-effort), while a readable empty manifest is a completed check with zero
+overlaps. Either way the evaluation proceeds (`_check_overlap` in
+`eval/runner.py`; tests `tests/eval/test_dataset_runner.py -k "overlap or manifest"`).
 
 ## Running an evaluation
 

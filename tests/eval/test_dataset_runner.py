@@ -83,15 +83,21 @@ def mock_provider(monkeypatch, fake_openai):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """Isolate the base directory and reset settings and SQLite state per test."""
-    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    """Isolate the base directory and reset settings, ledger and SQLite state per test."""
     from mailroom_reloaded import settings
+    from mailroom_reloaded.storage.ledger import reset_ledger
 
+    # A ledger writer thread left by an earlier run_eval can call get_settings()
+    # while the environment is unset and re-cache the default base_dir after our
+    # cache_clear(); stop it before and after each test.
+    reset_ledger()
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     settings.get_settings.cache_clear()
     monkeypatch.setattr(db, "_default_engine", None)
     try:
         yield tmp_path
     finally:
+        reset_ledger()
         if db._default_engine is not None:
             db._default_engine.dispose()
         db._default_engine = None
@@ -776,5 +782,49 @@ def test_overlap_check_uses_base_dir_manifest_fallback(env, monkeypatch):
     )
 
     metadata = _get_run_metadata(run_id)
-    assert metadata["status"] == "completed"
+    assert metadata["status"] == "completed", metadata
     assert metadata["overlapping_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [("{not json\n", "skipped"), ("", "completed")],
+    ids=["malformed_manifest_records_check_error", "empty_manifest_completes"],
+)
+def test_overlap_check_manifest_read_outcomes(env, monkeypatch, tmp_path, content, expected):
+    """A malformed manifest is a check error; a readable empty one is a clean check."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    manifest_file.write_text(content, encoding="utf-8")
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    metadata = _get_run_metadata(run_id)
+    assert metadata["status"] == expected
+    if expected == "skipped":
+        assert metadata["reason"] == "check_error"
+    else:
+        assert metadata["overlapping_count"] == 0
+
+
+def test_load_manifest_sha256_strict_raises_but_default_skips(tmp_path):
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text("{not json\n", encoding="utf-8")
+    assert load_manifest_sha256(bad) == set()
+    with pytest.raises(ValueError):
+        load_manifest_sha256(bad, strict=True)

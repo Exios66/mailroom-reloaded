@@ -166,23 +166,16 @@ def select_graded(
 # --------------------------------------------------------------------------- overlap check (spec §5)
 
 
-def _get_bert_manifest_path(explicit: Path | None = None) -> str | None:
-    """Return the BERT training manifest path, or ``None`` when there is none.
+def _manifest_candidates(explicit: Path | None = None) -> list[Path]:
+    """Where the BERT training manifest is looked for, in order.
 
-    An explicit ``EvalConfig.bert_manifest`` wins; otherwise checks
-    ``<base_dir>/models/bert_manifest.jsonl`` and ``<base_dir>/bert_manifest.jsonl``.
+    An explicit ``EvalConfig.bert_manifest`` is the only candidate when given;
+    otherwise ``<base_dir>/models/bert_manifest.jsonl`` then ``<base_dir>/bert_manifest.jsonl``.
     """
     if explicit is not None:
-        return str(explicit) if Path(explicit).exists() else None
+        return [Path(explicit)]
     base = Path(get_settings().base_dir)
-    candidates = [
-        base / "models" / "bert_manifest.jsonl",
-        base / "bert_manifest.jsonl",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-    return None
+    return [base / "models" / "bert_manifest.jsonl", base / "bert_manifest.jsonl"]
 
 
 def _check_overlap(docs: list[BlindDoc], manifest: Path | None = None) -> dict[str, Any]:
@@ -191,15 +184,17 @@ def _check_overlap(docs: list[BlindDoc], manifest: Path | None = None) -> dict[s
     Returns a dict with status, overlapping_count, overlapping_samples, and (if
     skipped) reason. Records a warning if overlaps are detected.
     """
-    manifest_path = _get_bert_manifest_path(manifest)
+    candidates = _manifest_candidates(manifest)
+    manifest_path = next((str(c) for c in candidates if c.exists()), None)
     if manifest_path is None:
         return {
             "status": "skipped",
             "reason": "manifest_not_found",
+            "searched": [str(c) for c in candidates],
         }
 
     try:
-        overlaps = bert_manifest_overlap(docs, manifest_path)
+        overlaps = bert_manifest_overlap(docs, manifest_path, strict=True)
         # bert_manifest_overlap returns {filename: bool}, so extract overlapping ones
         overlapping_files = {filename for filename, is_overlapping in overlaps.items() if is_overlapping}
         overlapping_count = len(overlapping_files)
