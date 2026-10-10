@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in Mailroom Reloaded behaves wrongly (pipeline, API, TUI, replay, sandbox, eval).
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read `AGENTS.md` first. Fields render as `### <Label>` headings in the issue body; keep each answer self-contained.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - pipeline / agents
+        - ingest / intake
+        - review / Boss desk
+        - API
+        - TUI / replay viewer
+        - observability / tracing
+        - storage / ledger
+        - eval / Jev
+        - sandbox server
+        - deploy / ops
+        - docs
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behaviour
+      description: What happened. Paste the exact error or output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, env vars (never secrets) and inputs, one per line.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD` or the release tag.
+    validations:
+      required: false
+  - type: textarea
+    id: suspected_paths
+    attributes:
+      label: Suspected paths
+      description: Files or modules you think are involved, one per line. Optional.
+      render: text
+    validations:
+      required: false

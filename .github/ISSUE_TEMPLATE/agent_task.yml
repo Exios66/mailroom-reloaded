@@ -1,0 +1,80 @@
+name: Agent task
+description: A bounded work card for an AI agent (or a human following the same rules).
+title: "[task]: "
+labels: ["agent-task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read `AGENTS.md` first. Fields render as `### <Label>` headings in the issue body; keep each answer self-contained.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One or two sentences, the outcome and not the method.
+    validations:
+      required: true
+  - type: textarea
+    id: scope_paths
+    attributes:
+      label: Scope paths
+      description: Files and directories the agent may change, one per line.
+      render: text
+      placeholder: |
+        src/mailroom_reloaded/api/tui/replay/
+        tests/tui/js/
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: Paths and topics the agent must not touch.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: A markdown checklist, one verifiable item per line.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: checkboxes
+    id: gates_to_run
+    attributes:
+      label: Gates to run
+      options:
+        - label: "ruff check src tests"
+        - label: "PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox"
+        - label: "pytest tests/sandbox -q (sandbox changes)"
+        - label: "node --test tests/tui/js/*.test.mjs"
+        - label: "scripts/tui_replay_check.mjs (browser check, TUI changes)"
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Deadlines, ordering, stacked-PR parent, plan item id, anything else binding.
+    validations:
+      required: false
+  - type: dropdown
+    id: autonomy_level
+    attributes:
+      label: Autonomy level
+      options:
+        - read-only analysis
+        - edit locally, no git
+        - branch + commit
+        - branch + commit + open PR
+    validations:
+      required: true
+  - type: textarea
+    id: definition_of_done
+    attributes:
+      label: Definition of done
+      description: What the agent reports at the end (gate results, files changed, not-verified list) and what a reviewer checks.
+    validations:
+      required: true

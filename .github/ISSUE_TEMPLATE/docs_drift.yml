@@ -1,0 +1,40 @@
+name: Docs drift
+description: A doc, the master plan or AGENTS.md disagrees with the code.
+title: "[docs]: "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: Fields render as `### <Label>` headings in the issue body.
+  - type: input
+    id: doc_path
+    attributes:
+      label: Document path
+      description: Repository-relative path, for example docs/TUI.md.
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: What the doc says
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What the code does
+      description: Cite the file and line, or the command output.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: authoritative
+    attributes:
+      label: Which side is right
+      options:
+        - code is right, fix the doc
+        - doc is right, fix the code
+        - unsure
+    validations:
+      required: true

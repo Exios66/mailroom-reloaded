@@ -1,0 +1,38 @@
+name: Follow-up
+description: A deferred item recorded from a PR or review (not blocking the PR it came from).
+title: "[follow-up]: "
+labels: ["follow-up"]
+body:
+  - type: markdown
+    attributes:
+      value: Fields render as `### <Label>` headings in the issue body.
+  - type: input
+    id: source
+    attributes:
+      label: Source PR or review
+      description: "For example #57 or a review-thread URL."
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: Finding
+      description: What is wrong or missing, with file paths.
+    validations:
+      required: true
+  - type: textarea
+    id: why_deferred
+    attributes:
+      label: Why deferred
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - low
+        - medium
+        - high
+    validations:
+      required: true

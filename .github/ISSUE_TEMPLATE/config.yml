@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Scenario content problem (mailroom-sandbox-content)
+    url: https://github.com/Exios66/mailroom-sandbox-content/issues
+    about: Scenarios, strata data and generated indexes live in the content pack. Report scenario defects and proposals there; open contract or loader problems here.

@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a new capability or an enhancement.
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read `AGENTS.md` first. Fields render as `### <Label>` headings in the issue body.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: The user-visible problem, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: A markdown checklist, one verifiable item per line.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: input
+    id: plan_item
+    attributes:
+      label: Master plan item
+      description: Item id in docs/superpowers/plans/2026-10-09-mailroom-core-plan.md (for example R-13), if any.
+    validations:
+      required: false

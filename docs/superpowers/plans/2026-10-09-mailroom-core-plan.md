@@ -12,14 +12,14 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-09. A parallel agent is still pushing. Before acting on any
+**As of:** 2026-10-10 (status refreshed against `main` @ `ab6b715`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
 row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
 the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`) |
-| mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `ab6b715`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit:** #45, #54, #55, #56, #57 merged; #23 and #44 still open (the mailbox code is not on `main`) |
+| mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
 audit was static (files, symbols, commits, PR state). **No Python test run was
@@ -31,7 +31,7 @@ own and unverified, and they differ because the branches differ.
 
 **Baseline (2026-10-09, this machine, R-01 done).** On `main` @ `44c8b0f`:
 `uv run pytest -q` → **1886 passed, 3 skipped, 2 deselected**; `uv run ruff
-check .` → clean; `node --test tests/tui/js/*.test.mjs` → **198 pass**. The one
+check .` → clean; `node --test tests/tui/js/*.test.mjs` → **198 pass**. These counts predate #45 and #54-#57 and were **not re-run on 2026-10-10**; re-baseline (R-01) before quoting them for the new `main`. The one
 audited failure (`test_api.py::test_jev_status_off_by_default`) was a
 test-isolation defect: a developer `.env` sets `MAILROOM_JEV_PROVIDER` and
 pydantic environment values win over `.env`, so deleting the key could not
@@ -104,7 +104,7 @@ ask the owner**; do not invent a top-level directory.
 | --- | --- | --- |
 | `2026-10-07-mailroom-reloaded.md` (24 tasks) + design spec | Pipeline, eval, deploy | 22 done, 2 partial (Section 3.1) |
 | `2026-10-08-mailroom-tui.md` (8 tasks) + `HANDOFF-tui.md` | `/tui` | 7 done, 1 partial (3.2) |
-| `2026-10-09-mailroom-trace-replay.md` (19 tasks) | Replay, ledger, anchor | 14 done, 3 partial, 2 deferred (3.3) |
+| `2026-10-09-mailroom-trace-replay.md` (19 tasks) | Replay, ledger, anchor | At audit: 14 done, 3 partial, 2 deferred. 2026-10-10: 18 done (7, 10, 11, 12 landed in #55-#57); only Task 6 open (3.3) |
 | `mailroom-sandbox-content/docs/IMPLEMENTATION_PLAN.md` | Content pack v0.1-v1.0 | Phases 1-2 done; 3 open (3.4) |
 | `ISSUE-1-status.md` | Tracker draft | Stale; folded into 3.1 |
 
@@ -139,23 +139,23 @@ Dependabot alerts open (`uv.lock:368`, R-09).
 
 DONE: Tasks 1-7 (serve, engine, api client, terminal, boot, pipeline + shell
 commands). Task 8 PARTIAL: R-10 (nine-point live browser checklist re-run with
-committed evidence). `feat/tui-brand-theme` is fully merged (PR #13); nothing
-stranded. `docs/TUI.md` matches code (22 commands, 6 themes). Out-of-plan
+committed evidence; still open 2026-10-10, no `docs/evidence/` exists). `feat/tui-brand-theme` is fully merged (PR #13); nothing
+stranded. `docs/TUI.md` matches code (22 commands, 6 themes; file map completed by R-11). Out-of-plan
 additions that exist and are accepted: `ledger`, `replay`, `jev` commands,
 `/ui` replay links (broader than the "one link" constraint; accepted).
 
 ### 3.3 Trace replay (19 tasks; branch numbers are stack positions, not task numbers)
 
-DONE: 1, 2, 3, 4, 5, 8, 9, 13, 14, 15, 16, 17, 18, 19. All 12 remaining
+DONE: 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 (7, 10, 11, 12 landed 2026-10-10 via #55-#57). All 12 remaining
 `claude/trace-replay-*` branches are 0 commits ahead of `main`; nothing stranded.
 
 | Task | State | Carried to |
 | --- | --- | --- |
 | 6 OTLP import + `mailroom replay` CLI | NOT STARTED (deferred by plan phasing) | R-13 |
-| 7 API | PARTIAL: REST done, `GET /v1/replay/live` SSE absent | R-14 |
-| 10 Replay command/grid | PARTIAL: `panels.js`/`registerPanel` absent (grid is `grid.js`, plan said `view.js`) | R-15 |
-| 11 Follow-live | NOT STARTED (needs R-14) | R-14 |
-| 12 Dev harness | PARTIAL: no replay seed in `scripts/tui_dev.sh` | R-16 |
+| 7 API | DONE (#55): `GET /v1/replay/live` SSE | R-14 (done) |
+| 10 Replay command/grid | DONE (#56): `panels.js`/`registerPanel` (grid is `grid.js`, plan said `view.js`) | R-15 (done) |
+| 11 Follow-live | DONE (#55): `replay --follow`, `f` key, `replay/live.js` | R-14 (done) |
+| 12 Dev harness | DONE (#57): replay seed in `scripts/tui_dev.sh` | R-16 (done) |
 | 18 Anchor | DONE in code; Supabase path never run on a live staging project | R-17 |
 
 Recorded deviations: env var is `MAILROOM_TRACE_STORE_PATH` (plan: `MAILROOM_TRACE_STORE`);
@@ -196,34 +196,35 @@ pattern to `^[A-HST]...`; reloaded PR #44 changes the same pattern and adds `mai
 Recommended order (so `v0.5.0` still means `f650cfd`):
 - [ ] Content: **K-01 first** (the sha256 changes with the `zstandard` version; only 0.25.0 reproduces the lock). Then on clean `main` run `tools/release.sh --push` to publish `v0.5.0` + bundle; confirm the sha256 equals the lock's `7a32e86e...`.
 - [ ] Content: merge PR #5 (H-series); in its own PR bump `content.json` version to `0.6.0`, run `tools/release.sh --push`.
-- [ ] Reloaded: merge PR #44; then `mailroom sandbox content bump --tag v0.6.0` in its own PR (updates `sandbox/content.lock`).
+- [x] Reloaded: merge PR #44 (done, `8e8522a`); then `mailroom sandbox content bump --tag v0.6.0` in its own PR (updates `sandbox/content.lock`).
 - [ ] Verify: `mailroom sandbox content pull && mailroom sandbox content validate && mailroom sandbox conformance --content smoke` all pass.
 - [ ] Content: update the GitHub repo description (still says "83 scenarios").
 
-#### R-02: Merge PR #45 (`fix/jev-integration-issue-14`), closes issue #14
+#### R-02: Merge PR #45 (`fix/jev-integration-issue-14`), closes issue #14. MERGED (`d8e428f`); one verification step still open
 Scope (from its body): `eval/dataset.py` bool parsing + derived `retry_expected`/`review_expected`; neutral
 operating points in `eval/jev_calibration.py`; `--dataset-repo/--config` flags; opt-in fixtures mirror
 `Lucius-Morningstar/mailroom-reloaded-fixtures` (core `v9.2` `1eb5b42c`). Default `ed7576b6` unchanged.
-- [ ] Re-fetch; confirm it merges cleanly onto current `main` and R-01 stays green.
+- [x] Re-fetch; confirm it merges cleanly onto current `main` (merge commit `d8e428f` on `main`; the full suite was not re-run after it, see Baseline).
 - [ ] Independently verify the mirror's claim of byte-identity with core `v9.2` (hash the `fixtures` config both sides).
-- [ ] Merge. Confirm issue #14 closes. Do **not** change the default `DEFAULT_REVISION` (D7).
+- [x] Merge. `DEFAULT_REVISION` is still `ed7576b6` (`eval/dataset.py:43`, D7). Issue #14's closed state is not checkable from the tree; confirm on GitHub.
 
 #### R-03: Decide and resolve the two Correspondent/Boss mailbox PRs. Needs: D1
 PR #44 and PR #23 implement near-identical mailbox code (`sandbox/server/mailbox.py`, `ui/mailbox.js`, `tests/sandbox/js/mailbox.test.mjs`).
 PR #23 is CONFLICTING (CHANGELOG.md, `agents/judge.py`, `ingest/clerk.py`, `llm/retry.py`), its 3-dot diff touches 61 files despite saying "no pipeline changes", and it still carries the Correspondent-v2 triage (53/88 scenarios pass alone; author calls the LOFO numbers optimistic).
+**Status 2026-10-10:** #44 is MERGED (`8e8522a`; `sandbox/server/mailbox.py`, held-out harness and `AGENTS.md` are on `main`). #23 is a duplicate implementation that additionally carries the Correspondent-v2 triage, with code conflicts in `agents/judge.py`, `ingest/clerk.py` and `llm/retry.py`; it is left for the owner (D1). Nothing below is ticked.
 Recommended:
-- [ ] Land #44 (fresh from `main`, mailbox + held-out harness + `AGENTS.md` + `docs/HELD_OUT_SCENARIOS.md`).
+- [x] Land #44 (fresh from `main`, mailbox + held-out harness + `AGENTS.md` + `docs/HELD_OUT_SCENARIOS.md`).
 - [ ] Re-cut #23's triage v2 as a new PR on top of #44 (rebase, then diff against `main` to separate real changes from formatting; no pipeline files unless justified).
 - [ ] Close #23 with a link to the replacement. Port #44's recorded follow-up: make committed Boss decisions authoritative on recovery.
 
 ### Phase 2: salvage stranded work
 
-#### R-18: Port valuable unmerged branches (reloaded)
+#### R-18: Port valuable unmerged branches (reloaded). DONE via #57 (salvage of the abandoned lucid branch) and earlier test salvage
 Each is one small PR from a fresh branch off `main`, never a merge of the old branch.
-- [ ] `coderabbit/add-pull-request-tests/6bacca95` (commit `451de3f`, +806 test lines across api/eval/ingest/llm/obs/pipeline/cli, applies cleanly): cherry-pick, run suite, PR.
-- [ ] `coderabbit/add-pull-request-tests/a10e0c34` (`4926976`, `tests/deploy/test_runbook.py`): cherry-pick, confirm it passes against current `docs/RUNBOOK.md`, PR.
-- [ ] `coderabbit/add-coderabbit-skills-fix-bugs/dfe7b81f` (`a33892b`, 28 files, conflicts in Makefile, `pipeline/flow.py`, `tests/api/test_api.py`, `tests/pipeline/test_flow_units.py`, `tests/sandbox/test_contract_schemas.py`): port the **tests first**; for each, check whether the bug still reproduces on `main` (PRs #9/#11/#12 fixed several); only then port the fix.
-- [ ] `c45b630` docstring commit (on `claude/mailroom-reloaded-build` and `coderabbit/document-pull-request-functions/c69dc8cd`; 5 files conflict): optional. Re-apply by hand where the docstrings still apply, or drop (D4).
+- [x] `coderabbit/add-pull-request-tests/6bacca95` (landed as `7b4220d` "salvage coderabbit unit-coverage tests" + `be3337a` alignment; commit `451de3f`, +806 test lines across api/eval/ingest/llm/obs/pipeline/cli, applies cleanly): cherry-pick, run suite, PR.
+- [x] `coderabbit/add-pull-request-tests/a10e0c34` (`tests/deploy/test_runbook.py` exists, `2894e18`; `4926976`, `tests/deploy/test_runbook.py`): cherry-pick, confirm it passes against current `docs/RUNBOOK.md`, PR.
+- [x] `coderabbit/add-coderabbit-skills-fix-bugs/dfe7b81f` (flow bounds/resume fixes `bbd729f`, `d869b9a`, `704b7cd`, `741af2e`, atomic upload publish `a9b8b3c`/`ce6bdba`, `SUPPORTED_EXTENSIONS` in `ingest/clerk.py`; `a33892b`, 28 files, conflicts in Makefile, `pipeline/flow.py`, `tests/api/test_api.py`, `tests/pipeline/test_flow_units.py`, `tests/sandbox/test_contract_schemas.py`): port the **tests first**; for each, check whether the bug still reproduces on `main` (PRs #9/#11/#12 fixed several); only then port the fix.
+- [x] `c45b630` docstring commit (docstrings re-applied across `src` in #57, e.g. `309a7c6`; on `claude/mailroom-reloaded-build` and `coderabbit/document-pull-request-functions/c69dc8cd`; 5 files conflict): optional. Re-apply by hand where the docstrings still apply, or drop (D4).
 
 ### Phase 3: finish partial plan scope
 
@@ -236,18 +237,18 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 - **R-09 chromadb alerts.** [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
 
 #### `/tui`
-- **R-10 Live checklist.** [ ] Run `scripts/tui_replay_check.mjs` and the nine-point checklist in `docs/TUI.md` against `scripts/tui_dev.sh`; commit screenshots/output to `docs/evidence/<date>-tui-live-check/`; tick Task 8 Step 3 (retire it from this plan).
-- **R-11 Doc drift.** [ ] Add `ledger.js`, `replay.js`, `deeplink.js`, `replay/` to the `docs/TUI.md` file map.
+- **R-10 Live checklist.** OPEN 2026-10-10: `scripts/tui_replay_check.mjs` and `scripts/tui_dev.sh` exist, but there is no `docs/evidence/` directory and no committed run output, so Task 8 Step 3 stays unticked. [ ] Run `scripts/tui_replay_check.mjs` and the nine-point checklist in `docs/TUI.md` against `scripts/tui_dev.sh`; commit screenshots/output to `docs/evidence/<date>-tui-live-check/`; tick Task 8 Step 3 (retire it from this plan).
+- **R-11 Doc drift.** DONE (#57; `docs/TUI.md` file map lists `ledger.js`, `replay.js`, `deeplink.js`, `replay/`). [x] Add `ledger.js`, `replay.js`, `deeplink.js`, `replay/` to the `docs/TUI.md` file map.
 
 #### Trace replay
-- **R-12 CHANGELOG.** [ ] Add entries for stacks 13 (viewer), 14 (deep link), 15 (dev harness) to `CHANGELOG.md`.
-- **R-13 OTLP import + CLI (old Task 6).** Deferred. Build only after R-01, R-10 are green. Files: `src/mailroom_reloaded/obs/replay/otlp_import.py`, CLI group `mailroom replay import|export|sessions` in `cli.py`, `deploy/otel-collector.yaml`; tests `tests/obs/test_replay_otlp.py`, `tests/test_cli.py`.
-- **R-14 SSE + follow-live (old Tasks 7b, 11).** Deferred. `GET /v1/replay/live` in `api/app.py` (`StreamingResponse`, `text/event-stream`), follow mode in `api/tui/commands/replay.js` + `api/tui/replay/`; tests `tests/api/test_replay_routes.py`, `tests/tui/js/replay-command.test.mjs`.
-- **R-15 Panels (old Task 10).** [ ] `api/tui/replay/panels.js` with `registerPanel`; test `tests/tui/js/replay-panels.test.mjs`.
-- **R-16 Dev seed (old Task 12).** [ ] Add a replay eval seed (retry, failure, parked, boss) to `scripts/tui_dev.sh` using `scripts/tui_seed*/`.
-- **R-17 Anchor staging run.** Owner Supabase project. [ ] Run `deploy/anchor/mailroom_anchor.sql` against staging; verify DDL, grants, trigger and key header per `docs/OPERATIONS.md`; record result there.
+- **R-12 CHANGELOG.** DONE (#57; stacks 13, 14, 15 entries are in `CHANGELOG.md` `[Unreleased]`). [x] Add entries for stacks 13 (viewer), 14 (deep link), 15 (dev harness) to `CHANGELOG.md`.
+- **R-13 OTLP import + CLI (old Task 6).** OPEN, deferred (`obs/replay/otlp_import.py` and the `mailroom replay` CLI group are absent). Build only after R-01, R-10 are green. Files: `src/mailroom_reloaded/obs/replay/otlp_import.py`, CLI group `mailroom replay import|export|sessions` in `cli.py`, `deploy/otel-collector.yaml`; tests `tests/obs/test_replay_otlp.py`, `tests/test_cli.py`.
+- **R-14 SSE + follow-live (old Tasks 7b, 11).** DONE (#55; `api/app.py` `/replay/live`, `api/tui/replay/live.js`, tests `tests/api/test_replay_routes.py`, `tests/tui/js/replay-live.test.mjs`, `replay-command.test.mjs`). [x] `GET /v1/replay/live` in `api/app.py` (`StreamingResponse`, `text/event-stream`), follow mode in `api/tui/commands/replay.js` + `api/tui/replay/`; tests `tests/api/test_replay_routes.py`, `tests/tui/js/replay-command.test.mjs`.
+- **R-15 Panels (old Task 10).** DONE (#56). [x] `api/tui/replay/panels.js` with `registerPanel`; test `tests/tui/js/replay-panels.test.mjs`.
+- **R-16 Dev seed (old Task 12).** DONE (#57; `scripts/tui_dev.sh` runs `scripts/tui_seed_replay/seed_replay.py`, six docs: happy, retry, failed, parked, boss, happy). [x] Add a replay eval seed (retry, failure, parked, boss) to `scripts/tui_dev.sh` using `scripts/tui_seed*/`.
+- **R-17 Anchor staging run.** OPEN (owner). Owner Supabase project. [ ] Run `deploy/anchor/mailroom_anchor.sql` against staging; verify DDL, grants, trigger and key header per `docs/OPERATIONS.md`; record result there.
 
-#### Observability UI links (new workstream)
+#### Observability UI links (new workstream). DONE (#54)
 
 - **R-19 Grafana & Phoenix deep links in the UI.** The Grafana dashboards already link *into* the viewer (Task 4 `replay ↗`/`phoenix ↗`, tested in `tests/deploy/test_grafana_links.py`), but neither `/ui` nor the replay viewer links *out* to Grafana or Phoenix, and the two `/ui` header links hardcode `localhost`. Files: `settings.py`, `api/app.py` (`GET /links`), `api/ui/index.html`, `api/tui/replay/grid.js` + `commands/replay.js`, `docs/OPERATIONS.md`, `docs/TUI.md`, `CHANGELOG.md`.
   - [x] Link config: `MAILROOM_PUBLIC_URL` / `MAILROOM_PHOENIX_URL` / `MAILROOM_GRAFANA_URL` (defaults `http://localhost:8000|6006|3000`) exposed by a public `GET /links`; `/ui` header and per-run links build from it.
@@ -255,6 +256,25 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
   - [x] Replay viewer: the inspector shows the run's `phoenix ↗` / `grafana ↗`; `o` / `g` open them (noopener).
   - [x] Tests: `tests/api/test_api.py` (`/links` + per-run links), `tests/tui/js/replay-command.test.mjs` (viewer links/keys); docs + CHANGELOG.
   - Decisions (assumed unless the owner says otherwise): link-out (not embed); Grafana target dashboard `mailroom-quality`; URLs from env with localhost defaults.
+
+#### Deferred follow-ups from PRs #54-#57
+
+Found in review of the merged work; none blocks it. Each is its own small PR (add an ID when one is picked up).
+- [ ] `review_approved` is never cleared after a re-extraction consumes it.
+- [ ] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
+- [ ] Follow mode never adds entities that start after the first snapshot.
+- [ ] The server's `seen` set and the `MAX_FRAMES=0` (unlimited) stream grow without bound.
+- [ ] The 100k-row read cap is not surfaced to the client as an error frame.
+- [ ] `followSeek` uses the client clock, not the server's.
+- [ ] The footer legend clips `q quit` below about 100 columns.
+- [ ] Panel `key` metadata is accepted by `registerPanel` but unused.
+- [ ] Reserved panel ids are not rejected by `registerPanel`.
+- [ ] Custom panel rows are not sanitised.
+- [ ] `phoenix_project` in `GET /links` is read from `os.environ` rather than `settings.py`.
+
+#### Governance (landed with the governance PR; content repo PR #15)
+
+Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, `agent_task`, `docs_drift`, `follow_up`, plus `config.yml`), a PR template (`.github/pull_request_template.md`) that ends in an `agent-report` YAML block, and `AGENTS.md` conventions. Verified here: the five forms, `config.yml` and the template's `agent-report` block are in the tree. `AGENTS.md` is not in this tree (it arrives with #44 per R-03, or lives in the content repo), so it is recorded but not verified in `mailroom-reloaded`. Hard rule 6 still applies; the template's validation checklist is the place to paste result lines.
 
 ### Phase 4: content pack to v1.0 (`mailroom-sandbox-content`)
 
@@ -278,7 +298,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 **Why:** four things overlap K-series scope and must not be redone or contradicted.
 - [x] Content PR #5 (H-series): both CodeRabbit findings landed in `c8336b9` (H6 claim grouping; held-out/freeze wording). #5 and #6 are merged to content `main` (`67b9a3e`). Hazard now live: content `main` carries H1-H28 and fails reloaded `main`'s loader until reloaded #44 lands, and content CI cannot see it (K-06). Content PR #7 (K-series work, branch `claude/upbeat-euler-85ifix`) is open.
 - [ ] **The scenario-patch PR (owner reports one is waiting).** At the time of writing no open PR in either repo patches existing scenarios: #5 only adds H1-H28, and reloaded #23 states it makes no content-repo change. When it lands, do **not** redo K-03; verify it against the K-03 decision table (below) and tick K-03 only if every row is covered and the K-03 lint passes.
-- [ ] Reloaded #44 must merge before any pin to an H-series bundle (K-07 shows why).
+- [x] Reloaded #44 must merge before any pin to an H-series bundle (K-07 shows why).
 - [ ] Re-run `git fetch --all --prune` in both repos; update this block if PR state changed.
 
 #### K-01: Make the bundle sha256 reproducible. Blocks X-01.
@@ -341,7 +361,7 @@ C-01 to C-07 above remain the content-completeness list. K-series items do not r
 
 #### K-08: Reloaded-side hardening that the pack cannot fix
 - [x] **Loader reports instead of raising.** `sandbox/content/loader.py` records per-file content read and JSON/YAML parse failures in `ValidationReport.errors` with the file path, including smoke manifest digest reads. `CompatError` still raises. `mailroom sandbox content validate` and the initial `build` load surface the report and exit 1. Regression coverage: `tests/sandbox/test_content_validation.py` and `tests/sandbox/test_content_cli.py`.
-- [ ] **Boss decision lifecycle must be recoverable.** Both CodeRabbit reviews (#23, #44) report that a Boss decision can be marked terminal before its effects (attachment actions, drafting) finish, and that restart does not reconcile mailbox, review state and attachment state. Already recorded as follow-up in #44; when R-03 re-cuts the work, require an idempotent, decision-keyed apply step and startup reconciliation. Also keep hard quarantine distinct from a soft review hold (the same reviews flag that a `legitimate` decision can release a hard-quarantined handoff).
+- [ ] **Boss decision lifecycle must be recoverable.** PARTLY DONE in #44's review fixes: a decision is recorded in a persisted `deciding` state, retries resume the remaining steps and conflicting retries get 409; a crash between queuing a draft and recording its id can still duplicate one draft. Both CodeRabbit reviews (#23, #44) report that a Boss decision can be marked terminal before its effects (attachment actions, drafting) finish, and that restart does not reconcile mailbox, review state and attachment state. Already recorded as follow-up in #44; when R-03 re-cuts the work, require an idempotent, decision-keyed apply step and startup reconciliation. Also keep hard quarantine distinct from a soft review hold (the same reviews flag that a `legitimate` decision can release a hard-quarantined handoff).
 - [ ] Docstring coverage warnings on #23 and #44 (63.9% and 77.9% against 80%) are cosmetic but block the pre-merge check; handle with the R-18 docstring decision (D4).
 
 ### Phase 5: cross-repo contract and hygiene
@@ -351,6 +371,7 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 - [ ] Do K-05. Reloaded's root `schemas/` remains the contract owner (content-plan CD8).
 
 #### X-02: Retire merged and dead branches (destructive; needs owner approval, D4)
+_Status 2026-10-10: branch retirement is in progress; no box below is ticked here because branch state is not visible from the tree._
 - [ ] Safe (fully merged): reloaded `docs/mailroom-reloaded-design`, `feat/mailroom-reloaded-completion`, `feat/tui-brand-theme`, all 12 `claude/trace-replay-*`.
 - [ ] After R-18 is done: `claude/mailroom-reloaded-build`, `coderabbit/*` (all four).
 - [ ] After D5: `revert-26-claude/mailroom-trace-replay-plan-5nj1nk` (reverts rev 4 of the old plan; conflicts with main, which built on it; no PR).
@@ -388,11 +409,11 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 
 ## 6. Definition of done for this plan
 
-- [ ] R-01 baseline recorded; `main` green in both repos.
+- [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [ ] Re-run on current `main` (not done after #45, #54-#57); `main` green in both repos is unconfirmed.
 - [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
-- [ ] PR #44, #45 merged; #23 resolved; no open PR without an owner.
+- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [ ] #23 resolved (owner); no open PR without an owner.
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
-- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file.
+- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-16, R-19; open R-04..R-10, R-13 (deferred), R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
 - [ ] `docs/superpowers/plans/` still contains only this file.
