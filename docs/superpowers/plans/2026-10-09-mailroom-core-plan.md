@@ -237,7 +237,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 - **R-09 chromadb alerts.** [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
 
 #### `/tui`
-- **R-10 Live checklist.** OPEN 2026-10-10: `scripts/tui_replay_check.mjs` and `scripts/tui_dev.sh` exist, but there is no `docs/evidence/` directory and no committed run output, so Task 8 Step 3 stays unticked. [ ] Run `scripts/tui_replay_check.mjs` and the nine-point checklist in `docs/TUI.md` against `scripts/tui_dev.sh`; commit screenshots/output to `docs/evidence/<date>-tui-live-check/`; tick Task 8 Step 3 (retire it from this plan).
+- **R-10 Live checklist.** PARTLY DONE 2026-10-10 (evidence: `docs/evidence/2026-10-10-tui-live-check/README.md`, screenshots `docs/demo/`). [x] Ran `scripts/tui_replay_check.mjs` (default run, seeded run, token variant: all checks passed) and the nine-point checklist by script against `scripts/tui_dev.sh`; points 1-5, 7, 8, 9 passed. [x] Committed screenshots/output to `docs/evidence/2026-10-10-tui-live-check/` and `docs/demo/`. [ ] Point 6 only partly evidenced: mid-session kill passes, but "reload shows `mailroom closed`" needs a served page with a dead API, so it was simulated by blocking `/v1`; reword the `docs/TUI.md` item. [ ] Walk was headless and scripted, not done by hand on a physical keyboard or in a headed browser; leave Task 8 Step 3 unticked until a person has done that once.
 - **R-11 Doc drift.** DONE (#57; `docs/TUI.md` file map lists `ledger.js`, `replay.js`, `deeplink.js`, `replay/`). [x] Add `ledger.js`, `replay.js`, `deeplink.js`, `replay/` to the `docs/TUI.md` file map.
 
 #### Trace replay
