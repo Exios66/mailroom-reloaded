@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Refreshed `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`: content PRs #23-#27 merged (K-01, K-02, content issues #12/#13, C-01/C-02), with the verified content `main` state (116 scenarios, 228 unit tests); K-05 marked in progress (content #28 and this repo's #89 still open, so content `main` currently drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`); the open-PR and ledger tables and D3 updated.
+- Refreshed `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`: content PRs #23-#28 merged (K-01, K-02, content issues #12/#13, C-01/C-02, and K-05 — the schema mirror), with the verified content `main` state (116 scenarios, 228 unit tests, `schema drift: none`); K-05 and X-03 ticked (content #28 @ `aedbc79`, reloaded #94 @ `09d318d`); the open-PR and ledger tables and D3 updated.
 
 ### Added
 
