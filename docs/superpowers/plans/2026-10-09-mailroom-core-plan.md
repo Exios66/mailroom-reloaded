@@ -104,7 +104,7 @@ ask the owner**; do not invent a top-level directory.
 | --- | --- | --- |
 | `2026-10-07-mailroom-reloaded.md` (24 tasks) + design spec | Pipeline, eval, deploy | 22 done, 2 partial (Section 3.1) |
 | `2026-10-08-mailroom-tui.md` (8 tasks) + `HANDOFF-tui.md` | `/tui` | 7 done, 1 partial (3.2) |
-| `2026-10-09-mailroom-trace-replay.md` (19 tasks) | Replay, ledger, anchor | At audit: 14 done, 3 partial, 2 deferred. 2026-10-10: 18 done (7, 10, 11, 12 landed in #55-#57); only Task 6 open (3.3) |
+| `2026-10-09-mailroom-trace-replay.md` (19 tasks) | Replay, ledger, anchor | At audit: 14 done, 3 partial, 2 deferred. 2026-10-10: 19 done (7, 10, 11, 12 landed in #55-#57; 6 via R-13); none open (3.3) |
 | `mailroom-sandbox-content/docs/IMPLEMENTATION_PLAN.md` | Content pack v0.1-v1.0 | Phases 1-2 done; 3 open (3.4) |
 | `ISSUE-1-status.md` | Tracker draft | Stale; folded into 3.1 |
 
@@ -146,12 +146,12 @@ additions that exist and are accepted: `ledger`, `replay`, `jev` commands,
 
 ### 3.3 Trace replay (19 tasks; branch numbers are stack positions, not task numbers)
 
-DONE: 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 (7, 10, 11, 12 landed 2026-10-10 via #55-#57). All 12 remaining
+DONE: 1-19 (6 via R-13; 7, 10, 11, 12 landed 2026-10-10 via #55-#57). All 12 remaining
 `claude/trace-replay-*` branches are 0 commits ahead of `main`; nothing stranded.
 
 | Task | State | Carried to |
 | --- | --- | --- |
-| 6 OTLP import + `mailroom replay` CLI | NOT STARTED (deferred by plan phasing) | R-13 |
+| 6 OTLP import + `mailroom replay` CLI | DONE (R-13): `obs/replay/otlp_import.py`, `mailroom replay import\|export\|sessions` | R-13 (done) |
 | 7 API | DONE (#55): `GET /v1/replay/live` SSE | R-14 (done) |
 | 10 Replay command/grid | DONE (#56): `panels.js`/`registerPanel` (grid is `grid.js`, plan said `view.js`) | R-15 (done) |
 | 11 Follow-live | DONE (#55): `replay --follow`, `f` key, `replay/live.js` | R-14 (done) |
@@ -242,7 +242,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 
 #### Trace replay
 - **R-12 CHANGELOG.** DONE (#57; stacks 13, 14, 15 entries are in `CHANGELOG.md` `[Unreleased]`). [x] Add entries for stacks 13 (viewer), 14 (deep link), 15 (dev harness) to `CHANGELOG.md`.
-- **R-13 OTLP import + CLI (old Task 6).** OPEN, deferred (`obs/replay/otlp_import.py` and the `mailroom replay` CLI group are absent). Build only after R-01, R-10 are green. Files: `src/mailroom_reloaded/obs/replay/otlp_import.py`, CLI group `mailroom replay import|export|sessions` in `cli.py`, `deploy/otel-collector.yaml`; tests `tests/obs/test_replay_otlp.py`, `tests/test_cli.py`.
+- **R-13 OTLP import + CLI (old Task 6).** DONE (`obs/replay/otlp_import.py` and the `mailroom replay` CLI group; tests `tests/obs/test_replay_otlp.py`, `tests/test_cli.py`). [x] Files: `src/mailroom_reloaded/obs/replay/otlp_import.py`, CLI group `mailroom replay import|export|sessions` in `cli.py`, `deploy/otel-collector.yaml`; tests `tests/obs/test_replay_otlp.py`, `tests/test_cli.py`.
 - **R-14 SSE + follow-live (old Tasks 7b, 11).** DONE (#55; `api/app.py` `/replay/live`, `api/tui/replay/live.js`, tests `tests/api/test_replay_routes.py`, `tests/tui/js/replay-live.test.mjs`, `replay-command.test.mjs`). [x] `GET /v1/replay/live` in `api/app.py` (`StreamingResponse`, `text/event-stream`), follow mode in `api/tui/commands/replay.js` + `api/tui/replay/`; tests `tests/api/test_replay_routes.py`, `tests/tui/js/replay-command.test.mjs`.
 - **R-15 Panels (old Task 10).** DONE (#56). [x] `api/tui/replay/panels.js` with `registerPanel`; test `tests/tui/js/replay-panels.test.mjs`.
 - **R-16 Dev seed (old Task 12).** DONE (#57; `scripts/tui_dev.sh` runs `scripts/tui_seed_replay/seed_replay.py`, six docs: happy, retry, failed, parked, boss, happy). [x] Add a replay eval seed (retry, failure, parked, boss) to `scripts/tui_dev.sh` using `scripts/tui_seed*/`.
@@ -413,7 +413,7 @@ _Status 2026-10-10: branch retirement is in progress; no box below is ticked her
 - [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [ ] #23 resolved (owner); no open PR without an owner.
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
-- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-16, R-19; open R-04..R-10, R-13 (deferred), R-17 (owner).
+- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
 - [ ] `docs/superpowers/plans/` still contains only this file.

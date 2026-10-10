@@ -150,6 +150,32 @@ are token-gated like the rest of `/v1`. `/tui` keeps its token in its own tab's 
 so arriving from `/ui` needs `auth <token>` once; the link is then run again by hand
 (`replay run:<id>`).
 
+### Offline replay import and export
+
+The `mailroom replay` CLI works on the span store (`<base_dir>/traces.db`, honouring
+`MAILROOM_BASE_DIR`) without the API running.
+
+```sh
+mailroom replay import traces.jsonl [--run-id ID] [--append]  # OTLP/JSON or collector `file` lines
+mailroom replay sessions [--limit N] [--json]                 # same rows as GET /v1/replay/sessions
+mailroom replay export run:ID [-o ID.replay.json]             # replay/v1 JSON, as GET .../export
+```
+
+Import runs every span through the same attribute allow-list as live tracing: prompts,
+completions and document text are never stored, unknown attributes are dropped and node
+summaries are stored masked. Input is capped (32 MiB and 100,000 spans), ids must be hex and
+times finite and non-negative. Every span needs a `mailroom.run_id` (resource attributes
+count) or you pass `--run-id`, which overrides the file's run id. A bad file writes nothing.
+
+Safety rules: an import is refused when its run already has spans (add `--append` to allow
+it), is a `showcase-*` run, or was pruned by retention (never allowed). Re-importing the same
+file with `--append` stores nothing new; the output reports `skipped` (spans already stored or
+over the per-run row cap) and warns on stderr when any were skipped. `sessions` and `export`
+mark pruned runs like the API (`data_pruned`).
+
+Exit codes: 0 ok, 1 nothing found or store unavailable, 2 invalid input or refused import,
+3 `export` of a pruned run whose spans are gone ("data pruned").
+
 ## Observability
 
 The app emits OpenTelemetry traces and metrics; the compose stack ships a

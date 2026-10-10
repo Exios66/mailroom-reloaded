@@ -375,13 +375,9 @@ def _read_ledger():
 
 def _pruned_run_ids() -> set[str]:
     """Run ids whose spans retention removed; empty when the ledger is unreadable."""
-    from mailroom_reloaded.storage.retention import pruned_runs
+    from mailroom_reloaded.storage.retention import read_pruned_run_ids
 
-    try:
-        return pruned_runs(_read_ledger())
-    except Exception:  # the picker still works without the marker
-        logger.warning("replay_pruned_lookup_failed", exc_info=True)
-        return set()
+    return read_pruned_run_ids()
 
 
 def _replay_timeline(session_id: str, from_s: float | None, to_s: float | None):

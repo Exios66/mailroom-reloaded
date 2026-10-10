@@ -44,6 +44,14 @@ exporters:
     traces_endpoint: http://phoenix:6006/v1/traces
     tls:
       insecure: true
+  # Offline replay: uncomment this exporter and add `file/replay` to the traces
+  # pipeline below to write OTLP/JSON lines, then load them with
+  # `mailroom replay import <file>` (spans pass the replay attribute allow-list).
+  # file/replay:
+  #   path: /var/lib/otelcol/replay-traces.jsonl
+  #   rotation:
+  #     max_megabytes: 20
+  #     max_backups: 3
   prometheus:
     endpoint: 0.0.0.0:8889
     metric_expiration: 24h
@@ -55,7 +63,7 @@ service:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlphttp/phoenix]
+      exporters: [otlphttp/phoenix]  # add file/replay here (see above)
     metrics:
       receivers: [otlp, prometheus, docker_stats]
       processors: [batch]
