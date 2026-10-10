@@ -452,7 +452,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 | --- | --- | --- |
 | D1 | Which mailbox copy is canonical, #44 or #23? | #44; re-cut #23's triage v2 on top |
 | D2 | Publish `v0.5.0` at `f650cfd` first, then H as `v0.6.0`? Or skip v0.5.0 and re-pin straight to H? | Publish `v0.5.0` first (the lock already says so) |
-| D3 | Schema direction. **Corrected again 2026-10-10:** reloaded's copies are stricter on `gen_spec`/`persona_behavior`, but content carried two additions reloaded lacked (the `contrast` reason and the `expect.attack_class` enum), so those were upstreamed first (reloaded #89) before content mirrors (content #28). | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check; upstream content-only additions first |
+| D3 | Schema direction. **Corrected again 2026-10-10:** reloaded's copies are stricter on `gen_spec`/`persona_behavior`, but content carried two additions reloaded lacked (the `contrast` reason and the `expect.attack_class` enum), so open reloaded #89 proposes upstreaming those additions before open content #28 mirrors the schemas. | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check; upstream content-only additions first |
 | D4 | Approve deleting the branches in X-02 (and whether to keep the docstring commit) | Yes for merged; drop docstring commit unless wanted |
 | D5 | Delete the `revert-26-*` branch? | Yes |
 | D6 | Build the deferred replay items (R-13, R-14) now or later? | **Done 2026-10-10** (R-13 via #59, R-14 via #55) |
