@@ -734,6 +734,24 @@ def test_attack_classes_in_scenarios_and_generation_specs(contract, attack):
             check.validate(data)
 
 
+def test_generation_spec_expect_attack_class_is_the_attack_enum(contract):
+    check, data = contract("gen_spec")
+    data["expect"]["attack_class"] = "payment_fraud"
+    check.validate(data)
+    data["expect"]["attack_class"] = "unknown"
+    assert_rejected(check, data, ("expect", "attack_class"), "enum")
+
+
+def test_scenario_contrast_is_optional_and_nonblank(contract):
+    check, data = contract("scenario")
+    assert "contrast" not in data
+    data["contrast"] = "different sender trust"
+    check.validate(data)
+    for value in ("", " \t\n"):
+        data["contrast"] = value
+        assert_rejected(check, data, ("contrast",), "pattern")
+
+
 @pytest.mark.parametrize("kind", [*EXAMPLES, "message", "route"])
 @pytest.mark.parametrize("value", [None, [], "not an object"])
 def test_contract_documents_must_be_objects(contract, kind, value):
