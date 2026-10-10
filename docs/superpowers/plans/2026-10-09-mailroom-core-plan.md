@@ -12,13 +12,13 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-10 (status refreshed against `main` @ `502995a`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
+**As of:** 2026-10-10 (status refreshed against `main` @ `9c7f22a`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
 row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
 the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `502995a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI). Only #23 remains open (owner decision, D1) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `9c7f22a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups). Only #23 remains open (owner decision, D1) |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -259,7 +259,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 
 #### Deferred follow-ups from PRs #54-#57
 
-Found in review of the merged work; none blocks it. Each is its own small PR (add an ID when one is picked up).
+Found in review of the merged work; none blocks it. All eleven fixed in #60 (`9c7f22a`).
 - [x] `review_approved` is never cleared after a re-extraction consumes it.
 - [x] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
 - [x] Follow mode never adds entities that start after the first snapshot.
