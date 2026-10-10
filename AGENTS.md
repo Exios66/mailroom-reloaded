@@ -516,9 +516,9 @@ parse an issue by heading. Field ids are stable; do not rename them.
   `node --test tests/tui/js/*.test.mjs` (and `tests/sandbox/js/*.test.mjs`);
   `scripts/tui_replay_check.mjs` for TUI changes; `scripts/docker_smoke.sh`
   (optional, only when `deploy/**` or a Dockerfile input changes; prune the build
-  cache afterwards on a small disk). The opt-in `.github/workflows/docker-smoke.yml`
-  is the only workflow; otherwise there is no hosted CI: paste the result lines
-  into the PR.
+  cache afterwards on a small disk). There are no GitHub Actions workflows (the
+  owner's account cannot run them; `docker-smoke.yml` was removed 2026-10-10), so
+  there is no hosted CI: paste the result lines into the PR.
 
 ## 9. Evidence contract
 
