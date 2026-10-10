@@ -209,6 +209,7 @@ class _NullLedger:
 
 
 def test_run_eval_scopes_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Propagate the evaluation run scope to every asynchronous document task."""
     from mailroom_reloaded.eval import runner
 
     captured: list[tuple[str, str, str | None]] = []
@@ -226,6 +227,7 @@ def test_run_eval_scopes_every_task(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runner, "select_graded", lambda *a, **k: set())
     monkeypatch.setattr(runner, "_engine", lambda: object())
     monkeypatch.setattr(runner, "_ensure_table", lambda engine: None)
+    monkeypatch.setattr(runner, "_record_dataset", lambda engine, run_id, cfg: None)
     cfg = runner.EvalConfig()
     monkeypatch.setattr(runner.run_ledger, "ledger_for", lambda overrides: _NullLedger())
     run_id = runner.run_eval(cfg)

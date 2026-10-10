@@ -91,6 +91,31 @@ def test_load_rejects_invariant_violations(tmp_path, overrides):
         load_jev_calibration(out)
 
 
+def test_no_separation_falls_back_to_neutral_thresholds(tmp_path):
+    """No separating power must not yield accept=1.0 / verify=0.0 (issue #14)."""
+    rows = [
+        {"split": "train", "confidence": 0.9, "correct": i % 2}
+        for i in range(40)
+    ]
+
+    result = fit_jev_calibration(rows, tmp_path / "calibration.json")
+
+    assert result["accept_threshold"] == 0.8
+    assert result["verify_threshold"] == 0.5
+
+
+def test_separable_labels_yield_a_trust_band(tmp_path):
+    """A genuinely separable fit keeps a non-degenerate verify/accept band."""
+    rows = [
+        {"split": "train", "confidence": 0.95 if i % 2 else 0.2, "correct": i % 2}
+        for i in range(40)
+    ]
+
+    result = fit_jev_calibration(rows, tmp_path / "calibration.json")
+
+    assert result["verify_threshold"] < result["accept_threshold"]
+
+
 def test_fit_rejects_non_train_split(tmp_path):
     out = tmp_path / "calibration.json"
 

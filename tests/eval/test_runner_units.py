@@ -268,3 +268,22 @@ def test_empty_eval_opens_and_seals_a_zero_document_run(engine, monkeypatch, mod
     )
     closed.assert_called_once_with(ledger, run_id, "completed", expected=0)
     assert rows(engine) == []
+
+
+def test_eval_table_migration_preserves_legacy_rows(document):
+    """Preserve old results while enabling content hashes for new evaluations."""
+    legacy = create_engine('sqlite:///:memory:')
+    try:
+        with legacy.begin() as conn:
+            conn.execute(text(runner._EVAL_DDL.replace('    content_sha256 TEXT,\n', '')))
+            conn.execute(text("INSERT INTO eval_docs (run_id, filename) VALUES ('old', 'a.txt')"))
+        runner._ensure_table(legacy)
+        runner._ensure_table(legacy)
+        assert rows(legacy)[0]['filename'] == 'a.txt'
+        assert rows(legacy)[0]['content_sha256'] is None
+        runner._insert(legacy, runner._base_row(
+            'new', document, None, mode='pipeline', latency_s=0, graded=False,
+        ))
+        assert rows(legacy)[1]['content_sha256'] == document.content_sha256
+    finally:
+        legacy.dispose()

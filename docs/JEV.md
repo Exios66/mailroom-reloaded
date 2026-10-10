@@ -189,17 +189,17 @@ uv run mailroom jev calibrate --rows rows.jsonl --out models/jev_calibration.jso
 ## Calibration
 
 Jev's confidence must be calibrated on **your** data before the gate trusts it.
-`fit_jev_calibration(rows, out)` (`eval/jev_calibration.py:106-138`):
+`fit_jev_calibration(rows, out)` (`eval/jev_calibration.py:162-200`):
 
 1. Reuses the leakage guard `_check_train` — every row must have
    `split == "train"`, else `ValueError` before anything is written
-   (`eval/jev_calibration.py:115`; `eval/train_gate.py:47-55`). Missing
+   (`eval/jev_calibration.py:173`; `eval/train_gate.py:47-55`). Missing
    `confidence`/`correct` keys raise `KeyError`.
 2. Fits a **temperature** by binary NLL minimisation, reusing
-   `train_gate._fit_temperature` (`eval/jev_calibration.py:124-125`;
+   `train_gate._fit_temperature` (`eval/jev_calibration.py:186-188`;
    `eval/train_gate.py:99-108`).
 3. Searches two operating points on the **calibrated** confidence by balanced
-   accuracy (`_search_thresholds`, `eval/jev_calibration.py:90-103`):
+   accuracy (`_search_thresholds`, `eval/jev_calibration.py:115-139`):
    **`accept_threshold`** (above it, the chosen action is trusted) and
    **`verify_threshold`** (the lower edge of the uncertainty band,
    `verify <= accept`).
@@ -209,10 +209,10 @@ Jev's confidence must be calibrated on **your** data before the gate trusts it.
 Rows are plain dicts `{split, confidence, correct}` with `correct ∈ {0,1}`.
 The artifact is a flat JSON object
 `{temperature, accept_threshold, verify_threshold, ece_before, ece_after, n}`
-(`eval/jev_calibration.py:129-136`), read back by `load_jev_calibration`
-(`eval/jev_calibration.py:59-69`) and consumed by `load_jev_gate`. Empty input
+(`eval/jev_calibration.py:190-198`), read back by `load_jev_calibration`
+(`eval/jev_calibration.py:77-94`) and consumed by `load_jev_gate`. Empty input
 writes a neutral calibration (`temperature 1.0`, `accept 0.8`, `verify 0.5`,
-`ece 0.0`) (`_NEUTRAL`, `eval/jev_calibration.py:40-44`, `106-120`).
+`ece 0.0`) (`_NEUTRAL`, `eval/jev_calibration.py:41-45`, `174-179`).
 
 **Careful calibration — why it matters.**
 
@@ -221,8 +221,17 @@ writes a neutral calibration (`temperature 1.0`, `accept 0.8`, `verify 0.5`,
 - Official guidance is **confidence-gated routing**: high confidence → *act*,
   medium → *caution*, low → *human*. The code names are `accept_threshold`
   (act) and `verify_threshold` (the lower edge of the caution band)
-  (`eval/jev_calibration.py:11-13`, `90-103`). Re-fit both thresholds on your
+  (`eval/jev_calibration.py:11-13`, `115-139`). Re-fit both thresholds on your
   own data.
+- **No-separation guard (issue #14).** When the best balanced-accuracy plateau
+  is no better than chance, `_search_thresholds` returns the neutral operating
+  points (`accept 0.8` / `verify 0.5`) instead of the plateau edges. Without
+  this, a degenerate label source (all-`false` `retry_expected`/`review_expected`)
+  produced `accept=1.0` / `verify=0.0`: route confidence below 1.0 enters the
+  verify band, where choices can escalate to human review; only confidence
+  1.0 reaches accept. The `fixtures` config in
+  `Lucius-Morningstar/mailroom-reloaded-fixtures` is the positive-label source;
+  `scripts/jev_harvest.py --mode features` also refuses a single-class batch.
 - The gate consumes **both thresholds**. Inside the medium band Jev's
   temperature-scaled confidence is tiered (`JevGate.decide` in
   `src/mailroom_reloaded/agents/jev.py`): `confidence < verify_threshold` →
