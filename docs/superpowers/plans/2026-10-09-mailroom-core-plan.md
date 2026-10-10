@@ -13,19 +13,21 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 without re-opening anything already done.
 
 **As of:** 2026-10-10 (evening). Status refreshed against reloaded `main` @
-`4ad2df6` and content `main` @ `c3d5cfe` (content PRs #23-#27 merged; the day's
+`8c2ce3a` and content `main` @ `c3d5cfe` (content PRs #23-#27 merged; the day's
 progress is logged in Section 3.5). **K-05 is not yet complete:** content `#28`
 and reloaded `#89` are still open, so content `main` currently **drifts** from
 reloaded `main` on `gen_spec.v1.json` and `scenario.v2.json`
-(`tools/check_schema_drift.py` → `2 of 6 shared schema(s) differ`). Also open on
-reloaded `main`: `#88` (restores upload/review behaviour broken by `4ad2df6`),
-`#86`, `#87`, `#90`. Before acting on any row marked `[PR]`, run
+(`tools/check_schema_drift.py` → `2 of 6 shared schema(s) differ`). Merged since
+the last refresh: reloaded `#88` (upload/review regression), `#87` (R-08 leakage
+check) and `#91` (Docker verification, R-04, closes #81-#84). Still open on
+reloaded `main`: `#89` (K-05 upstream), `#86` (Docker docs/scripts), `#90`
+(Docker verify WIP). Before acting on any row marked `[PR]`, run
 `git fetch --all --prune` in both repos and re-check the PR state; the audit
 tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs (2026-10-10 evening):** #88 (restores upload/review behaviour broken by `4ad2df6`), #89 (K-05 upstream: `contrast` + `attack_class` enum), #86 (Docker docs/scripts), #87 (R-08 leakage check), #90 (Docker verify WIP). Issues #81-#84 track the unrun Docker verification. |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs (2026-10-10 evening, `main` @ `8c2ce3a`):** #89 (K-05 upstream: `contrast` + `expect.attack_class` enum), #86 (Docker docs/scripts), #90 (Docker verify WIP). **Merged since the audit:** #87 (R-08 leakage check), #88 (upload/review regression fix), #91 (Docker verification, R-04; closes #81-#84). |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `c3d5cfe` (2026-10-10 evening) | #5/#6/#15 merged; **#23-#27 merged** (K-02, K-01, #12, #13, C-01/C-02; see 3.5); **#28 open** (K-05 schema mirror, blocked on reloaded #89). Content `main` now: 116 scenarios, 54 active strata rows, 233 dataset attachment rows, 228 unit tests OK. |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -129,10 +131,10 @@ and 135 of 136 planned test names existing (static only).
 
 | Task | State | Remaining (carried to Section 4) |
 | --- | --- | --- |
-| 22 Docker topology | PARTIAL | R-04: compose smoke never run; R-05: `mailroom.eval.*` gauges specified, never emitted |
+| 22 Docker topology | PARTIAL | R-04 done 2026-10-10 (compose smoke run, `docs/evidence/2026-10-10-docker-verification/`); R-05: `mailroom.eval.*` gauges specified, never emitted |
 | 24 Conformance suite | PARTIAL | R-06: live `mailroom conformance` run needs a provider |
 | 23 Modal deploy | code + tests only | R-07: real deploy/teardown/spend check never run |
-| 20 Dataset + runner | done, spec gap | R-08: `bert_manifest_overlap` (`eval/dataset.py:303`) never called by `run_eval` |
+| 20 Dataset + runner | done | R-08 closed 2026-10-10: `run_eval` calls `bert_manifest_overlap` (record-and-warn) |
 
 Accepted divergences from the original plan (record, do not "fix"): prompts live
 in `src/mailroom_reloaded/prompts/`; flow uses `do_extract`/`do_verify`/`do_boss`
@@ -266,12 +268,12 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 ### Phase 3: finish partial plan scope
 
 #### Core pipeline
-- **R-04 Compose smoke.** Needs Docker. [ ] `scripts/smoke.sh` -> record `SMOKE OK`, Phoenix `:6006` 200, Grafana health, and `docker compose config -q` per profile (`tests/deploy/test_compose.py`). Evidence to `docs/evidence/<date>-compose-smoke/`.
+- **R-04 Compose smoke.** [x] 2026-10-10: `scripts/smoke.sh` -> `SMOKE OK` against the lean stack with `--profile mock` (document archived, Phoenix 200, Grafana health ok), also in `split-watcher` mode; `config -q` for every profile in `scripts/docker_smoke.sh`. Evidence: `docs/evidence/2026-10-10-docker-verification/`. Originally: `scripts/smoke.sh` -> record `SMOKE OK`, Phoenix `:6006` 200, Grafana health, and `docker compose config -q` per profile (`tests/deploy/test_compose.py`). Evidence to `docs/evidence/<date>-compose-smoke/`.
 - **R-05 `mailroom.eval.*` gauges.** [ ] Either emit them from `eval/runner.py` (`obs/metrics.py` namespace `M`) and point `deploy/grafana/dashboards/quality.json` at them, or amend `docs/OPERATIONS.md` to state the dashboard reads app counters. Test in `tests/obs/` and `tests/deploy/test_grafana_links.py`. Owner picks; default recommendation: amend the doc (cheaper, matches shipped behaviour).
 - **R-06 Live conformance.** Needs a provider. [ ] `uv run mailroom conformance --provider llamafile|vllm`, commit the card under `docs/evidence/`, summarise pass rates in `docs/EVALUATION.md`.
 - **R-07 Modal.** [ ] Deploy, run, `modal app stop mailroom-vllm`, record spend in `deploy/README.md`. Owner credentials required.
-- **R-08 Leakage check.** [ ] Call `bert_manifest_overlap` from `run_eval` (or amend spec section 5) + test in `tests/eval/test_dataset_runner.py`.
-- **R-09 chromadb alerts.** [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
+- **R-08 Leakage check.** [x] 2026-10-10 (issue #71): code path, not a spec amendment. `run_eval` calls `bert_manifest_overlap` on the sample and stores the result in `eval_runs.overlap_check`; rule is record-and-warn (owner did not choose hard-fail), documented in `docs/EVALUATION.md`. Manifest via `--bert-manifest` or `<base_dir>/models/bert_manifest.jsonl`. Tests: `tests/eval/test_dataset_runner.py -k overlap` (fires, clean, absent, base-dir fallback).
+- **R-09 chromadb alerts.** 2026-10-10: `gh api repos/Exios66/mailroom-reloaded/dependabot/alerts?state=open` returns no open alerts; owner to confirm in the Security tab before ticking. [ ] Dismiss on GitHub as "vulnerable code not used", or pin/replace if a patched version appears.
 
 #### `/tui`
 - **R-10 Live checklist.** PARTLY DONE 2026-10-10 (evidence: `docs/evidence/2026-10-10-tui-live-check/README.md`, screenshots `docs/demo/`). [x] Ran `scripts/tui_replay_check.mjs` (default run, seeded run, token variant: all checks passed) and the nine-point checklist by script against `scripts/tui_dev.sh`; points 1-5, 7, 8, 9 passed. [x] Committed screenshots/output to `docs/evidence/2026-10-10-tui-live-check/` and `docs/demo/`. [x] Point 6 only partly evidenced: mid-session kill passes, but "reload shows `mailroom closed`" needs a served page with a dead API, so it was simulated by blocking `/v1`; the `docs/TUI.md` item is reworded (PR #80). Tracked by issue #73. [ ] Walk was headless and scripted, not done by hand on a physical keyboard or in a headed browser; leave Task 8 Step 3 unticked until a person has done that once.
@@ -305,11 +307,11 @@ Source: a first-scan audit of the repo plus a worker-run check of the Dockerfile
 - [x] **Compose env passthrough:** documented variables were dropped (`MOCK_BASE_URL`, `MAILROOM_TRACE_KEEP`, `MAILROOM_ANCHOR*`, `MAILROOM_JEV_*`, `JEV_API_KEY`, `TYPESAFE_API_KEY`); now null-valued passthroughs, checked with `docker compose config`. Header notes on `.env` location (compose reads `.env` next to the `-f` file; use `--env-file .env`) and `deploy/README.md` "Compose notes".
 - [x] **Collector** stays `user: "0:0"`: non-root works only with the Docker socket gid as `group_add` (permission denied otherwise); recipe documented, change reverted as a regression risk.
 - [x] CodeRabbit's four threads on #80 fixed, replied to and resolved. The docstring-coverage warning (77.78% vs 80%) was not acted on (see D4).
-- [ ] **NOT VERIFIED (blocked: the egress proxy returns 403 for `ghcr.io/astral-sh/uv:0.8.22`, so no image can be built here; Docker Hub pulls work and dockerd runs):** both app image builds (lean, ML), importing the package from `/opt/venv`, uid 10001, `/data` writes, `HEALTHCHECK`, the in-container bind-guard refusal, `compose up`, the sandbox image. The mock-provider/`MOCK_BASE_URL` requirement is from reading `llm/client.py:113-116` only.
-- [ ] Issue #81: build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
-- [ ] Issue #82: launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
-- [ ] Issue #83: sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
-- [ ] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
+- [x] **Verified 2026-10-10 on a Docker host** (`docs/evidence/2026-10-10-docker-verification/`; ModernBERT build, llamafile and `gpu` skipped by owner directive). Was NOT VERIFIED (blocked: the egress proxy returns 403 for `ghcr.io/astral-sh/uv:0.8.22`, so no image can be built here; Docker Hub pulls work and dockerd runs):** both app image builds (lean, ML), importing the package from `/opt/venv`, uid 10001, `/data` writes, `HEALTHCHECK`, the in-container bind-guard refusal, `compose up`, the sandbox image. The mock-provider/`MOCK_BASE_URL` requirement is from reading `llm/client.py:113-116` only.
+- [x] Issue #81 (lean; ML build skipped): build and run `deploy/Dockerfile` (lean and ML, import path, uid, `/data`, health, bind-guard refusal, `Dockerfile.dev`).
+- [x] Issue #82 (`mock` profile added; collector kept root): launch the compose stack (`smoke.sh`, `mock` / `MOCK_BASE_URL` decision, env passthrough in a container, collector privileges, profiles, dev compose, volumes, port exposure). Overlaps P6-D4 (issue #67).
+- [x] Issue #83 (favicon 404 fixed): sandbox container (`Dockerfile.sandbox`, `docker-compose.sandbox.yml`, CSP console clean, inbox deep link live, hardening, token behaviour, reset with no `ledger_write_failed`, content bundle).
+- [x] Issue #84: automate it: `scripts/docker_smoke.sh` (exit 0/1/2), a `docker`-marked pytest wrapper in `tests/deploy/`, always-on static tests, an opt-in `.github/workflows/docker-smoke.yml`.
 - [ ] **Audit items deliberately not fixed (all low severity, unrequested):** upload size cap enforced after spooling; ledger thread start/close race; `metrics._merge`; anchor retry blocking; `audit_log.append` chain read and dead retry; `jev_config` ValueError; `_jev_api_key` fallback for the `local` provider. Open one `follow-up` issue per item when the owner wants them.
 
 #### Deferred follow-ups from PRs #54-#57
@@ -442,7 +444,7 @@ _Status 2026-10-10: every branch below was verified (merged into `origin/main`, 
 
 ### Phase 6: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring
 
-Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. **Status 2026-10-10:** B11 `inbox` is shipped (#78). Docker groundwork in #80 (Dockerfile `schemas/` and `--no-editable`, compose env passthrough, bind-guard fix) is static-verified only. Tracking issues: #63 (P6-A), #64 (B1-B4), #65 (B5-B10), #66 (C1-C5, R-05), #67 (D1-D6, R-04), #68 (E1-E6, R-07), #69 (F1-F4), and #81-#84 for building and launching the Docker images. R-04, R-07 and the live Grafana/Modal checks still need Docker (with ghcr access) or owner credentials and stay unticked until evidenced under `docs/evidence/`.
+Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. **Status 2026-10-10:** B11 `inbox` is shipped (#78). The Docker images, compose stack and sandbox container are now **verified on a real host** (#91, R-04; evidence `docs/evidence/2026-10-10-docker-verification/`; issues #81-#84 closed). Tracking issues: #63 (P6-A), #64 (B1-B4), #65 (B5-B10), #66 (C1-C5, R-05), #67 (D1-D6, R-04), #68 (E1-E6, R-07), #69 (F1-F4). R-07 and the live Grafana/Modal checks still need owner credentials and stay unticked until evidenced under `docs/evidence/`.
 
 ---
 
@@ -472,8 +474,8 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 - [x] `v0.5.0` published. [ ] `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [x] PR #80 merged (`b5f09f9`).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
-- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
+- [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-07, R-09, R-10, R-17 (owner); R-08 closed 2026-10-10.
 - [ ] K-00..K-06 done in the content repo: [x] fault-injection suite shows 0 crashes and 0 unexpected accepts (#23); [x] the bundle sha256 rebuilds identically with the pinned `zstandard` (#24); [x] no un-annotated scenario contradiction remains (K-03 lint in `ci.sh`); [x] content CI loads the pack through reloaded's loader (K-06). [ ] **K-05 still open:** content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json` until reloaded #89 and content #28 merge.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
-- [ ] Docker images build and the compose stack launches with evidence under `docs/evidence/` (issues #81-#84, P6-D4); until then every Docker claim in this plan is static-only.
+- [x] Docker images build and the compose stack launches with evidence under `docs/evidence/2026-10-10-docker-verification/` (issues #81-#84). P6-D4 still needs `/ready` (P6-A4).
 - [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).

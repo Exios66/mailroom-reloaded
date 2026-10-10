@@ -169,7 +169,8 @@ Boss actions (`approve_outbound` shows as awaiting human approval), relations wi
 `/health` and the static `/ui` shell are public (like `/health` and `/ui` in the
 main API); every JSON route is behind the token. The page uses no CDN or external
 fetch, renders message text with `textContent` only, and is served with
-`Content-Security-Policy: default-src 'self'`.
+`Content-Security-Policy: default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'`
+(`CSP` in `sandbox/server/app.py`; no CORS headers).
 
 ## Exposing it on a dev server
 

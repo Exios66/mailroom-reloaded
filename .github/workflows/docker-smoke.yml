@@ -1,0 +1,39 @@
+name: Docker smoke test
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'src/**'
+      - 'schemas/**'
+      - 'scripts/docker_smoke.sh'
+      - '.github/workflows/docker-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+
+    env:
+      DOCKER_SMOKE_LOG_DIR: /tmp/docker-smoke-logs
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Run Docker smoke test
+        run: scripts/docker_smoke.sh
+        timeout-minutes: 20
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+        with:
+          name: docker-smoke-logs
+          path: /tmp/docker-smoke-logs/
+          retention-days: 5

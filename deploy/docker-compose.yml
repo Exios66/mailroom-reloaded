@@ -1,15 +1,17 @@
 # mailroom-reloaded topology (spec §9). Run from the repo root:
-#   docker compose -f deploy/docker-compose.yml up -d --build                     # app + observability
-#   docker compose -f deploy/docker-compose.yml --profile local-llm up -d --build  # + llamafile
-#   docker compose -f deploy/docker-compose.yml --profile gpu up -d                # + vLLM + DCGM
-#   docker compose -f deploy/docker-compose.yml --profile split-watcher up -d      # standalone watcher
+#   docker compose -f deploy/docker-compose.yml up -d --build                        # app + observability
+#   MOCK_BASE_URL=http://mock:8000/v1 docker compose -f deploy/docker-compose.yml \
+#     --profile mock up -d --build                                                  # + mock provider
+#   docker compose -f deploy/docker-compose.yml --profile local-llm up -d --build    # + llamafile
+#   docker compose -f deploy/docker-compose.yml --profile gpu up -d                  # + vLLM + DCGM
+#   docker compose -f deploy/docker-compose.yml --profile split-watcher up -d        # standalone watcher
 #       (set MAILROOM_EMBED_WATCHER=0 so `app` does not also run a watcher)
 # MAILROOM_API_TOKEN is required: the app binds 0.0.0.0 and refuses to start without it.
 # NOTE: compose reads `.env` from the directory of the -f file (deploy/), not the repo
 # root. With a root-level .env, pass `--env-file .env`.
-# DEFAULT_PROVIDER=mock needs MOCK_BASE_URL (an OpenAI-compatible fake; see
-# docker-compose.dev.yml) or the first model call raises; set DEFAULT_PROVIDER=vllm,
-# llamafile or openrouter for a real deployment.
+# DEFAULT_PROVIDER=mock needs MOCK_BASE_URL (point to deploy/mock_openai.py via the `mock`
+# profile, or supply your own); the first model call raises if it is unset and
+# DEFAULT_PROVIDER=mock. For production, set DEFAULT_PROVIDER=vllm, llamafile or openrouter.
 
 x-app-env: &app-env
   MAILROOM_BASE_DIR: /data
@@ -79,6 +81,20 @@ services:
       - mailroom_data:/data
       - hf_cache:/hf_cache
     depends_on: [otel-collector]
+
+  mock:
+    profiles: ["mock"]
+    build: *app-build
+    image: mailroom-reloaded:latest
+    restart: unless-stopped
+    command: ["uvicorn", "mock_openai:app", "--app-dir", "/mock", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - ./mock_openai.py:/mock/mock_openai.py:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
