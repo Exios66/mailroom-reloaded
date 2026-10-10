@@ -13,21 +13,22 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 without re-opening anything already done.
 
 **As of:** 2026-10-10 (evening). Status refreshed against reloaded `main` @
-`8c2ce3a` and content `main` @ `c3d5cfe` (content PRs #23-#27 merged; the day's
-progress is logged in Section 3.5). **K-05 is not yet complete:** content `#28`
-and reloaded `#89` are still open, so content `main` currently **drifts** from
-reloaded `main` on `gen_spec.v1.json` and `scenario.v2.json`
-(`tools/check_schema_drift.py` → `2 of 6 shared schema(s) differ`). Merged since
-the last refresh: reloaded `#88` (upload/review regression), `#87` (R-08 leakage
-check) and `#91` (Docker verification, R-04, closes #81-#84). Still open on
-reloaded `main`: `#89` (K-05 upstream), `#86` (Docker docs/scripts), `#90`
-(Docker verify WIP). Before acting on any row marked `[PR]`, run
-`git fetch --all --prune` in both repos and re-check the PR state; the audit
-tables in Section 4 will go stale within hours.
+`09d318d` and content `main` @ `c3d5cfe` (content PRs #23-#27 merged; the day's
+progress is logged in Section 3.5). **K-05 is one merge away:** reloaded `#94`
+landed the `contrast` reason and the `expect.attack_class` enum on `main` (so
+`gen_spec.v1.json` no longer drifts) and closed `#89` as superseded; content
+`main` still drifts from reloaded `main` on `scenario.v2.json` (the content-only
+`unknown` token + the name description). Content `#28` — whose schemas are now
+byte-identical to reloaded `main` — closes it. Merged since the last refresh:
+`#87` (R-08), `#88` (upload/review fix), `#91` (Docker verification, R-04),
+`#94` (schema tests + the `#89` schema changes). Still open on reloaded `main`:
+`#86` (Docker docs/scripts), `#90` (Docker verify WIP). Before acting on any row
+marked `[PR]`, run `git fetch --all --prune` in both repos and re-check the PR
+state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs (2026-10-10 evening, `main` @ `8c2ce3a`):** #89 (K-05 upstream: `contrast` + `expect.attack_class` enum), #86 (Docker docs/scripts), #90 (Docker verify WIP). **Merged since the audit:** #87 (R-08 leakage check), #88 (upload/review regression fix), #91 (Docker verification, R-04; closes #81-#84). |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs (2026-10-10 evening, `main` @ `09d318d`):** #86 (Docker docs/scripts), #90 (Docker verify WIP). **Merged since the audit:** #87 (R-08 leakage check), #88 (upload/review regression fix), #91 (Docker verification, R-04; closes #81-#84), #94 (schema tests + the `contrast`/`attack_class` schema changes; #89 closed as superseded). |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `c3d5cfe` (2026-10-10 evening) | #5/#6/#15 merged; **#23-#27 merged** (K-02, K-01, #12, #13, C-01/C-02; see 3.5); **#28 open** (K-05 schema mirror, blocked on reloaded #89). Content `main` now: 116 scenarios, 54 active strata rows, 233 dataset attachment rows, 228 unit tests OK. |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -205,7 +206,7 @@ Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
 | content #25 | Issue #12: the deliberate strata-drift fixture no longer leaks a failure-looking `out of date` line (`tests/test_content_v2.py` captures stderr) | content `tools/ci.sh`; merge `85b1bdb` |
 | content #26 | Issue #13: `tools/migrate_scenarios_v2.py` refuses re-runs unless `--confirm-historical-rerun` (`tests/test_migrate_guard.py`) | content `tools/ci.sh`; merge `1b20534` |
 | content #27 | **C-01 + C-02 done.** strata `rows_unverified` 54 → 0 (54 `active`); 233 dataset rows in `attachments/manifest.csv`; `responds_to,answers` added to `relations/dataset_relation_map.csv`; `_dataset_references()` leak-scan exemption; `tests/test_validate.py` | content `tools/ci.sh`; merge `c3d5cfe` (+ CodeRabbit `3882299`) |
-| content #28 / reloaded #89 | **K-05 in progress, NOT merged.** #89 upstreams `contrast` + the `expect.attack_class` enum to reloaded; #28 then mirrors both files byte-for-byte. Until both land, content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`. Verified on the #28 branch against reloaded `d1aa077`: drift none, `tools/ci.sh` green with no skip flags | open PRs |
+| content #28 / reloaded #89→#94 | **K-05 one merge away.** reloaded #94 landed `contrast` + the `expect.attack_class` enum on `main` and closed #89 as superseded; content #28 now mirrors reloaded `main` byte-for-byte. Remaining drift: `scenario.v2.json` (content `main` still carries `unknown` + the old description). Merging #28 clears it | `tools/check_schema_drift.py` → `1 of 6 shared schema(s) differ` |
 
 Counts last measured (this machine): `ruff` clean; `pytest` full run green except the 6 environmental root-user `tests/sandbox/test_server_deploy.py::test_startup_bind_policy` cases that also fail on `main`; one flaky test seen once (`tests/storage/test_span_store.py::test_concurrent_writers_share_the_wal_file`). There is no CI (`.github/workflows` does not exist), so PRs carry no statuses; gates are local.
 
@@ -404,7 +405,7 @@ K-01..K-07 are content-repo work (branch from content `main`; `bash tools/ci.sh`
 
 #### K-05: Schema ownership, corrected (replaces the X-03 recommendation)
 **Why (measured):** the earlier audit had the direction reversed. Diffing the two copies, reloaded is the stricter one on `gen_spec.v1.json` (extra `allOf` forbidding real brands/URLs/links/phone numbers, and `required: ["forbidden"]`) and on `persona_behavior.v1.json` (`additionalProperties: false` at four levels; content has none). Content only differs by also allowing relation `unknown` in `scenario.v2.json`. All 142 pack files (scenarios, gen specs, persona behaviors) already validate against reloaded's schemas, so adopting them is safe.
-- [ ] Content copies reloaded's `schemas/*.json` byte-for-byte; drop `unknown`. **IN PROGRESS (2026-10-10):** content #28 (mirror) + reloaded #89 (upstream the `contrast` reason and the `expect.attack_class` enum that content carried and the consumer lacked). Both open; **merge #89 before #28**. Until both land, content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json`.
+- [ ] Content copies reloaded's `schemas/*.json` byte-for-byte; drop `unknown`. **IN PROGRESS (2026-10-10):** reloaded `#94` landed the `contrast` reason and the `expect.attack_class` enum on `main` (`#89` closed as superseded). Content `#28` now mirrors reloaded `main` byte-for-byte; **merging #28 clears the last drift** (`scenario.v2.json`).
 - [x] Add the schema drift check to `tools/ci.sh` next to strata drift (`MAILROOM_RELOADED`, same pinned-commit fetch). DONE (`tools/check_schema_drift.py`; prints a loud SKIPPED notice when `MAILROOM_RELOADED` is unset).
 - [x] Update X-03 and D3 accordingly (done in this edit).
 
@@ -454,7 +455,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 | --- | --- | --- |
 | D1 | Which mailbox copy is canonical, #44 or #23? | #44; re-cut #23's triage v2 on top |
 | D2 | Publish `v0.5.0` at `f650cfd` first, then H as `v0.6.0`? Or skip v0.5.0 and re-pin straight to H? | Publish `v0.5.0` first (the lock already says so) |
-| D3 | Schema direction. **Corrected again 2026-10-10:** reloaded's copies are stricter on `gen_spec`/`persona_behavior`, but content carried two additions reloaded lacked (the `contrast` reason and the `expect.attack_class` enum), so open reloaded #89 proposes upstreaming those additions before open content #28 mirrors the schemas. | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check; upstream content-only additions first |
+| D3 | Schema direction. **Corrected again 2026-10-10:** reloaded's copies are stricter on `gen_spec`/`persona_behavior`, but content carried two additions reloaded lacked (the `contrast` reason and the `expect.attack_class` enum), so those were upstreamed first — landed via reloaded #94 (superseding #89) — before content #28 mirrors the schemas. | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check; upstream content-only additions first |
 | D4 | Approve deleting the branches in X-02 (and whether to keep the docstring commit) | Yes for merged; drop docstring commit unless wanted |
 | D5 | Delete the `revert-26-*` branch? | Yes |
 | D6 | Build the deferred replay items (R-13, R-14) now or later? | **Done 2026-10-10** (R-13 via #59, R-14 via #55) |
@@ -475,7 +476,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [x] PR #80 merged (`b5f09f9`).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-07, R-09, R-10, R-17 (owner); R-08 closed 2026-10-10.
-- [ ] K-00..K-06 done in the content repo: [x] fault-injection suite shows 0 crashes and 0 unexpected accepts (#23); [x] the bundle sha256 rebuilds identically with the pinned `zstandard` (#24); [x] no un-annotated scenario contradiction remains (K-03 lint in `ci.sh`); [x] content CI loads the pack through reloaded's loader (K-06). [ ] **K-05 still open:** content `main` drifts from reloaded `main` on `gen_spec.v1.json` + `scenario.v2.json` until reloaded #89 and content #28 merge.
+- [ ] K-00..K-06 done in the content repo: [x] fault-injection suite shows 0 crashes and 0 unexpected accepts (#23); [x] the bundle sha256 rebuilds identically with the pinned `zstandard` (#24); [x] no un-annotated scenario contradiction remains (K-03 lint in `ci.sh`); [x] content CI loads the pack through reloaded's loader (K-06). [ ] **K-05 one merge away:** reloaded #94 landed the schema additions; only `scenario.v2.json` drifts until content #28 merges.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
 - [x] Docker images build and the compose stack launches with evidence under `docs/evidence/2026-10-10-docker-verification/` (issues #81-#84). P6-D4 still needs `/ready` (P6-A4).
 - [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).
