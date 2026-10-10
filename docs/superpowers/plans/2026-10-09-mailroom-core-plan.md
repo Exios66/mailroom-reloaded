@@ -12,13 +12,13 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-10 (status refreshed against `main` @ `ab6b715`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
+**As of:** 2026-10-10 (status refreshed against `main` @ `9c7f22a`; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
 row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
 the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `ab6b715`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit:** #45, #54, #55, #56, #57 merged; #23 and #44 still open (the mailbox code is not on `main`) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `9c7f22a`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups). Only #23 remains open (owner decision, D1) |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -259,22 +259,22 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
 
 #### Deferred follow-ups from PRs #54-#57
 
-Found in review of the merged work; none blocks it. Each is its own small PR (add an ID when one is picked up).
-- [ ] `review_approved` is never cleared after a re-extraction consumes it.
-- [ ] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
-- [ ] Follow mode never adds entities that start after the first snapshot.
-- [ ] The server's `seen` set and the `MAX_FRAMES=0` (unlimited) stream grow without bound.
-- [ ] The 100k-row read cap is not surfaced to the client as an error frame.
-- [ ] `followSeek` uses the client clock, not the server's.
-- [ ] The footer legend clips `q quit` below about 100 columns.
-- [ ] Panel `key` metadata is accepted by `registerPanel` but unused.
-- [ ] Reserved panel ids are not rejected by `registerPanel`.
-- [ ] Custom panel rows are not sanitised.
-- [ ] `phoenix_project` in `GET /links` is read from `os.environ` rather than `settings.py`.
+Found in review of the merged work; none blocks it. All eleven fixed in #60 (`9c7f22a`).
+- [x] `review_approved` is never cleared after a re-extraction consumes it.
+- [x] A review restore failure leaves the manifest `processing`; the retried resolve then 404s.
+- [x] Follow mode never adds entities that start after the first snapshot.
+- [x] The server's `seen` set and the `MAX_FRAMES=0` (unlimited) stream grow without bound.
+- [x] The 100k-row read cap is not surfaced to the client as an error frame.
+- [x] `followSeek` uses the client clock, not the server's.
+- [x] The footer legend clips `q quit` below about 100 columns.
+- [x] Panel `key` metadata is accepted by `registerPanel` but unused.
+- [x] Reserved panel ids are not rejected by `registerPanel`.
+- [x] Custom panel rows are not sanitised.
+- [x] `phoenix_project` in `GET /links` is read from `os.environ` rather than `settings.py`.
 
-#### Governance (landed with the governance PR; content repo PR #15)
+#### Governance (LANDED: reloaded #58, content #15)
 
-Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, `agent_task`, `docs_drift`, `follow_up`, plus `config.yml`), a PR template (`.github/pull_request_template.md`) that ends in an `agent-report` YAML block, and `AGENTS.md` conventions. Verified here: the five forms, `config.yml` and the template's `agent-report` block are in the tree. `AGENTS.md` is not in this tree (it arrives with #44 per R-03, or lives in the content repo), so it is recorded but not verified in `mailroom-reloaded`. Hard rule 6 still applies; the template's validation checklist is the place to paste result lines.
+Issue forms in `.github/ISSUE_TEMPLATE/*.yml` (`bug_report`, `feature_request`, `agent_task`, `docs_drift`, `follow_up`, plus `config.yml`), a PR template (`.github/pull_request_template.md`) that ends in an `agent-report` YAML block, and `AGENTS.md` conventions. Verified here: the five forms, `config.yml` and the template's `agent-report` block are in the tree. `AGENTS.md` (from #44) gained §8.1 (branches, stacked PRs, merge rules, CodeRabbit handling, pruning, workers) and §8.2 (form field-id table, `agent-task` rules, `agent-report` schema, gates) in #58. Issue-form rendering on GitHub and the `agent-task` / `follow-up` labels are not verified. Hard rule 6 still applies; the template's validation checklist is the place to paste result lines.
 
 ### Phase 4: content pack to v1.0 (`mailroom-sandbox-content`)
 
@@ -371,12 +371,12 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 - [ ] Do K-05. Reloaded's root `schemas/` remains the contract owner (content-plan CD8).
 
 #### X-02: Retire merged and dead branches (destructive; needs owner approval, D4)
-_Status 2026-10-10: branch retirement is in progress; no box below is ticked here because branch state is not visible from the tree._
+_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`, `feat/sandbox-correspondent-tuning` (#23)._
 - [ ] Safe (fully merged): reloaded `docs/mailroom-reloaded-design`, `feat/mailroom-reloaded-completion`, `feat/tui-brand-theme`, all 12 `claude/trace-replay-*`.
 - [ ] After R-18 is done: `claude/mailroom-reloaded-build`, `coderabbit/*` (all four).
 - [ ] After D5: `revert-26-claude/mailroom-trace-replay-plan-5nj1nk` (reverts rev 4 of the old plan; conflicts with main, which built on it; no PR).
 - [ ] After R-03: `feat/sandbox-correspondent-tuning`. After X-01 merges: reloaded `feat/heldout-boss-mailbox-agents`, content `feat/heldout-h-series`. After R-02: `fix/jev-integration-issue-14`.
-- [ ] Local only: fast-forward reloaded local `main` (16 behind), delete stray local branch in content.
+- [x] Local only: reloaded local `main` fast-forwarded to `502995a`; stray `wt/*` worktree branches removed.
 
 #### X-04: Issue tracker and housekeeping
 - [ ] Reloaded issues: #1 (24-task tracker) comment with link to this plan and close; #14 closes via R-02; #18 (ingress simulator, likely done by PR #22) verify and close; #24 (replay viewer plan) close after R-12; #8 (Jev) keep open for calibrated scorer.
@@ -384,6 +384,10 @@ _Status 2026-10-10: branch retirement is in progress; no box below is ticked her
 - [ ] `DISCUSSION_BOARD.md`: header still names a merged branch (D10).
 - [ ] `HANDOFF` items: execution-method decision is moot (retired with the archive).
 - [ ] Verify tracked `gen/` in content is intentional generator output (119 files) and say so in `CONTENT_SPEC.md`.
+
+### Phase 6: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring
+
+Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. R-04, R-07 and the live Grafana/Modal checks still need Docker or owner credentials and stay unticked until evidenced under `docs/evidence/`.
 
 ---
 
@@ -396,7 +400,7 @@ _Status 2026-10-10: branch retirement is in progress; no box below is ticked her
 | D3 | Schema direction. **Corrected:** reloaded's copies are the stricter ones (K-05), so nothing needs upstreaming. | Content adopts reloaded's `schemas/` byte-for-byte; drop `unknown`; add drift check |
 | D4 | Approve deleting the branches in X-02 (and whether to keep the docstring commit) | Yes for merged; drop docstring commit unless wanted |
 | D5 | Delete the `revert-26-*` branch? | Yes |
-| D6 | Build the deferred replay items (R-13, R-14) now or later? | Later, after Phases 0-2 |
+| D6 | Build the deferred replay items (R-13, R-14) now or later? | **Done 2026-10-10** (R-13 via #59, R-14 via #55) |
 | D7 | Adopt the fixtures mirror as eval default? | No; keep opt-in (`ed7576b6` stays default) |
 | D8 | Adopt `docs/evidence/<date>-<topic>/` for screenshots and check output? | Yes |
 | D9 | Rename content `email/` vs `emails/`? | No; document the distinction (done in 1.2) |
@@ -409,11 +413,11 @@ _Status 2026-10-10: branch retirement is in progress; no box below is ticked her
 
 ## 6. Definition of done for this plan
 
-- [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [ ] Re-run on current `main` (not done after #45, #54-#57); `main` green in both repos is unconfirmed.
+- [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [x] Re-run on `main` plus #44/#59 changes 2026-10-10: reloaded `ruff` clean, `pytest --ignore=tests/sandbox` 1520 passed, `node --test tests/tui/js` 235 pass, `tests/sandbox` 745 passed with 6 root-user `test_startup_bind_policy` failures (environmental). Content repo not re-run.
 - [ ] `v0.5.0` and `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
 - [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [ ] #23 resolved (owner); no open PR without an owner.
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
 - [ ] K-08 loader item merged in reloaded; the Boss-decision recovery item is tracked in the re-cut of #23.
-- [ ] `docs/superpowers/plans/` still contains only this file.
+- [ ] `docs/superpowers/plans/` contains this file plus only the dated sub-plans it links (currently `2026-10-10-pipeline-tui-wiring.md`, Phase 6).

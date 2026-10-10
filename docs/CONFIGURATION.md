@@ -67,7 +67,7 @@ block → a default (`_jev_env`/`_jev_field`/`_jev_scalar`). `jev_config()` is
 | `OTEL_SERVICE_NAME` | compose (`docker-compose.yml:19`) | `mailroom` | `service.name` resource attribute. |
 | `MAILROOM_INSTANCE_ID` | `obs/tracing.py:113-115` | `hostname:pid` | `service.instance.id`. |
 | `MAILROOM_GPU_REPLICA` (or `GPU_REPLICA`) | `obs/tracing.py:118-124` | `0` | `gpu.replica` resource attribute. |
-| `MAILROOM_PHOENIX_PROJECT` | `obs/tracing.py:133-135` | `mailroom-live` | `openinference.project.name` (Phoenix project). |
+| `MAILROOM_PHOENIX_PROJECT` | `settings.py` (`phoenix_project`), `obs/tracing.py:133-135` | `mailroom-live` | `openinference.project.name` (Phoenix project); `GET /links` returns it as `phoenix_project`. |
 
 ### Docker / build (compose and Modal)
 

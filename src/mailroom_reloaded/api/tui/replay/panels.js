@@ -207,25 +207,34 @@ function fieldsPanel(ctx) {
 }
 
 const BUILTINS = [
-  { id: 'metrics', title: 'Metrics', key: 'm', render: metricsPanel },
-  { id: 'tokens', title: 'Tokens', key: 't', render: tokensPanel },
-  { id: 'decisions', title: 'Decisions', key: 'd', render: decisionsPanel },
-  { id: 'latency', title: 'Latency', key: 'l', render: latencyPanel },
-  { id: 'fields', title: 'Fields', key: 'f', render: fieldsPanel },
+  { id: 'metrics', title: 'Metrics', render: metricsPanel },
+  { id: 'tokens', title: 'Tokens', render: tokensPanel },
+  { id: 'decisions', title: 'Decisions', render: decisionsPanel },
+  { id: 'latency', title: 'Latency', render: latencyPanel },
+  { id: 'fields', title: 'Fields', render: fieldsPanel },
 ];
 
 // ------------------------------------------------------------------ registry
 
 const registry = new Map();
 
-/**
- * Register an insight panel. Throws on a bad spec or a duplicate id (kept honest
- * rather than silently overwriting a shipped panel). Returns the stored spec.
- */
-export function registerPanel(spec = {}) {
-  const { id, title, key, render } = spec || {};
-  if (typeof id !== 'string' || id.trim() === '') {
-    throw new TypeError('panel id must be a non-empty string');
+// Ids the viewer itself handles (`panel` selectors in the command) plus the shipped panels.
+const RESERVED_IDS = new Set(['none', 'inspector', 'ledger', ...BUILTINS.map((b) => b.id)]);
+const ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+const MAX_TITLE = 40;
+// Control, zero-width and bidi characters would reorder or hide cells (as grid.js).
+const CTRL_RE = new RegExp(
+  '[\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u061c\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u206f\\ufeff]',
+  'g',
+);
+
+function addPanel(spec, builtin) {
+  const { id, title, render } = spec || {};
+  if (typeof id !== 'string' || !ID_RE.test(id)) {
+    throw new TypeError('panel id must be 1-32 characters of letters, digits, _ or -');
+  }
+  if (!builtin && RESERVED_IDS.has(id)) {
+    throw new Error(`panel id '${id}' is reserved`);
   }
   if (typeof render !== 'function') {
     throw new TypeError(`panel '${id}': render must be a function`);
@@ -233,14 +242,22 @@ export function registerPanel(spec = {}) {
   if (registry.has(id)) {
     throw new Error(`panel '${id}' is already registered`);
   }
-  const entry = {
-    id,
-    title: typeof title === 'string' && title ? title : id,
-    key: typeof key === 'string' && key ? key : null,
-    render,
-  };
+  const cleanTitle = typeof title === 'string' ? Array.from(title.replace(CTRL_RE, ' ').trim()).slice(0, MAX_TITLE).join('') : '';
+  const entry = { id, title: cleanTitle || id, render };
   registry.set(id, entry);
   return entry;
+}
+
+/**
+ * Register an insight panel `{ id, title, render }`. Throws on a bad spec, a reserved id
+ * (`none`, `inspector`, `ledger` or a shipped panel's id) or a duplicate id, so a shipped
+ * panel is never replaced. The id must be 1-32 characters of letters, digits, `_` or `-`;
+ * the title is stripped of control characters and clamped to 40. Panels are reached with
+ * `p`; there is no per-panel key. The rows `render` returns are sanitised by the grid
+ * (control characters, classes, length). Returns the stored spec.
+ */
+export function registerPanel(spec = {}) {
+  return addPanel(spec, false);
 }
 
 /** The registered spec, or null. */
@@ -248,15 +265,15 @@ export function getPanel(id) {
   return registry.get(id) ?? null;
 }
 
-/** Every panel as { id, title, key }, in registration order. */
+/** Every panel as { id, title }, in registration order. */
 export function listPanels() {
-  return [...registry.values()].map(({ id, title, key }) => ({ id, title, key }));
+  return [...registry.values()].map(({ id, title }) => ({ id, title }));
 }
 
 /** Restore exactly the built-in panel set (test helper). */
 export function resetPanels() {
   registry.clear();
-  for (const spec of BUILTINS) registerPanel(spec);
+  for (const spec of BUILTINS) addPanel(spec, true);
 }
 
 resetPanels();
