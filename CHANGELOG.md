@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Conventions now require verifying merge state per branch and stating the content mirror for schema PRs.** `AGENTS.md` §8.1: after `git fetch --all --prune`, check `git merge-base --is-ancestor origin/<branch> origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`, never from a note or PR list. §8.2: a PR that changes root `schemas/` must state the content-repo mirror follow-up (K-05) and the merge order (this repo first, then the content mirror).
+
 ### Added
 
 - Docker smoke automation (issue #84): `scripts/docker_smoke.sh [--no-build] [--keep] [--only app|sandbox|compose]` builds the lean app and sandbox images, runs them and checks the compose files (exit 0 ok, 1 failed, 2 prerequisite missing; prints `DOCKER SMOKE OK`; removes everything named `mrl-smoke*`). `tests/deploy/test_docker_smoke.py` wraps it behind the new `docker` pytest marker (deselected by default) and adds always-on guards that every project Dockerfile copies `schemas/` and the runtime install is `--no-editable`. `.github/workflows/docker-smoke.yml` is the first workflow: opt-in by paths, `contents: read`, actions pinned by SHA. Documented in `deploy/README.md` and `AGENTS.md` sections 6 and 8.2.
