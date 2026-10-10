@@ -132,6 +132,12 @@ def eval(
         None, "--config", help="Single labeled config (fixtures/bundles) instead of the join."
     ),
     gpu_usd_per_hour: float = typer.Option(0.80, "--gpu-usd-per-hour"),
+    bert_manifest: Path = typer.Option(
+        None,
+        "--bert-manifest",
+        exists=True,
+        help="BERT-training documents manifest (JSONL file or dir) for the leakage check.",
+    ),
 ) -> None:
     """Run an evaluation posture and print its ``run_id``."""
     from mailroom_reloaded.eval.runner import EvalConfig, run_eval
@@ -154,6 +160,7 @@ def eval(
         dataset_repo=dataset_repo,
         dataset_config=config,
         gpu_usd_per_hour=gpu_usd_per_hour,
+        bert_manifest=bert_manifest,
     )
     run_id = run_eval(cfg)
     typer.echo(run_id)
