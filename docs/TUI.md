@@ -132,6 +132,13 @@ for one, paste it into its API token field. Without a valid `sandbox_url` the co
 `inbox: sandbox URL not configured (set MAILROOM_SANDBOX_URL)`. In the replay viewer's inspector a
 `sandbox` row shows the same link when `/links` carries `sandbox_url` (there is no key for it). `sandbox_url` is the configured `MAILROOM_SANDBOX_URL` (default `http://localhost:8100`), so the `sandbox` row and the `inbox` target appear even when no sandbox is running.
 
+The **status bar** at the top of `/tui` carries the outbound links. `ui ↗` opens `/ui` in the same
+tab; `inbox ↗` opens the sandbox ingress simulator in a new tab, with the same
+`<sandbox_url>/ui#tab=messages&mailbox=open&role=correspondent` target as the `inbox` command. The
+`inbox ↗` link is added once `GET /links` resolves (`terminal.js` `addSisterLink`, wired in
+`main.js`); it is omitted when `sandbox_url` is not configured or the fetch fails, and boot never
+depends on it.
+
 ## Themes
 
 `dark` (default), `light` (labelled proposed in the kit), and `hc` (high

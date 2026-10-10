@@ -255,6 +255,40 @@ function mkTerm({ run } = {}) {
   return { term, input, display, out, type, key, texts, history };
 }
 
+function collectLinks(node, found = []) {
+  if (node.tagName === 'a') found.push(node);
+  for (const c of node.children || []) collectLinks(c, found);
+  return found;
+}
+
+test('status bar carries the ui link and addSisterLink adds the ingress link', () => {
+  const doc = fakeTerminalDoc();
+  doc.nodes['.status-bar'] = fakeEl('header');
+  const registry = { get: () => undefined, complete: () => ({ matches: [], ghost: '' }) };
+  const history = { push() {}, reset() {}, prev() {}, next() {} };
+  const term = createTerminal({ root: doc, registry, history, api: {} });
+  const bar = doc.nodes['.status-bar'];
+
+  const ui = collectLinks(bar).find((a) => a.textContent === 'ui ↗');
+  assert.ok(ui, 'ui link is rendered');
+  assert.equal(ui.attrs.href, '/ui');
+  assert.equal(ui.attrs.target, undefined, 'the same-origin ui link opens in place');
+
+  const url = 'http://localhost:8100/ui#tab=messages&mailbox=open&role=correspondent';
+  const item = term.addSisterLink('inbox ↗', url, { external: true });
+  assert.ok(item, 'addSisterLink returns the new item');
+  const ingress = collectLinks(bar).find((a) => a.textContent === 'inbox ↗');
+  assert.ok(ingress, 'the ingress link is appended to the status bar');
+  assert.equal(ingress.attrs.href, url);
+  assert.equal(ingress.attrs.target, '_blank', 'the other-origin ingress link opens in a new tab');
+  assert.equal(ingress.attrs.rel, 'noopener noreferrer');
+});
+
+test('addSisterLink is a no-op without a status bar', () => {
+  const t = mkTerm();
+  assert.equal(t.term.addSisterLink('inbox ↗', 'http://localhost:8100/ui'), null);
+});
+
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
 test('multi-line paste inserts the first line, warns, and never runs', async () => {

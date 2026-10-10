@@ -145,18 +145,33 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     statusEls.set(spec.key, b);
     return item;
   }
+  // A status-bar "sister link" occupies the same slot as `ui ↗`. Built at boot, or
+  // added later via `addSisterLink` once the public GET /links supplies a URL (the
+  // ingress simulator's `sandbox_url`). No-op (returns null) without a status bar.
+  let statusLeft = null;
+  function addSisterLink(label, href, { external = false } = {}) {
+    if (!statusLeft) return null;
+    const item = el(doc, 'span', 'status-item essential');
+    const a = el(doc, 'a', 'sister-link', label);
+    a.setAttribute('href', href);
+    if (external) {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+    }
+    item.appendChild(a);
+    statusLeft.appendChild(item);
+    return item;
+  }
+
   if (statusBar) {
     const left = el(doc, 'div', 'status-group');
+    statusLeft = left;
     const dotItem = el(doc, 'span', 'status-item essential');
     dotItem.appendChild(el(doc, 'span', 'dot'));
     dotItem.appendChild(el(doc, 'span', '', 'mailroom@floor'));
     left.appendChild(dotItem);
     for (const spec of STATUS_LEFT) left.appendChild(statusItem(spec));
-    const linkItem = el(doc, 'span', 'status-item essential');
-    const link = el(doc, 'a', 'sister-link', 'ui ↗');
-    link.setAttribute('href', '/ui');
-    linkItem.appendChild(link);
-    left.appendChild(linkItem);
+    addSisterLink('ui ↗', '/ui');
     const right = el(doc, 'div', 'status-group');
     for (const spec of STATUS_RIGHT) right.appendChild(statusItem(spec));
     statusBar.appendChild(left);
@@ -608,5 +623,5 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     input.setAttribute('aria-disabled', enabled ? 'false' : 'true');
   }
 
-  return { ctx, run, focus, setInputEnabled };
+  return { ctx, run, focus, setInputEnabled, addSisterLink };
 }

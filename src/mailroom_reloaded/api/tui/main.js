@@ -11,6 +11,7 @@ import { registerSandbox } from './commands/sandbox.js';
 import { registerShell } from './commands/shell.js';
 import { createModuleHost } from './plugins.js';
 import { deepLinkCommand, deepLinkKind } from './deeplink.js';
+import { inboxUrl, loadLinks, sandboxBase } from './lib/links.js';
 
 async function loadText(name) {
   try {
@@ -54,6 +55,17 @@ export async function start() {
   setTimeout(() => document.body.classList.remove('powering-on'), 650);
   const term = createTerminal({ root: document, registry, history, api });
   term.setInputEnabled(false); // read-only until boot resolves
+  // The ingress-simulator link sits beside `ui ↗` in the status bar. Its URL comes
+  // from the public GET /links (`sandbox_url`, server setting MAILROOM_SANDBOX_URL);
+  // a missing config or a failed fetch just leaves the link off. Best-effort: this
+  // never blocks or fails boot.
+  loadLinks(term.ctx)
+    .then((links) => {
+      const base = sandboxBase(links);
+      const href = base ? inboxUrl(base) : null;
+      if (href) term.addSisterLink('inbox ↗', href, { external: true });
+    })
+    .catch(() => {});
   const [banner, bannerCompact] = await Promise.all([
     loadText('banner.txt'),
     loadText('banner-compact.txt'),
