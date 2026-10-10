@@ -612,3 +612,169 @@ def test_specialist_cell_documents_are_recorded(env, monkeypatch):
     roles = {r for e in docs for r in e.payload["usage_by_role"]}
     assert roles and all(r.endswith("_specialist") for r in roles)
     assert ledger.verify(run_id).ok
+
+
+# --------------------------------------------------------------------------- overlap check
+
+
+def _get_run_metadata(run_id):
+    """Fetch the overlap check metadata from the eval_runs table."""
+    engine = db.get_engine()
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT overlap_check FROM eval_runs WHERE run_id = :run"),
+            {"run": run_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            return None
+        metadata_json = row[0]
+        if metadata_json is None:
+            return None
+        return json.loads(metadata_json)
+
+
+def test_overlap_check_fires_with_overlapping_manifest(env, monkeypatch, tmp_path):
+    """Verify the overlap check detects and records overlapping documents."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    docs, gts = _load_mini()
+    sampled = sample(docs, gts, per_class=1, seed=42)
+
+    # Create a manifest that includes the first document
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    first_doc = sampled[0]
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "filename": first_doc.filename,
+                "content_sha256": first_doc.content_sha256,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that overlap was recorded
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "completed"
+    assert metadata["overlapping_count"] > 0
+    assert len(metadata.get("overlapping_samples", [])) > 0
+    assert first_doc.filename in {s["filename"] for s in metadata["overlapping_samples"]}
+
+
+def test_overlap_check_no_overlap_with_clean_manifest(env, monkeypatch, tmp_path):
+    """Verify the overlap check reports no overlaps when manifest is clean."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+
+    # Create a manifest with documents not in our sample
+    manifest_file = tmp_path / "bert_documents.jsonl"
+    manifest_file.write_text(
+        json.dumps(
+            {
+                "filename": "nonexistent_doc.txt",
+                "content_sha256": sha256_text("completely different content"),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            bert_manifest=manifest_file,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that no overlaps were recorded
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "completed"
+    assert metadata["overlapping_count"] == 0
+    assert len(metadata.get("overlapping_samples", [])) == 0
+
+
+def test_overlap_check_skipped_when_manifest_absent(env, monkeypatch):
+    """Verify the overlap check is skipped when the manifest does not exist."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+
+    # No explicit manifest and nothing at <base_dir>/models/bert_manifest.jsonl.
+    run_id = run_eval(
+        EvalConfig(
+            local_dir=FIXTURES,
+            per_class=1,
+            seed=42,
+            concurrency=2,
+            judge_sample_rate=0.0,
+        )
+    )
+
+    # Check that the check was skipped
+    metadata = _get_run_metadata(run_id)
+    assert metadata is not None
+    assert metadata["status"] == "skipped"
+    assert metadata["reason"] == "manifest_not_found"
+
+
+def test_overlap_check_uses_base_dir_manifest_fallback(env, monkeypatch):
+    """Without ``bert_manifest``, ``<base_dir>/models/bert_manifest.jsonl`` is used."""
+    _patch_bert_unavailable(monkeypatch)
+    _patch_coverage(monkeypatch)
+    _patch_judge(monkeypatch)
+
+    async def fake_kickoff(self, inputs=None, input_files=None, **kwargs):
+        return MailroomState(status="archived")
+
+    monkeypatch.setattr(flow_mod.MailroomFlow, "kickoff_async", fake_kickoff)
+    docs, gts = _load_mini()
+    sampled = sample(docs, gts, per_class=1, seed=42)
+    manifest_file = env / "models" / "bert_manifest.jsonl"
+    manifest_file.parent.mkdir(parents=True, exist_ok=True)
+    manifest_file.write_text(
+        json.dumps({"content_sha256": sampled[0].content_sha256}) + "\n", encoding="utf-8"
+    )
+
+    run_id = run_eval(
+        EvalConfig(local_dir=FIXTURES, per_class=1, seed=42, judge_sample_rate=0.0)
+    )
+
+    metadata = _get_run_metadata(run_id)
+    assert metadata["status"] == "completed"
+    assert metadata["overlapping_count"] == 1

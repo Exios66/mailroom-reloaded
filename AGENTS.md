@@ -211,7 +211,7 @@ API (see §7.5).
 | `mailroom serve [--host] [--port] [--watch/--no-watch]` | FastAPI app + `/ui`, optionally with the embedded watcher. |
 | `mailroom watch [--worker-id] [--concurrency 1..32]` | Standalone inbox watcher. |
 | `mailroom run <file> [--worker-id]` | One document through the pipeline; prints `doc_id`/`status`/`doc_type`/`route_trail`. |
-| `mailroom eval [flags]` | Evaluation posture; prints its `run_id`. Flags: `--revision`, `--per-class`, `--seed`, `--classes`, `--concurrency`, `--posture-label`, `--gpu`, `--gpus`, `--prompt-set`, `--merger-mode`, `--mode pipeline\|specialist_cell`, `--judge-sample-rate`, `--split`, `--local-dir`, `--gpu-usd-per-hour`. |
+| `mailroom eval [flags]` | Evaluation posture; prints its `run_id`. Flags: `--revision`, `--per-class`, `--seed`, `--classes`, `--concurrency`, `--posture-label`, `--gpu`, `--gpus`, `--prompt-set`, `--merger-mode`, `--mode pipeline\|specialist_cell`, `--judge-sample-rate`, `--split`, `--local-dir`, `--gpu-usd-per-hour`, `--bert-manifest`. |
 | `mailroom train-gate --rows R [--out] [--calibration]` | Fit the route gate or sorter temperature calibration from JSONL. |
 | `mailroom card --run-id ID [--doc-type T] [--master] [--out]` | Write SAND-37 cards (repeat `--run-id` for the master). |
 | `mailroom conformance [--provider] [--per-class] [--revision] [--split] [--local-dir] [--out]` | Behavioural conformance suite + card. |

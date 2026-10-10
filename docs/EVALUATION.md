@@ -53,10 +53,20 @@ to `--split test` (`cli.py:119`).
 Leakage is also checked structurally: the blind `BlindDoc` carries no labels, the
 flow reaches ground truth only through `EvalContext` (`eval/dataset.py:86-96`),
 and `tests/helpers.assert_no_gt` asserts no ground-truth value appears in any
-recorded sorter/specialist request (`tests/helpers.py:50-62`). A BERT-training
-overlap helper exists (`bert_manifest_overlap`, `eval/dataset.py:302-311`) for
-the spec §5 leakage check; note it is a **helper only** — the runner does not
-call it yet.
+recorded sorter/specialist request (`tests/helpers.py:50-62`).
+
+**BERT training-set overlap check (spec §5).** After sampling, `run_eval` calls
+`bert_manifest_overlap` on the selected blind documents against the BERT-training
+`documents` manifest (a JSONL file or directory): `--bert-manifest PATH`
+(`EvalConfig.bert_manifest`), else `<base_dir>/models/bert_manifest.jsonl`, else
+`<base_dir>/bert_manifest.jsonl`. The rule is **record-and-warn**, not fail: the
+result is stored as JSON in `eval_runs.overlap_check` (`status: completed` with
+`overlapping_count`, up to five `overlapping_samples` and `total_docs`), and a
+warning is logged when the count is non-zero, because fast-path accuracy on
+overlapping documents must be excluded from the KPIs. With no manifest the run
+records `status: skipped, reason: manifest_not_found`; a read error records
+`reason: check_error`. Either way the evaluation proceeds (`_check_overlap` in
+`eval/runner.py`; tests `tests/eval/test_dataset_runner.py -k overlap`).
 
 ## Running an evaluation
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ from mailroom_reloaded.eval.dataset import (
     BlindDoc,
     EvalContext,
     GroundTruth,
+    bert_manifest_overlap,
     doc_id_for_sha,
     load_split,
     sample,
@@ -43,6 +45,8 @@ from mailroom_reloaded.storage import db
 from mailroom_reloaded.storage.bins import Bins
 
 __all__ = ["EvalConfig", "run_eval", "select_graded"]
+
+logger = logging.getLogger(__name__)
 
 #: ``eval_docs`` column set: identity, stage outputs, efficiency, gate features
 #: and the judge grade (spec section 8).
@@ -132,6 +136,9 @@ class EvalConfig:
     dataset_repo: str | None = None
     dataset_config: str | None = None
     gpu_usd_per_hour: float = 0.80
+    #: BERT-training ``documents`` manifest (JSONL file or dir) for the spec §5
+    #: leakage check; ``None`` falls back to ``<base_dir>/models/bert_manifest.jsonl``.
+    bert_manifest: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -154,6 +161,79 @@ def select_graded(
     )
     count = round(rate * len(ranked))
     return {doc.filename for doc in ranked[:count]}
+
+
+# --------------------------------------------------------------------------- overlap check (spec §5)
+
+
+def _get_bert_manifest_path(explicit: Path | None = None) -> str | None:
+    """Return the BERT training manifest path, or ``None`` when there is none.
+
+    An explicit ``EvalConfig.bert_manifest`` wins; otherwise checks
+    ``<base_dir>/models/bert_manifest.jsonl`` and ``<base_dir>/bert_manifest.jsonl``.
+    """
+    if explicit is not None:
+        return str(explicit) if Path(explicit).exists() else None
+    base = Path(get_settings().base_dir)
+    candidates = [
+        base / "models" / "bert_manifest.jsonl",
+        base / "bert_manifest.jsonl",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _check_overlap(docs: list[BlindDoc], manifest: Path | None = None) -> dict[str, Any]:
+    """Check blind documents against the BERT training manifest (spec §5 leakage check).
+
+    Returns a dict with status, overlapping_count, overlapping_samples, and (if
+    skipped) reason. Records a warning if overlaps are detected.
+    """
+    manifest_path = _get_bert_manifest_path(manifest)
+    if manifest_path is None:
+        return {
+            "status": "skipped",
+            "reason": "manifest_not_found",
+        }
+
+    try:
+        overlaps = bert_manifest_overlap(docs, manifest_path)
+        # bert_manifest_overlap returns {filename: bool}, so extract overlapping ones
+        overlapping_files = {filename for filename, is_overlapping in overlaps.items() if is_overlapping}
+        overlapping_count = len(overlapping_files)
+
+        # Build a doc_id map for quick lookup
+        doc_by_filename = {doc.filename: doc for doc in docs}
+
+        # Record a small sample of overlapping documents (with their content_sha256)
+        overlapping_samples = [
+            {"filename": filename, "content_sha256": doc_by_filename[filename].content_sha256[:16]}
+            for filename in sorted(overlapping_files)[:5]
+        ]
+
+        if overlapping_count > 0:
+            logger.warning(
+                "BERT manifest overlap detected: %d of %d blind documents are in the "
+                "training set; fast-path accuracy must be excluded from KPIs (spec §5)",
+                overlapping_count,
+                len(docs),
+            )
+
+        return {
+            "status": "completed",
+            "overlapping_count": overlapping_count,
+            "overlapping_samples": overlapping_samples,
+            "total_docs": len(docs),
+        }
+    except (OSError, ValueError, TypeError) as e:
+        logger.warning("BERT manifest overlap check failed: %s: %s", type(e).__name__, e)
+        return {
+            "status": "skipped",
+            "reason": "check_error",
+            "error": str(e)[:200],
+        }
 
 
 # --------------------------------------------------------------------------- sqlite
@@ -182,18 +262,23 @@ def _ensure_table(engine: Engine) -> None:
                 dataset_config TEXT,
                 revision TEXT NOT NULL,
                 split TEXT NOT NULL,
-                local_dir TEXT
+                local_dir TEXT,
+                overlap_check TEXT
             )
         """))
+        # Add overlap_check column if it doesn't exist (for existing databases)
+        if "overlap_check" not in {c["name"] for c in inspect(conn).get_columns("eval_runs")}:
+            conn.execute(text("ALTER TABLE eval_runs ADD COLUMN overlap_check TEXT"))
 
 
-def _record_dataset(engine: Engine, run_id: str, cfg: EvalConfig) -> None:
-    """Persist the dataset selection before processing any run documents."""
+def _record_dataset(engine: Engine, run_id: str, cfg: EvalConfig, overlap_check: dict[str, Any] | None = None) -> None:
+    """Persist the dataset selection and overlap check result before processing documents."""
     with engine.begin() as conn:
+        overlap_check_json = _json(overlap_check) if overlap_check is not None else None
         conn.execute(text("""
             INSERT INTO eval_runs
-                (run_id, dataset_repo, dataset_config, revision, split, local_dir)
-            VALUES (:run_id, :repo, :config, :revision, :split, :local_dir)
+                (run_id, dataset_repo, dataset_config, revision, split, local_dir, overlap_check)
+            VALUES (:run_id, :repo, :config, :revision, :split, :local_dir, :overlap_check)
         """), {
             "run_id": run_id,
             "repo": cfg.dataset_repo or REPO,
@@ -201,6 +286,7 @@ def _record_dataset(engine: Engine, run_id: str, cfg: EvalConfig) -> None:
             "revision": cfg.revision,
             "split": cfg.split,
             "local_dir": str(cfg.local_dir.resolve()) if cfg.local_dir is not None else None,
+            "overlap_check": overlap_check_json,
         })
 
 
@@ -555,10 +641,11 @@ async def _run_all(
 def run_eval(cfg: EvalConfig) -> str:
     """Run one eval posture and return its ``run_id``.
 
-    Loads and verifies the split, samples it, runs every document under a
-    concurrency semaphore, and writes one ``eval_docs`` row per selected
-    document. Tasks share an ``eval`` run scope with session ID
-    ``eval-<run_id>``; the caller's scope is restored on exit.
+    Loads and verifies the split, samples it, runs the BERT manifest overlap
+    check (spec §5), runs every document under a concurrency semaphore, and
+    writes one ``eval_docs`` row per selected document. Tasks share an ``eval``
+    run scope with session ID ``eval-<run_id>``; the caller's scope is restored
+    on exit.
 
     Pipeline/extraction exceptions are recorded as error rows. Dataset loading
     and integrity errors, inbox write errors, and database errors propagate.
@@ -575,10 +662,12 @@ def run_eval(cfg: EvalConfig) -> str:
     selected = sample(
         docs, gts, per_class=cfg.per_class, seed=cfg.seed, classes=cfg.classes
     )
+    # Run BERT manifest overlap check (spec §5 leakage check)
+    overlap_check = _check_overlap(selected, cfg.bert_manifest)
     graded = select_graded(selected, cfg.judge_sample_rate, cfg.seed)
     engine = _engine()
     _ensure_table(engine)
-    _record_dataset(engine, run_id, cfg)
+    _record_dataset(engine, run_id, cfg, overlap_check)
     # asyncio tasks (and to_thread) copy this context, so every eval document inherits the scope
     ledger = run_ledger.ledger_for(None)
     run_ledger.open_run(
