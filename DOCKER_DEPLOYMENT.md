@@ -42,8 +42,8 @@ docker compose -f deploy/docker-compose.dev.yml logs -f app
 
 ```bash
 # Start with llamafile profile + specify provider
-docker compose -f deploy/docker-compose.dev.yml --profile local-llm up -d --build
 export DEFAULT_PROVIDER=llamafile
+docker compose -f deploy/docker-compose.dev.yml --profile local-llm up -d --build
 curl -X POST http://127.0.0.1:8000/v1/documents -F "file=@test.txt"
 ```
 
@@ -117,16 +117,30 @@ Production uses named volumes:
 
 **Backup:**
 ```bash
-# Export mailroom_data volume to a tarball
-docker run --rm -v mailroom_data:/data -v $(pwd):/backup \
-  alpine tar czf /backup/mailroom-data.tar.gz -C /data .
+# Resolve the actual named volume mounted by the running app
+(
+  set -eu
+  app_container=$(docker compose -f deploy/docker-compose.yml ps -q app)
+  : "${app_container:?No running app container found}"
+  data_volume=$(docker inspect --format '{{range .Mounts}}{{if and (eq .Destination "/data") (eq .Type "volume")}}{{.Name}}{{end}}{{end}}' "$app_container")
+  : "${data_volume:?No named volume mounted at /data}"
+  docker run --rm -v "$data_volume:/data:ro" -v "$(pwd):/backup" \
+    alpine tar czf /backup/mailroom-data.tar.gz -C /data .
+)
 ```
 
 **Restore:**
 ```bash
-# Import from tarball
-docker run --rm -v mailroom_data:/data -v $(pwd):/backup \
-  alpine tar xzf /backup/mailroom-data.tar.gz -C /data
+# Resolve the actual named volume mounted by the running app
+(
+  set -eu
+  app_container=$(docker compose -f deploy/docker-compose.yml ps -q app)
+  : "${app_container:?No running app container found}"
+  data_volume=$(docker inspect --format '{{range .Mounts}}{{if and (eq .Destination "/data") (eq .Type "volume")}}{{.Name}}{{end}}{{end}}' "$app_container")
+  : "${data_volume:?No named volume mounted at /data}"
+  docker run --rm -v "$data_volume:/data" -v "$(pwd):/backup:ro" \
+    alpine tar xzf /backup/mailroom-data.tar.gz -C /data
+)
 ```
 
 ### Horizontal Scaling
@@ -353,15 +367,18 @@ docker compose -f deploy/docker-compose.yml up -d app
 ### Build & Push to Registry
 
 ```bash
-# Build production image
-docker build -f deploy/Dockerfile -t myregistry.azurecr.io/mailroom:latest .
+# Build and push a pinned release (do not overwrite published release tags)
+docker build -f deploy/Dockerfile -t myregistry.azurecr.io/mailroom:v0.2.0 .
+docker push myregistry.azurecr.io/mailroom:v0.2.0
 
-# Push
-docker push myregistry.azurecr.io/mailroom:latest
-
-# Deploy
-docker compose -f deploy/docker-compose.yml set image app=myregistry.azurecr.io/mailroom:latest
-docker compose -f deploy/docker-compose.yml up -d
+# Deploy the same release
+cat > deploy/docker-compose.registry.yml <<'YAML'
+services:
+  app:
+    image: myregistry.azurecr.io/mailroom:v0.2.0
+YAML
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.registry.yml \
+  up -d --no-build --pull always
 ```
 
 ### GitHub Actions Example

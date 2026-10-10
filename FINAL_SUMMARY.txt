@@ -8,7 +8,7 @@ PROJECT STATUS: ✅ PRODUCTION READY
   🐛 BUG FIXES (7 TOTAL)
 ================================================================================
 
-All 7 critical bugs have been surgically patched in 4 source files:
+All 7 bugs (1 Critical, 2 High, 4 Medium) have been patched in 4 source files:
 
 Bug 1: SHA256 Upload Verification (Critical)
   File: src/mailroom_reloaded/api/app.py (lines 248-280)
@@ -62,10 +62,12 @@ Dockerfiles (3 - all optimized & verified):
   ✅ deploy/Dockerfile.dev (development, hot-reload, 400MB)
   ✅ deploy/Dockerfile.sandbox (sandbox, offline, 500MB)
 
-Docker Compose Files (3 - all validated):
-  ✅ deploy/docker-compose.yml (production topology)
-  ✅ deploy/docker-compose.dev.yml (development topology)
-  ✅ deploy/docker-compose.sandbox.yml (sandbox topology)
+Docker Compose Files (historical checks: 2 validated, 1 structural check):
+  ✅ deploy/docker-compose.yml (production topology; structural check only)
+  ✅ deploy/docker-compose.dev.yml (Compose configuration validated)
+  ✅ deploy/docker-compose.sandbox.yml (Compose configuration validated)
+  Current validator runs full Compose configuration checks for all three files,
+  using non-secret placeholders for required environment values.
 
 Configuration:
   ✅ .env.example (28 environment variables, fully documented)
@@ -164,7 +166,7 @@ Code Quality: ✅
 
 Docker & Deployment: ✅
   - All 3 Dockerfiles validated
-  - All 3 compose files validated
+  - Historical Compose checks: dev/sandbox validated; production structural only
   - Layer caching optimized
   - Non-root user configured
   - Health checks implemented
@@ -188,7 +190,7 @@ OVERALL: ✅ ALL DELIVERABLES COMPLETE & PRODUCTION READY
   📊 STATISTICS
 ================================================================================
 
-Bug Fixes:         7 critical bugs
+Bug Fixes:         7 bugs (1 Critical, 2 High, 4 Medium)
 Files Modified:    4 source files
 Code Changes:      +150 lines, -30 lines (net: +120)
 Dockerfiles:       3 (production, dev, sandbox)

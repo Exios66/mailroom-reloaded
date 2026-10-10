@@ -42,27 +42,46 @@ Examples:
 EOF
 }
 
+# Escape double-quoted dotenv values, including Compose's dollar interpolation.
+write_env_entry() {
+    local value="$2"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//\$/\$\$}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    printf '%s="%s"\n' "$1" "$value"
+}
+
 init_env() {
     if [ -f "$PROJECT_ROOT/.env" ]; then
         echo -e "${YELLOW}⚠ .env already exists${NC}"
-        return 0
+    else
+        echo -e "${BLUE}Creating .env from .env.example${NC}"
+        local token="${API_TOKEN:-mailroom-dev-token-$(openssl rand -hex 8 2>/dev/null || date +%s)}"
+        local provider="${PROVIDER:-mock}"
+        local env_tmp line
+        env_tmp="$(mktemp "$PROJECT_ROOT/.env.XXXXXX")"
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                DEFAULT_PROVIDER=*) write_env_entry DEFAULT_PROVIDER "$provider" ;;
+                MAILROOM_API_TOKEN=*) write_env_entry MAILROOM_API_TOKEN "$token" ;;
+                GRAFANA_ADMIN_PASSWORD=) write_env_entry GRAFANA_ADMIN_PASSWORD admin ;;
+                *) printf '%s\n' "$line" ;;
+            esac
+        done < "$PROJECT_ROOT/.env.example" > "$env_tmp"
+        mv "$env_tmp" "$PROJECT_ROOT/.env"
+        echo -e "${GREEN}✓ .env created${NC}"
     fi
-    
-    echo -e "${BLUE}Creating .env from .env.example${NC}"
-    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
-    
-    # Set defaults
-    local token="${API_TOKEN:-mailroom-dev-token-$(openssl rand -hex 8 2>/dev/null || date +%s)}"
-    local provider="${PROVIDER:-mock}"
-    
-    # Update .env
-    sed -i '' "s/DEFAULT_PROVIDER=mock/DEFAULT_PROVIDER=$provider/" "$PROJECT_ROOT/.env"
-    sed -i '' "s/MAILROOM_API_TOKEN=$/MAILROOM_API_TOKEN=$token/" "$PROJECT_ROOT/.env"
-    sed -i '' "s/GRAFANA_ADMIN_PASSWORD=$/GRAFANA_ADMIN_PASSWORD=admin/" "$PROJECT_ROOT/.env"
-    
-    echo -e "${GREEN}✓ .env created${NC}"
-    echo "  Token: $token"
-    echo "  Provider: $provider"
+
+    # Compose gives the process environment precedence over --env-file.
+    # Keep unspecified settings intact, and never evaluate or print supplied tokens.
+    if [ "${PROVIDER+x}" = x ]; then
+        export DEFAULT_PROVIDER="$PROVIDER"
+    fi
+    if [ "${API_TOKEN+x}" = x ]; then
+        export MAILROOM_API_TOKEN="$API_TOKEN"
+    fi
 }
 
 cmd_up() {
@@ -76,7 +95,7 @@ cmd_up() {
     local build_flag=""
     [ -z "$no_build" ] && build_flag="--build"
     
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" up -d $build_flag
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" up -d $build_flag
     
     echo ""
     echo -e "${GREEN}✓ Stack started${NC}"
@@ -88,22 +107,22 @@ cmd_up() {
     echo "  Grafana:     http://127.0.0.1:3000 (admin/admin)"
     echo ""
     echo "🔄 Health check:"
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
 }
 
 cmd_down() {
     echo -e "${BLUE}🛑 Stopping mailroom-reloaded dev stack${NC}"
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" down
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" down
     echo -e "${GREEN}✓ Stack stopped${NC}"
 }
 
 cmd_logs() {
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" logs -f app
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" logs -f app
 }
 
 cmd_status() {
     echo -e "${BLUE}📊 Stack status${NC}"
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" ps
     
     echo ""
     echo -e "${BLUE}🏥 Health checks${NC}"
@@ -117,7 +136,7 @@ cmd_status() {
     
     for check in "${checks[@]}"; do
         local name="${check%%:*}"
-        local url="${check##*:}"
+        local url="${check#*:}"
         if curl -s "$url" > /dev/null 2>&1; then
             echo -e "${GREEN}✓${NC} $name"
         else
@@ -140,7 +159,7 @@ cmd_reset() {
     fi
     
     echo "Resetting..."
-    docker compose -f "$DEPLOY_DIR/docker-compose.dev.yml" down -v
+    docker compose --env-file "$PROJECT_ROOT/.env" -f "$DEPLOY_DIR/docker-compose.dev.yml" down -v
     rm -rf "$PROJECT_ROOT/data"
     rm -f "$PROJECT_ROOT/.env"
     echo -e "${GREEN}✓ Reset complete${NC}"

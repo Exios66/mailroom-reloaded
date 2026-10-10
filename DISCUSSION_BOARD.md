@@ -23,6 +23,13 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Docker deployment review fixes] Scripts and deployment procedures — CodeRabbit Agent
+- **Status:** done
+- **Files:** `scripts/{quickstart,validate-docker}.sh`, `tests/deploy/test_{quickstart,validate_docker}.py`, five deployment summary/runbook files, `CHANGELOG.md`.
+- **Evidence:** `uv run pytest tests/deploy/test_validate_docker.py -q`: 16 passed; `.venv/bin/pytest tests/deploy tests/test_dependency_fence.py tests/test_prompts.py --ignore=tests/deploy/test_validate_docker.py --ignore=tests/deploy/test_quickstart.py -q`: 83 passed; `.venv/bin/pytest tests/deploy/test_quickstart.py -q`: 11 passed. `bash scripts/validate-docker.sh`, shell syntax, changed-test Ruff, registry override config, and mocked volume guards passed. Root Ruff found the pre-existing unused `sys` import in `scripts/demo_seed_eval_runs.py:16` (also reproduced from HEAD).
+- **Commit:** uncommitted changes on `d89f5f8d92312d8761dc60a1e3ddafa1e2d8b7d0`.
+- **Notes:** deployment, credential, and docs specialists verified supplied findings; duplicate Compose requests reconciled with plugin preference and standalone fallback. Historical production structural checks distinguished from current full config validation with placeholders. Container startup and live backup/restore were not exercised.
+
 ### [Sandbox review hardening] Payment, prompt and Boss safeguards — CodeRabbit Agent
 - **Status:** done
 - **Files:** `sandbox/server/{correspondent,llm_correspondent,service}.py`, their sandbox

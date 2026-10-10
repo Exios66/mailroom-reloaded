@@ -27,12 +27,12 @@
 | `deploy/Dockerfile` | Enhanced | Production multi-stage image (1.2GB) |
 | `deploy/Dockerfile.dev` | Enhanced | Dev image with hot-reload (400MB) |
 | `deploy/Dockerfile.sandbox` | Enhanced | Sandbox minimal image (500MB) |
-| `deploy/docker-compose.yml` | Verified | Production topology |
+| `deploy/docker-compose.yml` | Structurally checked | Production topology |
 | `deploy/docker-compose.dev.yml` | Verified | Development topology |
 | `deploy/docker-compose.sandbox.yml` | Verified | Sandbox/offline topology |
 | `.env.example` | 28 vars | Environment template (comprehensive) |
 
-**Status:** All Dockerfiles and compose files validated
+**Historical status:** All Dockerfiles checked; dev and sandbox Compose configurations validated; production received only a structural check. The current validator runs full Compose configuration checks for all three files using non-secret placeholders for required environment values.
 
 ---
 
@@ -123,7 +123,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 ### Docker & Deployment
 - [x] 3 Dockerfiles validated
-- [x] 3 docker-compose files validated
+- [x] Historical Compose checks: dev/sandbox validated; production structural check only
 - [x] 28 environment variables documented
 - [x] Multi-stage builds optimized for layer caching
 - [x] Non-root user configured
@@ -215,7 +215,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 | Metric | Value |
 |--------|-------|
-| **Bug Fixes** | 7 critical bugs |
+| **Bug Fixes** | 7 bugs (1 Critical, 2 High, 4 Medium) |
 | **Files Modified** | 4 source files |
 | **Lines Added** | ~150 (defensive code) |
 | **Lines Removed** | ~30 |
@@ -275,7 +275,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 ## ✨ What You Get
 
-✅ **Fully patched codebase** — 7 critical bugs fixed  
+✅ **Fully patched codebase** — 7 bugs fixed (1 Critical, 2 High, 4 Medium)\
 ✅ **Production-ready Docker images** — optimized for size and startup  
 ✅ **3 deployment topologies** — dev, production, sandbox  
 ✅ **One-command setup** — dev stack in < 5 minutes  

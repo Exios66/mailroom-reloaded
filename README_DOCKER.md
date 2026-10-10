@@ -236,9 +236,15 @@ docker build -f deploy/Dockerfile -t mailroom:v0.2.0 .
 docker tag mailroom:v0.2.0 myregistry.azurecr.io/mailroom:v0.2.0
 docker push myregistry.azurecr.io/mailroom:v0.2.0
 
-# Deploy
+# Deploy the pushed image
+cat > deploy/docker-compose.registry.yml <<'YAML'
+services:
+  app:
+    image: myregistry.azurecr.io/mailroom:v0.2.0
+YAML
 MAILROOM_API_TOKEN=prod-secret GRAFANA_ADMIN_PASSWORD=prod-pass \
-  docker compose -f deploy/docker-compose.yml up -d
+  docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.registry.yml \
+  up -d --no-build --pull always
 ```
 
 ### Scaling

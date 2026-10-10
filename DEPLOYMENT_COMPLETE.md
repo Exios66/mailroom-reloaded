@@ -169,8 +169,14 @@ export OPENROUTER_API_KEY=sk-...
 docker build -f deploy/Dockerfile -t myregistry/mailroom:v0.2.0 .
 docker push myregistry/mailroom:v0.2.0
 
-# 3. Deploy stack
-docker compose -f deploy/docker-compose.yml up -d --build
+# 3. Deploy the pushed image
+cat > deploy/docker-compose.registry.yml <<'YAML'
+services:
+  app:
+    image: myregistry/mailroom:v0.2.0
+YAML
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.registry.yml \
+  up -d --no-build --pull always
 
 # 4. Verify
 docker compose -f deploy/docker-compose.yml ps

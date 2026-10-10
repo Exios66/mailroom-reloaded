@@ -25,23 +25,34 @@ if ! command -v docker &> /dev/null; then
 fi
 echo -e "${GREEN}✓ Docker${NC} $(docker --version | awk '{print $3}' | tr -d ',')"
 
-if ! command -v docker-compose &> /dev/null; then
+if docker compose version > /dev/null 2>&1; then
+    COMPOSE=(docker compose)
+elif command -v docker-compose > /dev/null 2>&1 && docker-compose version > /dev/null 2>&1; then
+    COMPOSE=(docker-compose)
+else
     echo -e "${RED}✗ Docker Compose not found${NC}"
     exit 1
 fi
-echo -e "${GREEN}✓ Docker Compose${NC} $(docker-compose --version | awk '{print $3}' | tr -d ',')"
+echo -e "${GREEN}✓ Docker Compose${NC} $("${COMPOSE[@]}" version --short)"
+
+failures=0
 
 # Validate Dockerfiles
 echo ""
 echo "📝 Validating Dockerfiles..."
 for dockerfile in "$DEPLOY_DIR"/Dockerfile "$DEPLOY_DIR"/Dockerfile.dev "$DEPLOY_DIR"/Dockerfile.sandbox; do
-    [ ! -f "$dockerfile" ] && continue
     name=$(basename "$dockerfile")
+    if [ ! -f "$dockerfile" ]; then
+        echo -e "${RED}✗ $name${NC} (missing file)"
+        failures=$((failures + 1))
+        continue
+    fi
     # Basic syntax check: ensure key directives are present
     if grep -q "^FROM" "$dockerfile" && grep -q "^COPY\|^RUN" "$dockerfile"; then
         echo -e "${GREEN}✓ $name${NC}"
     else
         echo -e "${RED}✗ $name${NC} (missing key directives)"
+        failures=$((failures + 1))
     fi
 done
 
@@ -49,18 +60,20 @@ done
 echo ""
 echo "🐳 Validating docker-compose files..."
 for compose in "$DEPLOY_DIR"/docker-compose.yml "$DEPLOY_DIR"/docker-compose.dev.yml "$DEPLOY_DIR"/docker-compose.sandbox.yml; do
-    [ ! -f "$compose" ] && continue
     name=$(basename "$compose")
-    # Skip validation for production compose which requires env vars
-    if [[ "$name" == "docker-compose.yml" ]]; then
-        if grep -q "services:" "$compose" && grep -q "image:" "$compose"; then
-            echo -e "${GREEN}✓ $name${NC} (structure valid, requires MAILROOM_API_TOKEN + GRAFANA_ADMIN_PASSWORD)"
-        fi
-    elif docker-compose -f "$compose" config > /dev/null 2>&1; then
+    if [ ! -f "$compose" ]; then
+        echo -e "${RED}✗ $name${NC} (missing file)"
+        failures=$((failures + 1))
+        continue
+    fi
+    # Synthetic values satisfy production's required variables for config checks
+    # only. Suppress rendered configuration and errors that may include secrets.
+    if MAILROOM_API_TOKEN=validation-only GRAFANA_ADMIN_PASSWORD=validation-only \
+        "${COMPOSE[@]}" -f "$compose" config --quiet > /dev/null 2>&1; then
         echo -e "${GREEN}✓ $name${NC}"
     else
-        echo -e "${RED}✗ $name${NC}"
-        docker-compose -f "$compose" config 2>&1 | head -5
+        echo -e "${RED}✗ $name${NC} (Compose configuration validation failed)"
+        failures=$((failures + 1))
     fi
 done
 
@@ -77,6 +90,10 @@ fi
 # Summary
 echo ""
 echo "======================================"
+if [ "$failures" -ne 0 ]; then
+    echo -e "${RED}✗ $failures validation(s) failed.${NC}"
+    exit 1
+fi
 echo -e "${GREEN}✓ All validations passed!${NC}"
 echo ""
 echo "🚀 Next steps:"
