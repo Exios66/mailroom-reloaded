@@ -12,13 +12,13 @@ and its helper `mailroom-sandbox-content` (the synthetic content pack) from
 "built and mostly merged" to "verified, released, and consistently organised",
 without re-opening anything already done.
 
-**As of:** 2026-10-10 (status refreshed against `main` @ `093ee2e` plus open PR #80; the full day's progress is logged in Section 3.5; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
+**As of:** 2026-10-10 (status refreshed against `main` @ `b5f09f9`, which includes PR #80; the full day's progress is logged in Section 3.5; the Section 4 audit text below is otherwise the 2026-10-09 audit). A parallel agent is still pushing. Before acting on any
 row marked `[PR]`, run `git fetch --all --prune` in both repos and re-check
 the PR state; the audit tables in Section 4 will go stale within hours.
 
 | Repo | GitHub | `origin/main` at audit | Open PRs at audit |
 | --- | --- | --- | --- |
-| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `093ee2e`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open:** #80 (`claude/scan-fixes`, head `7177db5`: first-scan bug fixes, Dockerfile/compose/bind-guard fixes, CodeRabbit threads resolved; awaiting the owner's merge call) |
+| mailroom-reloaded | `Exios66/mailroom-reloaded` | `df249e2` (2026-10-10: `b5f09f9`) | #23 (`feat/sandbox-correspondent-tuning`, head `64b8400`), #44 (`feat/heldout-boss-mailbox-agents`, `021ecf1`), #45 (`fix/jev-integration-issue-14`, `75da8a1`). **Since the audit (all merged to `main`):** #45 (Jev/eval fix), #54 (outbound UI links), #55 (live SSE follow), #56 (panels), #57 (lucid salvage + replay seed + fixes), #44 (Boss mailbox, held-out harness, `AGENTS.md`, CodeRabbit fixes), #58 (issue forms, PR template, `AGENTS.md` governance, plan refresh), #59 (R-13 OTLP import + `mailroom replay` CLI), #60 (replay and review follow-ups), #61 (Phase 6 sub-plan), #62 (browser-check evidence and demo shots), #77 (sandbox docstring port), #78 (Correspondent inbox deep link), #80 (first-scan fixes, Docker build/compose and bind-guard fixes; merged `b5f09f9`). #23 is closed (2026-10-10; triage v2, harness and Boss mailbox were already on `main` via #44, the leftover sandbox docstrings landed in #77). **Open PRs:** none (issues #81-#84 track the unrun Docker verification) |
 | mailroom-sandbox-content | `Exios66/mailroom-sandbox-content` | `f650cfd` | #5 (`feat/heldout-h-series`, `27acdba`); 2026-10-10: #5 and #6 merged, #7 open (see K-00); #15 merged (issue forms, PR template, `AGENTS.md`; see Governance) |
 
 **Evidence rule.** A status below is **verified** only where it says so. The
@@ -181,7 +181,7 @@ Open: 1.8 and 2.6 (`v0.5.0` is published and `content.lock` pins it), phase 3.
 | #77 | 16 missing sandbox docstrings ported from #23 (docstring-only; AST-checked against `main`) | R-03 |
 | #78 | `inbox` TUI command (B11), `/tui#inbox` deep link, `GET /links` `sandbox_url` (`MAILROOM_SANDBOX_URL`), sandbox UI hash routes (`ui/route.js`), Correspondent-filtered Boss mailbox dock, live Ingress-table browser check (`scripts/tui_inbox_check.mjs`), demo shots 19-20 | sandbox JS tests, browser check |
 | #23 | Closed with an explanatory comment (D1) | R-03 |
-| #80 (open) | See "Scan fixes and Docker verification" under Phase 3 | local gates; Docker builds NOT run |
+| #80 | Merged `b5f09f9` (2026-10-10, owner approved). See "Scan fixes and Docker verification" under Phase 3 | local gates; Docker builds NOT run |
 | #81-#84 | Issues for the Docker work that could not be done here (app image, compose stack, sandbox container, smoke automation) | Phase 3 |
 | #63-#76 | One tracking issue per remaining Phase 6 / R-series item (see Phase 3 and Phase 6) | issue tracker |
 
@@ -274,7 +274,7 @@ Each is one small PR from a fresh branch off `main`, never a merge of the old br
   - [x] Tests: `tests/api/test_api.py` (`/links` + per-run links), `tests/tui/js/replay-command.test.mjs` (viewer links/keys); docs + CHANGELOG.
   - Decisions (assumed unless the owner says otherwise): link-out (not embed); Grafana target dashboard `mailroom-quality`; URLs from env with localhost defaults.
 
-#### Scan fixes and Docker verification (PR #80, issues #81-#84)
+#### Scan fixes and Docker verification (PR #80 merged, issues #81-#84 open)
 
 Source: a first-scan audit of the repo plus a worker-run check of the Dockerfile and compose findings. Each fix below has a regression test unless marked.
 - [x] **Ledger shutdown gate.** `Ledger.close()` / `reset_ledger()` report whether the writer thread stopped; the sandbox `_repoint()` refuses to dispose the database if it did not. A late write after `rmtree` used to land silently in the fresh DB file, so only an `rmtree`-spy test proves it (verified to fail without the fix). Files: `storage/ledger.py`, `sandbox/server/pipeline_runner.py`.
@@ -406,7 +406,7 @@ Superseded by **K-05** (the direction in the first audit was reversed; see K-05 
 - [ ] Do K-05. Reloaded's root `schemas/` remains the contract owner (content-plan CD8).
 
 #### X-02: Retire merged and dead branches (destructive; needs owner approval, D4)
-_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`. `feat/sandbox-correspondent-tuning` (#23, now closed, not merged) is deletable too; same 403 block. Also deletable once merged: `claude/sandbox-docstrings` (#77), `claude/inbox-deeplink` (#78), `claude/demo-evidence` (#62), `claude/plan-pipeline-wiring` (#61) and, after the owner merges #80, `claude/scan-fixes`._
+_Status 2026-10-10: every branch below was verified (merged into `origin/main`, or its content salvaged and cited) but **deletion is blocked**: `git push --delete` returns 403 from the agent sandbox proxy and the GitHub tools have no delete-branch call. An owner must delete them in the GitHub UI or with their own credentials. Verified-merged (23): `claude/governance-templates`, `claude/land-lucid-fixes`, `claude/upbeat-euler-85ifix`, `claude/trace-replay-01-run-context`, `claude/trace-replay-05..15-*` (11), `docs/mailroom-reloaded-design`, `feat/heldout-boss-mailbox-agents`, `feat/mailroom-reloaded-completion`, `feat/replay-live-sse`, `feat/replay-panels`, `feat/tui-brand-theme`, `feat/ui-observability-links`, `fix/jev-integration-issue-14`. Unmerged but salvaged (7): `claude/lucid-bohr-lrj20n` (#57), `claude/mailroom-reloaded-build` (#57 docstrings), the four `coderabbit/*`, `revert-26-*`. Content: `feat/heldout-h-series` (merged). Keep: `main`. `feat/sandbox-correspondent-tuning` (#23, now closed, not merged) is deletable too; same 403 block. Also deletable once merged: `claude/sandbox-docstrings` (#77), `claude/inbox-deeplink` (#78), `claude/demo-evidence` (#62), `claude/plan-pipeline-wiring` (#61) `claude/scan-fixes` (#80, merged `b5f09f9`) and `claude/plan-post-80`._
 - [ ] Safe (fully merged): reloaded `docs/mailroom-reloaded-design`, `feat/mailroom-reloaded-completion`, `feat/tui-brand-theme`, all 12 `claude/trace-replay-*`.
 - [ ] After R-18 is done: `claude/mailroom-reloaded-build`, `coderabbit/*` (all four).
 - [ ] After D5: `revert-26-claude/mailroom-trace-replay-plan-5nj1nk` (reverts rev 4 of the old plan; conflicts with main, which built on it; no PR).
@@ -450,7 +450,7 @@ Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeli
 
 - [x] R-01 baseline recorded (2026-10-09 @ `44c8b0f`). [x] Re-run on `main` plus #44/#59 changes 2026-10-10: reloaded `ruff` clean, `pytest --ignore=tests/sandbox` 1520 passed, `node --test tests/tui/js` 235 pass, `tests/sandbox` 745 passed with 6 root-user `test_startup_bind_policy` failures (environmental). Content repo not re-run.
 - [x] `v0.5.0` published. [ ] `v0.6.0` published; `content.lock` resolves; `mailroom sandbox content pull` works from a clean checkout.
-- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [ ] PR #80 merged (open, owner call pending).
+- [x] PR #45 merged (with #54-#57). [x] PR #44 merged (`8e8522a`). [x] #23 resolved (closed 2026-10-10). [x] PR #80 merged (`b5f09f9`).
 - [ ] No unmerged branch holding work not in `main` (X-02 complete).
 - [ ] Phase 3 partials closed or explicitly re-deferred with a dated note in this file. 2026-10-10: closed R-11, R-12, R-14, R-15, R-13, R-16, R-19; open R-04..R-10, R-17 (owner).
 - [ ] K-00..K-06 done in the content repo: fault-injection suite shows 0 crashes and 0 unexpected accepts; the bundle sha256 rebuilds identically with the pinned `zstandard`; no un-annotated scenario contradiction remains; content CI loads the pack through reloaded's loader.
