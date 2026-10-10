@@ -18,7 +18,9 @@ def test_health_ui_and_static_are_offline(live):
     assert ui.status_code == 200 and "text/html" in ui.headers["content-type"]
     assert "default-src 'self'" in ui.headers["content-security-policy"]
     assert "/ui/route.js" in ui.text
-    route = client.get("/ui/route.js")
+    # An inline icon stops the browser fetching /favicon.ico (a 404 in the console).
+    assert '<link rel="icon" href="data:,">' in ui.text
+    route =client.get("/ui/route.js")
     assert route.status_code == 200 and "javascript" in route.headers["content-type"]
     assert "default-src 'self'" in route.headers["content-security-policy"]
     for asset in ("/ui/app.js", "/ui/app.css"):
