@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mailroom Sandbox</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<header>
+  <div class="brand"><strong>Mailroom Sandbox</strong> <span class="muted">ingress simulation, fully offline</span></div>
+  <div id="chips" class="chips"><span class="chip ok">content smoke 0.5.0 (6)</span><span class="chip ">policy: vendored</span><span class="chip ">offline mock LLM</span><span class="chip ok">network guard: 0 blocked</span><span class="chip ok">transmitted mail: 0</span><span class="chip ">queue 0</span><select><option value="closed" selected="true">recipient profile: closed</option><option value="egress">recipient profile: egress</option></select><select><option value="human" selected="true">autonomy: human</option><option value="sandbox">autonomy: sandbox</option></select></div>
+  <div class="tokenbox">
+    <label>API token <input id="token" type="password" autocomplete="off" placeholder="only if the server needs one"></label>
+  </div>
+</header>
+<div class="banner" id="banner">
+  Stand-ins in this view: the <b>Correspondent</b> and <b>Boss Desk</b> are deterministic rule-based placeholders (the real agent does not exist yet).
+  The <b>pipeline</b> is the real mailroom-reloaded flow on an offline mock LLM, in its own data dir. Outbound mail is <b>captured, never sent</b>.
+</div>
+<main>
+  <section id="col-scn" class="panel">
+    <h2>Scenarios</h2>
+    <div class="toolbar">
+      <label><input type="checkbox" id="fl-corr" checked=""> Flow A Correspondent</label>
+      <label><input type="checkbox" id="fl-pipe" checked=""> Flow B pipeline</label>
+      <label>stagger s <input type="number" id="stagger" value="120" min="0" max="3600" class="num"></label>
+      <button id="inject-all" class="primary">Inject all</button>
+      <button id="reset" class="danger">Reset</button>
+    </div>
+    <div id="scenarios"><div class="scn"><div class="name">A1_status_inquiry <span class="chip ok">pass</span></div><div class="title">Counsel asks for the status of in-flight matter HP-2026-0417; catalog-backed reply</div><div class="row"><span class="chip ">1 email</span><span class="chip ">expect: status_request</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div><div class="scn"><div class="name">A3_supersession </div><div class="title">Title company sends v3 of Schedule C, superseding Monday's v2</div><div class="row"><span class="chip ">1 email</span><span class="chip ">1 doc feed</span><span class="chip ">1 att</span><span class="chip ">expect: document_submission</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div><div class="scn"><div class="name">B1_amendment_by_title </div><div class="title">Amendment referenced only by title and date, no filename match; matched via extracted entities</div><div class="row"><span class="chip ">1 email</span><span class="chip ">1 doc feed</span><span class="chip ">1 att</span><span class="chip ">expect: correction_or_amendment</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div><div class="scn"><div class="name">D1_vendor_cold_outreach </div><div class="title">Cold vendor pitch with "final notice" subject framing — not escalated</div><div class="row"><span class="chip ">1 email</span><span class="chip ">expect: unrelated</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div><div class="scn"><div class="name">E1_lookalike_wire_change <span class="chip ok">pass</span></div><div class="title">Lookalike-domain wire-instruction change (smoke)</div><div class="row"><span class="chip ">2 email</span><span class="chip ">2 att</span><span class="chip ">expect: payment_or_identity_change</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div><div class="scn"><div class="name">F1_personal_address_lockout </div><div class="title">Personal address reports work-email lockout; attachment soft-held pending callback</div><div class="row"><span class="chip ">1 email</span><span class="chip ">1 att</span><span class="chip ">expect: general_question</span></div><div class="row"><button class="small primary">Inject</button><button class="small">Messages</button></div></div></div>
+  </section>
+  <section id="col-mid" class="panel">
+    <nav class="tabs" id="tabs">
+      <button data-tab="messages" class="active">Ingress queue</button>
+      <button data-tab="boss">Pending boss review</button>
+      <button data-tab="outbox">Outbox / egress sink</button>
+      <button data-tab="events">Events</button>
+      <button data-tab="conformance">Expected vs actual</button>
+      <button data-tab="docs">Pipeline documents</button>
+      <button data-tab="policy">Policy</button>
+    </nav>
+    <div id="tab-body"><div><div class="toolbar"><span class="chip ">all scenarios</span></div><table><tr><th>id</th><th>scenario</th><th>sim t+</th><th>from</th><th>subject / file</th><th>state</th><th>flows</th></tr><tr class="click"><td>m0001</td><td>A1_status_inquiry</td><td>2s</td><td>dwhitcomb@harlowpryce.sandbox.invalid</td><td>Status check on HP-2026-0417</td><td><span class="chip ok">processed</span> </td><td>correspondent, pipeline</td></tr><tr class="click"><td>m0002</td><td>E1_lookalike_wire_change</td><td>2s</td><td>kalvarado@tricounty-title.sandbox.invalid</td><td>URGENT - updated wire instructions for today's closing</td><td><span class="chip ok">processed</span> </td><td>correspondent, pipeline</td></tr><tr class="click"><td>m0003</td><td>E1_lookalike_wire_change</td><td>9s</td><td>kalvarado@tricountytitle.sandbox.invalid</td><td>Officer certificate for TC-2026-1190</td><td><span class="chip ok">processed</span> </td><td>correspondent, pipeline</td></tr></table></div></div>
+  </section>
+  <section id="col-trace" class="panel">
+    <h2>Trace <span id="trace-id" class="muted"></span></h2>
+    <div id="trace"></div>
+  </section>
+</main>
+<aside id="mbx-dock" class="dock open">
+  <button id="mbx-toggle" class="small">Boss mailbox <span id="mbx-badge" class="chip bad">2</span></button>
+  <div id="mbx-body"><div class="mbx"><div class="muted mbx-filter">filter: role=correspondent <button class="small">clear filter</button></div><div class="mbx-thread"><h4>thread thr_c8f7d0790e <span class="muted">m0001</span></h4><div class="mbx-entry to-boss"><div><b>correspondent</b> → <b>boss</b> <span class="chip">draft_for_approval</span> <span class="chip warn">new</span> <span class="muted">bm00001 23:46:06.761</span></div><div class="mbx-sum">draft out_0001 (status_request) to dwhitcomb@harlowpryce.sandbox.invalid</div></div></div><div class="mbx-thread"><h4>thread thr_12d2b9683f <span class="muted">m0002</span></h4><div class="mbx-entry to-boss"><div><b>correspondent</b> → <b>boss</b> <span class="chip">hostile_forward</span> <span class="chip ">read</span> <span class="muted">bm00002 23:46:06.939</span></div><div class="mbx-sum">hostile mail forwarded: payment_fraud; 1 attachment(s) held; URGENT - updated wire instructions for today's closing</div><div><input placeholder="reason (recorded)"> <button class="small primary" data-decision-message="m0002">Release (legitimate)</button> <button class="small danger" data-decision-message="m0002">Quarantine</button></div></div></div></div></div>
+</aside>
+<script src="/ui/route.js"></script>
+<script src="/ui/mailbox.js"></script>
+<script src="/ui/app.js"></script>
+
+
+</body></html>

@@ -52,12 +52,34 @@ See [`status-bar.html`](status-bar.html). Both links are present:
 - `ui ↗` → `/ui`, same tab.
 - `inbox ↗` → `<sandbox_url>/ui#tab=messages&mailbox=open&role=correspondent`, new tab (`target="_blank"`), no token in the URL.
 
+## Link target: the sandbox ingress simulator
+
+The `inbox ↗` link points at the configured `sandbox_url` (`http://localhost:8100`).
+That URL is only reachable while the sandbox is running — the dev stack does **not**
+start it. Started here with host mode (`uv`, no Docker):
+
+```bash
+scripts/sandbox.sh run          # or: make sandbox   → http://127.0.0.1:8100
+scripts/sandbox.sh smoke        # inject A1 + E1 (prints SANDBOX SMOKE OK)
+```
+
+Rendered `http://localhost:8100/ui#tab=messages&mailbox=open&role=correspondent`:
+
+![sandbox ingress deep link](sandbox-inbox-deeplink.png)
+
+The rendered DOM shows `data-tab="messages" class="active"` (Ingress queue) and the
+seeded `A1_status_inquiry` / `E1_lookalike_wire_change` rows — the link target works
+when the sandbox is up. When the sandbox is **not** running, `:8100` refuses the
+connection (the browser shows an error / 404), which is expected.
+
 ## Files
 
 | File | What |
 | --- | --- |
 | [`status-bar-2x.png`](status-bar-2x.png) | The status bar at 2× device scale (legible). |
 | [`status-bar.html`](status-bar.html) | The rendered `<header class="status-bar">` from `--dump-dom`. |
+| [`sandbox-inbox-deeplink.png`](sandbox-inbox-deeplink.png) | The `inbox ↗` target: sandbox ingress UI, Ingress queue tab, seeded A1/E1. |
+| [`sandbox-inbox.html`](sandbox-inbox.html) | The rendered sandbox DOM (`--dump-dom`). |
 | [`../../demo/21-tui-status-links.png`](../../demo/21-tui-status-links.png) | The full 1200×800 render (also in `docs/demo/`). |
 
 ## Notes
