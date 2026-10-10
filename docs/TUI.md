@@ -184,6 +184,16 @@ read-only while it is open.
 The server reads `api/ui/index.html` and the TUI shell once at startup, so
 restart (`down`, `up`) after editing them.
 
+## Browser checks and demo screenshots
+
+- `scripts/tui_replay_check.mjs` (above) is the pass/fail browser check for the replay viewer.
+- `scripts/demo_capture.mjs` writes the committed screenshots and `manifest.json` to [`docs/demo/`](demo/README.md)
+  (viewport 1200x800, dark theme, under 400 KB each); `scripts/demo_seed_eval_runs.py` gives `/ui` a run to link;
+  `scripts/demo_release_notes.py --sha <commit>` prints Markdown embedding them for PR bodies and release notes.
+  Regenerate them when the UI changes; the rules and exact commands are in `docs/demo/README.md`.
+- The latest recorded run of the checks and of the manual checklist below, with environment and known gaps, is
+  [`docs/evidence/2026-10-10-tui-live-check/`](evidence/2026-10-10-tui-live-check/README.md).
+
 ## Manual checklist
 
 1. Boot plays: banner fade, four `[ ok ]` lines with real counts, `type 'help' to begin.`; a keypress skips the animation.

@@ -1,0 +1,150 @@
+{
+  "source_commit": "502995aa6a98d0af62c02efe77ac7285bea0d15d",
+  "tool": "node scripts/demo_capture.mjs",
+  "images": [
+    {
+      "file": "01-tui-help.png",
+      "caption": "The /tui terminal after boot, running `help`.",
+      "command": "open /tui, type `help`",
+      "sha256": "7985deac9b97b292c7d292746ba76b6419b29f4d7dc23fbd04ea3315c6c6b666",
+      "size_bytes": 206806,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "02-replay-viewer.png",
+      "caption": "Replay viewer paused at 01:30: station grid with per-station counts, scrub bar and the run metrics line.",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 90`",
+      "sha256": "fa7ab63534a3aaa7665ba53ff3187b61bf835f6a509d271476fbd1bcd226605c",
+      "size_bytes": 242959,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "03-replay-panel-metrics.png",
+      "caption": "Replay insight panel `metrics` (first `p`).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, key p",
+      "sha256": "6989e9174ae46e69089e644c79a7b540b6bda000d77c008054fa0f26778dd749",
+      "size_bytes": 257342,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "04-replay-panel-tokens.png",
+      "caption": "Replay insight panel `tokens` (second `p`).",
+      "command": "same session, key p x2",
+      "sha256": "c1896fb1a3c81c0e7442b65c7155ee550eaa97a905b03d054f3c8d23f0a23a5e",
+      "size_bytes": 250688,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "05-replay-panel-decisions.png",
+      "caption": "Replay insight panel `decisions` (third `p`).",
+      "command": "same session, key p x3",
+      "sha256": "1c1aec8776ba399337b65c7d54a8d8742b1f70095b505f0c431081974a3e85a7",
+      "size_bytes": 249891,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "06-replay-panel-latency.png",
+      "caption": "Replay insight panel `latency` (fourth `p`).",
+      "command": "same session, key p x4",
+      "sha256": "1d4e9e00bc1885c02a69c74ff849f594cafbd61fad956ac930c43fe737e6b354",
+      "size_bytes": 260134,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "07-outbound-links.png",
+      "caption": "Inspector (no document selected) listing the Phoenix and Grafana links, after pressing `o` and `g` (each opens a new tab).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, keys i, o, g; links come from GET /links",
+      "sha256": "1f9a31df522135e7ae0d12342ce60ef68834508d9924e75ddea6b56d57b30346",
+      "size_bytes": 265189,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "08-inspector-retry.png",
+      "caption": "Inspector on the retry document (gate_decision then retry events).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, key i, j x2",
+      "sha256": "2c6a07d65ff02b08754186f6465a1945954f7b664b51f4fd56f16ea73988f5c9",
+      "size_bytes": 284370,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "09-inspector-failed.png",
+      "caption": "Inspector on the failed document (failure `run_budget`, cause `extraction_miss`).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, key i, j x3",
+      "sha256": "e8af534c5f1f6d568a85d78bdc36b0b13ed5a415d6baed34a665ca85daa705b5",
+      "size_bytes": 283650,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "10-inspector-parked.png",
+      "caption": "Inspector on the parked document (parked in review, cause `judge_partial`).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, key i, j x4",
+      "sha256": "d5788fc1b6c1207833582656190564ae2a780346c7af14d2113dda6b5eb1bdfd",
+      "size_bytes": 279825,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "11-inspector-boss.png",
+      "caption": "Inspector on the boss-escalated document (arbiter and escalation events).",
+      "command": "/tui: `replay run:7e57d0c0ffee --at 135`, key i, j x5",
+      "sha256": "1a5566a416208f234b91831f13cef86ce7f6eb20c70cdb49d3399666d5be3bdc",
+      "size_bytes": 285412,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "12-links-json.png",
+      "caption": "Raw `GET /links`: the public base URLs the UI and viewer link out to.",
+      "command": "open http://127.0.0.1:8000/links",
+      "sha256": "4c5c0200b8711224cc3cc20d822e24b74643370e8fcd5f00844588aa491d4876",
+      "size_bytes": 15006,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "13-ui-replay-links.png",
+      "caption": "/ui Eval runs table with `replay`, `grafana` and `phoenix` links per run.",
+      "command": "open http://127.0.0.1:8000/ui (after demo_seed_eval_runs.py)",
+      "sha256": "4bc0b51315b71248f3b4b0c29fcf601eb7bf23b1b4adcb78b57c39404c97b3d1",
+      "size_bytes": 107413,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "14-ledger.png",
+      "caption": "The `ledger` listing followed by `ledger verify` (hash-chain check).",
+      "command": "open /tui, type `ledger` then `ledger verify`",
+      "sha256": "ceb39a055898792972cf656fe6693e0673a346e954e58975ba6dff8dddc6a899",
+      "size_bytes": 266883,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "15-pipeline-ls-runs.png",
+      "caption": "Pipeline commands `ls` (catalog documents, hostile filename shown as literal text) and `runs` (eval runs).",
+      "command": "open /tui, type `ls` then `runs`",
+      "sha256": "d2764502a7acbd0867a159916a246b3fe12e7f673849de257bfcca5047159bb3",
+      "size_bytes": 272623,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "16-sandbox-dock-badge.png",
+      "caption": "Sandbox UI with the docked Boss mailbox collapsed: unread badge on the toggle.",
+      "command": "http://127.0.0.1:8100/ui after injecting A1 + E1",
+      "sha256": "9662b46d862e2661c1114661c891de246dd1d05a1be14b304ed78e236265df01",
+      "size_bytes": 179146,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "17-sandbox-dock-open.png",
+      "caption": "Boss mailbox dock expanded: draft awaiting approval and the hostile_forward entry (pending Release / Quarantine).",
+      "command": "same page, click the dock toggle",
+      "sha256": "924a41d8844612c169056adaafd4b59d445aa2747e8f973b9644e2ee24fdb116",
+      "size_bytes": 215150,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "18-sandbox-pending-review.png",
+      "caption": "Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture).",
+      "command": "same page, tab \"Pending boss review\"",
+      "sha256": "00fef420ea3c5306fdf7236cb16ebcecfcf4502bb50ca7d0e4ab4dfb95d5b4d9",
+      "size_bytes": 202607,
+      "viewport": "1200x800"
+    }
+  ]
+}
