@@ -75,3 +75,77 @@ def test_content_spec_resolution(tmp_path):
         resolve_content_spec("locked", pull_dir=tmp_path / "missing")
     with pytest.raises(ContentSpecError):
         resolve_content_spec("nonsense-dir")
+
+
+def test_conformance_is_registered_with_documented_options():
+    """Verify sandbox conformance exposes the documented command-line options."""
+    res = runner.invoke(cli.app, ["sandbox", "conformance", "--help"])
+    assert res.exit_code == 0
+    for opt in (
+        "--content",
+        "--data-dir",
+        "--json",
+        "--only",
+        "--heldout",
+        "--slim",
+        "--lofo",
+    ):
+        assert opt in res.output
+
+
+def test_conformance_rejects_invalid_content_before_side_effects(monkeypatch):
+    """Verify conformance refuses an invalid pack before starting any service."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from mailroom_reloaded.sandbox.server import content, service, telemetry
+
+    loaded = SimpleNamespace(
+        cs=SimpleNamespace(report=SimpleNamespace(ok=False, errors=["invalid scenario"]))
+    )
+    monkeypatch.setattr(content, "load_sandbox_content", lambda _: loaded)
+    silence = Mock()
+    start = Mock()
+    monkeypatch.setattr(telemetry, "silence_exporters", silence)
+    monkeypatch.setattr(service, "SandboxService", start)
+    res = runner.invoke(cli.app, ["sandbox", "conformance", "--content", "smoke"])
+    assert res.exit_code == 1
+    assert "content has validation errors:\ninvalid scenario" in res.output
+    silence.assert_not_called()
+    start.assert_not_called()
+
+
+def test_conformance_uninstalls_guard_when_service_start_fails(monkeypatch):
+    """Verify a failing service start still uninstalls the network guard."""
+    from types import SimpleNamespace
+
+    from mailroom_reloaded.sandbox.server import content, service, telemetry
+    from mailroom_reloaded.sandbox.server import guard as guard_mod
+
+    loaded = SimpleNamespace(
+        cs=SimpleNamespace(report=SimpleNamespace(ok=True, errors=[]))
+    )
+    monkeypatch.setattr(content, "load_sandbox_content", lambda _: loaded)
+    monkeypatch.setattr(telemetry, "silence_exporters", lambda: None)
+    events = []
+
+    class FakeGuard:
+        def install(self):
+            events.append("install")
+            return self
+
+        def uninstall(self):
+            events.append("uninstall")
+
+    class BoomService:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, **k):
+            raise OSError("state dir not writable")
+
+    monkeypatch.setattr(guard_mod, "NetworkGuard", FakeGuard)
+    monkeypatch.setattr(service, "SandboxService", BoomService)
+    res = runner.invoke(cli.app, ["sandbox", "conformance", "--content", "smoke"])
+    assert res.exit_code != 0
+    assert events == ["install", "uninstall"]

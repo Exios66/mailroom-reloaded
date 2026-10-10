@@ -50,6 +50,14 @@ class ReviewBody(BaseModel):
     by: str = "reviewer"
 
 
+class BossDecisionBody(BaseModel):
+    message_id: str
+    decision: Literal["legitimate", "quarantine"]
+    reason: str = ""
+    category: Literal["phishing", "malware", "other"] | None = None
+    by: str = "boss"
+
+
 class ProfileBody(BaseModel):
     egress_profile: Literal["closed", "egress"] | None = None
     autonomy: Literal["human", "sandbox"] | None = None
@@ -316,6 +324,80 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
             "fail": sum(r["verdict"] == "fail" for r in rows),
         }
 
+    @api.get("/boss/mailbox")
+    def boss_mailbox(
+        direction: Literal["correspondent->boss", "boss->correspondent"] | None = None,
+        role: Literal["correspondent", "boss"] | None = None,
+        thread: str | None = None,
+        message: str | None = None,
+        status: Literal["new", "read", "acted", "expired"] | None = None,
+        kind: str | None = None,
+        since: int = Query(default=0, ge=0),
+        limit: int = Query(default=500, ge=1, le=5000),
+        latest: bool = False,
+    ) -> dict:
+        """List matching entries after the exclusive sequence cursor without marking them read.
+
+        ``latest`` returns the newest ``limit`` matches instead of the oldest.
+
+        ``role`` matches either sender or recipient. Return entries in sequence
+        order, their count, and ``last_seq``: the last returned sequence, or
+        ``since`` when no entries match.
+        """
+        rows = service.mailbox.list(
+            direction=direction,
+            role=role,
+            thread_id=thread,
+            message_id=message,
+            status=status,
+            kind=kind,
+            since=since,
+            limit=limit,
+            latest=latest,
+        )
+        return {
+            "entries": rows,
+            "count": len(rows),
+            "last_seq": rows[-1]["seq"] if rows else since,
+        }
+
+    @api.get("/boss/mailbox/{entry_id}")
+    def boss_mailbox_entry(entry_id: str) -> dict:
+        """Return an entry and status history without marking it read; raise HTTP 404 if absent."""
+        e = service.mailbox.get(entry_id)
+        if e is None:
+            raise HTTPException(404, f"unknown mailbox entry {entry_id}")
+        return {**e, "history": service.mailbox.history(entry_id)}
+
+    @api.get("/boss/pending")
+    def boss_pending() -> dict:
+        """Return pending review cases and their count without changing review state."""
+        rows = service.pending_reviews()
+        return {"pending": rows, "count": len(rows)}
+
+    @api.get("/boss/decisions")
+    def boss_decisions() -> dict:
+        """Return all non-pending review cases and their count."""
+        rows = [c for c in service.list_reviews() if c["state"] != "pending"]
+        return {"decisions": rows, "count": len(rows)}
+
+    @api.post("/boss/decisions")
+    def boss_decide(body: BossDecisionBody) -> dict:
+        """Record a decision and apply its release or quarantine effects immediately.
+
+        Missing messages/reviews become HTTP 404; invalid or already-decided
+        reviews become HTTP 409. Permission errors become HTTP 403.
+        """
+        return _wrap(
+            lambda: service.boss_decide(
+                body.message_id,
+                body.decision,
+                body.reason,
+                category=body.category,
+                by=body.by,
+            )
+        )
+
     @api.post("/reset")
     def reset() -> dict:
         """Clear sandbox state and return a reset acknowledgment."""
@@ -360,6 +442,11 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
     def ui_js() -> FileResponse:
         """Serve the sandbox browser script."""
         return _static("app.js", "text/javascript")
+
+    @app.get("/ui/mailbox.js")
+    def ui_mailbox_js() -> FileResponse:
+        """Serve the mailbox panel script, or raise HTTP 404 if it is not packaged."""
+        return _static("mailbox.js", "text/javascript")
 
     @app.get("/ui/app.css")
     def ui_css() -> FileResponse:
