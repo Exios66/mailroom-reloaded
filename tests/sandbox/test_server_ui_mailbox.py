@@ -1,4 +1,4 @@
-"""Runs the Boss mailbox panel's JS under node with a stub DOM (offline)."""
+"""Runs the sandbox UI's JS (mailbox panel, URL routing, boot) under node with a stub DOM (offline)."""
 
 import shutil
 import subprocess
@@ -10,12 +10,18 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_mailbox_panel_js_suite() -> None:
-    """Run the mailbox panel JavaScript tests with Node when it is available."""
+    """Run the mailbox, route and boot JavaScript tests with Node when it is available."""
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
     res = subprocess.run(
-        [node, "--test", "tests/sandbox/js/mailbox.test.mjs"],
+        [
+            node,
+            "--test",
+            "tests/sandbox/js/mailbox.test.mjs",
+            "tests/sandbox/js/route.test.mjs",
+            "tests/sandbox/js/boot.test.mjs",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,

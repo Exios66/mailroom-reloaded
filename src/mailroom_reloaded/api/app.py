@@ -1063,6 +1063,7 @@ def create_app() -> FastAPI:
             "public_url": settings.public_url,
             "phoenix_url": settings.phoenix_url,
             "grafana_url": settings.grafana_url,
+            "sandbox_url": settings.sandbox_url,
             "phoenix_project": settings.phoenix_project or "mailroom-live",
         }
 

@@ -279,6 +279,7 @@ def test_links_public(client, monkeypatch):
     monkeypatch.setenv("MAILROOM_PUBLIC_URL", "https://mailroom.example")
     monkeypatch.setenv("MAILROOM_PHOENIX_URL", "https://phoenix.example")
     monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://grafana.example")
+    monkeypatch.setenv("MAILROOM_SANDBOX_URL", "https://sandbox.example")
     monkeypatch.setenv("MAILROOM_PHOENIX_PROJECT", "proj-x")
     from mailroom_reloaded.settings import get_settings
 
@@ -289,6 +290,7 @@ def test_links_public(client, monkeypatch):
         "public_url": "https://mailroom.example",
         "phoenix_url": "https://phoenix.example",
         "grafana_url": "https://grafana.example",
+        "sandbox_url": "https://sandbox.example",
         "phoenix_project": "proj-x",
     }
 
@@ -320,13 +322,14 @@ def test_links_phoenix_project_comes_from_settings(client, monkeypatch):
         "not a url",
     ],
 )
-def test_link_settings_reject_unsafe_values(monkeypatch, bad):
+@pytest.mark.parametrize("var", ["MAILROOM_GRAFANA_URL", "MAILROOM_SANDBOX_URL"])
+def test_link_settings_reject_unsafe_values(monkeypatch, bad, var):
     """Verify the public link settings accept only credential-free http(s) URLs."""
     from pydantic import ValidationError
 
     from mailroom_reloaded.settings import Settings
 
-    monkeypatch.setenv("MAILROOM_GRAFANA_URL", bad)
+    monkeypatch.setenv(var, bad)
     with pytest.raises(ValidationError):
         Settings()
 
@@ -337,6 +340,8 @@ def test_link_settings_strip_trailing_slash(monkeypatch):
 
     monkeypatch.setenv("MAILROOM_GRAFANA_URL", "https://g.example/")
     assert Settings().grafana_url == "https://g.example"
+    monkeypatch.setenv("MAILROOM_SANDBOX_URL", "https://s.example/")
+    assert Settings().sandbox_url == "https://s.example"
 
 
 def test_links_public_without_token(client, monkeypatch):

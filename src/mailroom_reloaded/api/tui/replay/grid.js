@@ -3,6 +3,7 @@
 // string is only sanitised (control chars -> space) and truncated, never interpreted.
 
 import { getPanel } from './panels.js';
+import { inboxUrl, sandboxBase } from '../lib/links.js';
 
 const CLASSES = new Set(['dim', 'ok', 'warn', 'err', 'info', 'hot', 'sel']);
 const MIN_COLS = 60;
@@ -186,6 +187,7 @@ function externalLinkRows({ sess, links, cols }) {
   const grafana = typeof cfg.grafana_url === 'string' ? cfg.grafana_url : '';
   const id = sess && typeof sess.id === 'string' ? sess.id : '';
   const run = id.startsWith('run:') ? id.slice(4) : null;
+  const sandbox = inboxUrl(sandboxBase(cfg));
   const out = [];
   if (phoenix) {
     out.push(clip([[' phoenix  ', 'dim'], [truncate(phoenix, cols - 10), 'info']], cols));
@@ -193,6 +195,9 @@ function externalLinkRows({ sess, links, cols }) {
   if (grafana && run) {
     const url = `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}`;
     out.push(clip([[' grafana  ', 'dim'], [truncate(url, cols - 10), 'info']], cols));
+  }
+  if (sandbox) {
+    out.push(clip([[' sandbox  ', 'dim'], [truncate(sandbox, cols - 10), 'info']], cols));
   }
   return out;
 }

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- TUI `inbox` command (`src/mailroom_reloaded/api/tui/commands/sandbox.js`): opens the sandbox UI's Correspondent inbox (Ingress queue plus the Boss mailbox dock filtered to `role=correspondent`) in a new tab so sandbox simulation experiments can be watched live; flags `--tab`, `--scenario`, `--message`, `--thread`, `--no-mailbox`, `--print`. The link never carries a token. `/tui#inbox` and `/tui#inbox=<tab>` deep links run it (`deeplink.js`), and the replay inspector shows a `sandbox` row when `/links` has `sandbox_url`.
+- Sandbox UI hash routes (`#tab=…&scenario=…&sel=…&mailbox=…&role=…&thread=…`, allow-listed) and `sandbox_url` in the public `GET /links` response, set by `MAILROOM_SANDBOX_URL`.
+- Shared TUI link helpers in `src/mailroom_reloaded/api/tui/lib/links.js` (moved out of `commands/replay.js`; no behaviour change). Tests in `tests/tui/js/sandbox-command.test.mjs`, `links.test.mjs`, `deeplink.test.mjs`, `replay-command.test.mjs`; `docs/TUI.md` updated.
+
 ### Fixed
 
 - `review_approved` is now cleared once the approved re-extraction has run (`src/mailroom_reloaded/pipeline/flow.py`), so a later retry or resume is not treated as a fresh approval; tests in `tests/test_watcher_review.py`.

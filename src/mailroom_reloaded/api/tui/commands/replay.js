@@ -8,6 +8,7 @@ import { createModel } from '../replay/model.js';
 import { listPanels } from '../replay/panels.js';
 import { createFollowReader } from '../replay/live.js';
 import { fmtTime, renderFrame } from '../replay/grid.js';
+import { externalUrls, loadLinks } from '../lib/links.js';
 
 const PREFIXES = new Set(['run', 'session', 'doc', 'window']);
 const TAIL_RE = /^[A-Za-z0-9._:-]+$/;
@@ -161,27 +162,6 @@ function reducedMotion() {
   }
 }
 
-/**
- * The run's outbound observability URLs from the GET /links config. Both are
- * null when the config is missing or the session is not a run, so the `o`/`g`
- * keys degrade to a no-op.
- */
-function httpBase(v) {
-  if (typeof v !== 'string' || !/^https?:\/\/[^\s@]+$/i.test(v)) return null;
-  return v.replace(/\/+$/, '');
-}
-
-function externalUrls(links, id) {
-  const cfg = links && typeof links === 'object' ? links : {};
-  const phoenix = httpBase(cfg.phoenix_url);
-  const grafana = httpBase(cfg.grafana_url);
-  const run = typeof id === 'string' && id.startsWith('run:') ? id.slice(4) : null;
-  return {
-    phoenix,
-    grafana: grafana && run ? `${grafana}/d/mailroom-quality?var-run_id=${encodeURIComponent(run)}` : null,
-  };
-}
-
 async function openViewer(ctx, arg, flags) {
   const id = normalizeSessionId(arg);
   if (!id) return ctx.out.line('replay: invalid session id', 'error');
@@ -263,18 +243,14 @@ async function openViewer(ctx, arg, flags) {
     }
   };
 
-  const loadLinks = () => {
-    Promise.resolve()
-      .then(() => ctx.api.get('/links', undefined, { signal: ctx.signal() }))
-      .then((body) => {
-        if (closed) return;
-        links = body && typeof body === 'object' ? body : null;
-        linksVersion += 1;
-        redraw();
-      })
-      .catch(() => {
-        // No config: the viewer still opens; o/g become no-ops.
-      });
+  const fetchLinks = () => {
+    loadLinks(ctx).then((body) => {
+      // No config: the viewer still opens; o/g become no-ops.
+      if (closed || !body) return;
+      links = body;
+      linksVersion += 1;
+      redraw();
+    });
   };
 
   const loadLedger = () => {
@@ -489,7 +465,7 @@ async function openViewer(ctx, arg, flags) {
 
   view = ctx.takeover({ onKey, label: `replay ${id}` });
   if (!view) return ctx.out.line('replay: another viewer is already open', 'error');
-  loadLinks();
+  fetchLinks();
   if (doc && typeof doc.addEventListener === 'function') {
     doc.addEventListener('visibilitychange', onVisibility);
   }

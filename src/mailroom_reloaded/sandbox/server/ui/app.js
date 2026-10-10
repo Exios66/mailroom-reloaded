@@ -85,6 +85,7 @@ async function inject(ids) {
 // ---------------------------------------------------------------- tabs
 /** Refresh the active tab and its content, displaying view-loading errors in the tab. */
 async function renderTab() {
+  writeRoute();
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === state.tab));
   const body = $("tab-body");
   try {
@@ -154,7 +155,7 @@ function reviewCard(c, withButtons) {
       el("button", { ...decisionAttrs, class: "small danger", onclick: () => onDecide("quarantine") }, "Quarantine")) : null);
 }
 // ---------------------------------------------------------------- boss mailbox dock (always live)
-const mbx = { entries: [], last: 0, open: false, timer: null };
+const mbx = { entries: [], last: 0, open: false, role: null, thread: null, timer: null };
 /**
  * Refresh cached entries, the unread badge, and the open dock without marking entries read.
  * Fetch the newest 5,000 entries; suppress polling errors and retain existing content on fetch failure.
@@ -168,12 +169,41 @@ async function pollMailbox() {
     $("mbx-badge").textContent = String(window.sbxMailbox.unread(mbx.entries, pending));
     $("mbx-badge").className = "chip " + (pending.size ? "bad" : "");
     if (mbx.open) $("mbx-body").replaceChildren(window.sbxMailbox.renderMailbox(mbx.entries, {
-      pending, isDeciding: (mid) => decidingMessages.has(mid),
+      pending, role: mbx.role, thread: mbx.thread, onClearFilter: clearMailboxFilter,
+      isDeciding: (mid) => decidingMessages.has(mid),
       onDecide: (mid, decision, reason) => guarded(() => decide(mid, decision, reason)),
     }));
   } catch (e) { /* offline or no token yet: keep the last view */ }
 }
-$("mbx-toggle").addEventListener("click", () => { mbx.open = !mbx.open; $("mbx-dock").classList.toggle("open", mbx.open); pollMailbox(); });
+$("mbx-toggle").addEventListener("click", () => { mbx.open = !mbx.open; $("mbx-dock").classList.toggle("open", mbx.open); writeRoute(); pollMailbox(); });
+/** Drop the dock's role/thread filter, update the URL fragment and redraw. */
+function clearMailboxFilter() { mbx.role = mbx.thread = null; writeRoute(); pollMailbox(); }
+
+// ---------------------------------------------------------------- URL fragment (deep links)
+// The fragment mirrors tab, scenario, selection and dock state so a reload or a copied URL reproduces
+// the view. It never carries the API token. history/location are guarded for non-browser harnesses.
+const hasLocation = () => typeof location !== "undefined" && location !== null;
+const hasRoute = () => typeof window !== "undefined" && !!window.sbxRoute;
+/** Apply a fragment to the view state and dock; absent keys reset to their defaults. Does not fetch. */
+function applyRoute(hash) {
+  if (!hasRoute()) return;
+  const r = window.sbxRoute.parseRoute(hash);
+  state.tab = r.tab || "messages"; state.scenario = r.scenario || null; state.sel = r.sel || null;
+  mbx.open = r.mailbox === "open"; mbx.role = r.role || null; mbx.thread = r.thread || null;
+  $("mbx-dock").classList.toggle("open", mbx.open);
+}
+/** Mirror the current view into the fragment with replaceState (no history entry, no hashchange). */
+function writeRoute() {
+  if (!hasRoute() || !hasLocation() || typeof history === "undefined" || !history || !history.replaceState) return;
+  const h = window.sbxRoute.formatRoute({ tab: state.tab, scenario: state.scenario, sel: state.sel,
+    mailbox: mbx.open ? "open" : "closed", role: mbx.role, thread: mbx.thread });
+  if (h === (location.hash || "")) return;
+  try { history.replaceState(null, "", (location.pathname || "") + (location.search || "") + h); } catch (e) { /* sandboxed frame */ }
+}
+applyRoute(hasLocation() ? location.hash : "");
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("hashchange", () => { applyRoute(hasLocation() ? location.hash : ""); renderTab(); renderTrace(); pollMailbox(); });
+}
 mbx.timer = setInterval(pollMailbox, 2000);
 pollMailbox();
 
@@ -246,9 +276,13 @@ async function policyView() {
 // ---------------------------------------------------------------- trace
 async function renderTrace() {
   const box = $("trace");
-  if (!state.sel) return;
+  if (!state.sel) {
+    $("trace-id").textContent = "";
+    box.replaceChildren();
+    return;
+  }
   try {
-    const t = await api("/messages/" + state.sel + "/trace");
+    const t = await api("/messages/" + encodeURIComponent(state.sel) + "/trace");
     $("trace-id").textContent = t.message_id + " / " + t.ingress.scenario;
     box.replaceChildren(...traceSections(t));
   } catch (e) { box.replaceChildren(el("p", { class: "err" }, e.message)); }

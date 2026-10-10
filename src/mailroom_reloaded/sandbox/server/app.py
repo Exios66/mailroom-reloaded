@@ -448,6 +448,11 @@ def create_sandbox_app(service: SandboxService) -> FastAPI:
         """Serve the mailbox panel script, or raise HTTP 404 if it is not packaged."""
         return _static("mailbox.js", "text/javascript")
 
+    @app.get("/ui/route.js")
+    def ui_route_js() -> FileResponse:
+        """Serve the URL fragment routing script, or raise HTTP 404 if it is not packaged."""
+        return _static("route.js", "text/javascript")
+
     @app.get("/ui/app.css")
     def ui_css() -> FileResponse:
         """Serve the sandbox stylesheet."""

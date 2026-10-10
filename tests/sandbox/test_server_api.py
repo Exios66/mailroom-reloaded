@@ -17,9 +17,19 @@ def test_health_ui_and_static_are_offline(live):
     ui = client.get("/ui")
     assert ui.status_code == 200 and "text/html" in ui.headers["content-type"]
     assert "default-src 'self'" in ui.headers["content-security-policy"]
+    assert "/ui/route.js" in ui.text
+    route = client.get("/ui/route.js")
+    assert route.status_code == 200 and "javascript" in route.headers["content-type"]
+    assert "default-src 'self'" in route.headers["content-security-policy"]
     for asset in ("/ui/app.js", "/ui/app.css"):
         assert client.get(asset).status_code == 200
-    page = ui.text + client.get("/ui/app.js").text + client.get("/ui/app.css").text
+    page = (
+        ui.text
+        + client.get("/ui/app.js").text
+        + client.get("/ui/app.css").text
+        + client.get("/ui/mailbox.js").text
+        + route.text
+    )
     assert (
         "http://" not in page and "https://" not in page
     )  # no external fetches at all

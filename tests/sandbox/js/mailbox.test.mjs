@@ -123,3 +123,18 @@ for (const fails of [false, true]) {
     await retry;
   });
 }
+
+test("role and thread filters narrow the view and show a clearable filter line", () => {
+  const other = { ...dec, id: "bm00003", thread_id: "t2", sender_role: "auditor", recipient_role: "boss" };
+  assert.deepEqual(mbx.filterEntries([fwd, dec, other], { role: "correspondent" }).map((e) => e.id), ["bm00001", "bm00002"]);
+  assert.deepEqual(mbx.filterEntries([fwd, dec, other], { role: "boss", thread: "t2" }).map((e) => e.id), ["bm00003"]);
+  assert.equal(mbx.filterEntries([fwd, dec, other], {}).length, 3);
+  let cleared = 0;
+  const root = mbx.renderMailbox([fwd, dec, other], { role: "correspondent", onClearFilter: () => cleared++ });
+  assert.match(root.text, /filter: role=correspondent/);
+  assert.doesNotMatch(root.text, /thread t2/);
+  root.find((n) => n.tag === "button" && n.text === "clear filter")[0].handlers.click();
+  assert.equal(cleared, 1);
+  assert.match(mbx.renderMailbox([fwd], { role: "boss", thread: "zzz" }).text, /No mailbox entries match the filter/);
+  assert.equal(mbx.renderMailbox([fwd, dec], {}).find((n) => n.className.includes("mbx-filter")).length, 0);
+});

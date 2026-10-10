@@ -442,6 +442,19 @@ test('the inspector shows the Phoenix and Grafana links for the run', async () =
   await p;
 });
 
+test('the inspector lists the sandbox inbox link only when sandbox_url is valid', async () => {
+  const { h, p } = await open('r1', makeCtx({ routes: { '/links': { ...LINKS, sandbox_url: 'http://localhost:8765/' }, '/v1/replay/sessions/run%3Ar1/timeline': TL } }));
+  h.tk.opts.onKey(key('i'));
+  assert.match(lastText(h.view), /sandbox\s+http:\/\/localhost:8765\/ui#tab=messages&mailbox=open&role=correspondent/);
+  h.tk.opts.onKey(key('q'));
+  await p;
+  const bad = await open('r1', makeCtx({ routes: { '/links': { ...LINKS, sandbox_url: 'javascript:alert(1)' }, '/v1/replay/sessions/run%3Ar1/timeline': TL } }));
+  bad.h.tk.opts.onKey(key('i'));
+  assert.doesNotMatch(lastText(bad.h.view), /sandbox/);
+  bad.h.tk.opts.onKey(key('q'));
+  await bad.p;
+});
+
 test('o and g open Phoenix and Grafana with the injected opener', async () => {
   const opened = [];
   const h = makeCtx({

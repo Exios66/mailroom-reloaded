@@ -7,8 +7,9 @@ import { createAmbient } from './ambient.js';
 import { registerPipeline } from './commands/pipeline.js';
 import { registerLedger } from './commands/ledger.js';
 import { registerReplay } from './commands/replay.js';
+import { registerSandbox } from './commands/sandbox.js';
 import { registerShell } from './commands/shell.js';
-import { deepLinkCommand, isReplayLink } from './deeplink.js';
+import { deepLinkCommand, deepLinkKind } from './deeplink.js';
 
 async function loadText(name) {
   try {
@@ -23,6 +24,7 @@ export function registerAll(registry, { ambient }) {
   registerPipeline(registry);
   registerLedger(registry);
   registerReplay(registry);
+  registerSandbox(registry);
   registerShell(registry, { ambient });
 }
 
@@ -71,7 +73,10 @@ export async function start() {
   const hash = globalThis.location ? globalThis.location.hash : '';
   const link = deepLinkCommand(hash);
   if (link) term.run(link).catch(() => {});
-  else if (isReplayLink(hash)) term.ctx.out.line('replay: invalid deep link', 'error');
+  else {
+    const kind = deepLinkKind(hash);
+    if (kind) term.ctx.out.line(`${kind}: invalid deep link`, 'error');
+  }
   return term;
 }
 

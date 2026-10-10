@@ -35,6 +35,7 @@ services:
     environment:
       <<: *app-env
       MAILROOM_EMBED_WATCHER: ${MAILROOM_EMBED_WATCHER:-1}
+      MAILROOM_SANDBOX_URL: ${MAILROOM_SANDBOX_URL:-http://localhost:8100}
     volumes:
       - mailroom_data:/data
       - hf_cache:/hf_cache
