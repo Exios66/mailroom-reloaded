@@ -39,6 +39,7 @@ __all__ = [
     "policy_source",
     "prune",
     "pruned_runs",
+    "read_pruned_run_ids",
     "seed_showcase",
     "set_policy",
     "unpin",
@@ -140,6 +141,22 @@ def pruned_runs(ledger: Ledger) -> set[str]:
         for e in _entries(ledger, "pruned")
         if isinstance(t := e.payload.get("target"), str)
     }
+
+
+def read_pruned_run_ids() -> set[str]:
+    """Run ids whose spans retention removed, read with a throwaway ledger.
+
+    Shared by the API and the ``mailroom replay`` CLI. Empty when the ledger is unreadable,
+    so listings still work without the marker. A process-wide ledger is not used because it
+    would install the external anchor hook.
+    """
+    from mailroom_reloaded.storage.db import get_engine
+
+    try:
+        return pruned_runs(Ledger(get_engine()))
+    except Exception:
+        logger.warning("replay_pruned_lookup_failed", exc_info=True)
+        return set()
 
 
 def _checked_run_id(run_id: str) -> str:

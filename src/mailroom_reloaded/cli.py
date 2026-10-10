@@ -11,14 +11,17 @@ Commands:
 * ``mailroom card ...`` — SAND-37 scorecards, one ``mailroom.card/v1`` per run
   or the aggregated master card (Task 21).
 * ``mailroom conformance ...`` — behavioural conformance suite (Task 24).
+* ``mailroom replay import|export|sessions`` — offline OTLP import and replay/v1 export.
 """
 
 # ruff: noqa: B008 - Typer/FastAPI options are function calls in defaults by design.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -387,6 +390,136 @@ def audit_export_head(
         typer.echo(str(out))
     else:
         typer.echo(text)
+
+
+replay_app = typer.Typer(
+    name="replay",
+    help="Trace replay: import OTLP/JSON spans, export a replay/v1 timeline, list sessions.",
+    no_args_is_help=True,
+)
+app.add_typer(replay_app, name="replay")
+
+
+def _replay_fail(message: str, code: int = 1) -> typer.Exit:
+    typer.echo(f"error: {message}", err=True)
+    return typer.Exit(code)
+
+
+@replay_app.command("import")
+def replay_import(
+    file: Path = typer.Argument(
+        ..., exists=True, dir_okay=False, readable=True, help="OTLP/JSON or JSON-lines file."
+    ),
+    run_id: str = typer.Option(
+        None, "--run-id", help="File every span under this run id (overrides mailroom.run_id)."
+    ),
+    append: bool = typer.Option(
+        False, "--append", help="Allow adding to a run that already has spans."
+    ),
+) -> None:
+    """Import OTLP/JSON spans into the span store (allow-listed, idempotent)."""
+    from mailroom_reloaded.obs.replay.otlp_import import (
+        OtlpImportError,
+        import_otlp_file,
+    )
+    from mailroom_reloaded.storage.retention import read_pruned_run_ids
+    from mailroom_reloaded.storage.span_store import SpanStore, default_span_store_path
+
+    store = SpanStore(default_span_store_path())
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            pruned = read_pruned_run_ids()
+        result = import_otlp_file(file, store, run_id=run_id, append=append, pruned=pruned)
+    except OtlpImportError as exc:
+        raise _replay_fail(str(exc), 2) from None
+    finally:
+        store.close()
+    typer.echo(
+        json.dumps(
+            {
+                "parsed": result.parsed,
+                "stored": result.stored,
+                "skipped": result.skipped,
+                "runs": result.runs,
+                "sessions": result.sessions,
+            }
+        )
+    )
+    if result.skipped:
+        typer.echo(
+            f"warning: {result.skipped} of {result.parsed} spans were not stored "
+            "(already present or over the per-run row cap)",
+            err=True,
+        )
+
+
+@replay_app.command("export")
+def replay_export(
+    session: str = typer.Argument(..., help="Session id: run:<id>, session:<id>, doc:<id>."),
+    out: Path = typer.Option(None, "--out", "-o", help="Write here instead of stdout."),
+) -> None:
+    """Write the ``replay/v1`` timeline of a session as JSON (exit 3: its data was pruned)."""
+    from mailroom_reloaded.obs.replay.sessions import parse_session_id
+    from mailroom_reloaded.obs.replay.timeline import build_timeline
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.retention import read_pruned_run_ids
+
+    try:
+        kind, key = parse_session_id(session)
+    except ValueError:
+        raise _replay_fail("invalid session id", 2) from None
+    try:
+        with contextlib.redirect_stdout(sys.stderr):  # keep log lines out of the JSON
+            pruned = kind == "run" and key in read_pruned_run_ids()
+            tl = build_timeline(session, engine=get_engine())
+    except Exception:
+        logger.warning("replay_export_failed", exc_info=True)
+        raise _replay_fail("timeline unavailable") from None
+    if tl is None:
+        raise _replay_fail("data pruned" if pruned else f"no timeline for {session}", 3 if pruned else 1)
+    if pruned:
+        tl.session.data_pruned = True
+    text = tl.model_dump_json()
+    if out is None:
+        typer.echo(text)
+        return
+    try:
+        out.write_text(text + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise _replay_fail(f"cannot write {out}: {exc.strerror or exc}") from None
+    typer.echo(str(out))
+
+
+@replay_app.command("sessions")
+def replay_sessions(
+    limit: int = typer.Option(50, "--limit", min=1, max=500),
+    as_json: bool = typer.Option(False, "--json", help="Print the API's JSON shape."),
+) -> None:
+    """List replayable sessions, newest first."""
+    from mailroom_reloaded.obs.replay.sessions import list_sessions
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.retention import read_pruned_run_ids
+
+    try:
+        with contextlib.redirect_stdout(sys.stderr):  # keep log lines out of the JSON
+            sessions = list_sessions(limit, engine=get_engine())
+            pruned = read_pruned_run_ids()
+        for sm in sessions:
+            if sm.kind == "run" and sm.id.removeprefix("run:") in pruned:
+                sm.data_pruned = True
+    except Exception:
+        logger.warning("replay_sessions_failed", exc_info=True)
+        raise _replay_fail("sessions unavailable") from None
+    if as_json:
+        typer.echo(json.dumps({"sessions": [s.model_dump(mode="json") for s in sessions]}))
+        return
+    if not sessions:
+        typer.echo("no sessions")
+    for s in sessions:
+        typer.echo(
+            f"{s.id}\t{s.environment}\t{s.documents} docs\t{s.duration_s}s\t{s.started_at}\t{s.source}"
+            + ("\tdata pruned" if s.data_pruned else "")
+        )
 
 
 jev_app = typer.Typer(

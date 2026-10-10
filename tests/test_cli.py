@@ -388,3 +388,145 @@ def test_train_gate_malformed_json_does_not_call_trainer(
     assert result.exit_code != 0
     assert isinstance(result.exception, json.JSONDecodeError)
     fit.assert_not_called()
+
+
+# --- mailroom replay (R-13) -------------------------------------------------------------
+
+
+def _otlp_file(path, run: str = "run-cli-1") -> None:
+    t0 = 1_760_000_000 * 10**9
+
+    def kv(k: str, v: str) -> dict:
+        return {"key": k, "value": {"stringValue": v}}
+
+    spans = [
+        {
+            "traceId": "cd" * 16,
+            "spanId": f"{i:016x}",
+            "name": name,
+            "startTimeUnixNano": str(t0 + i * 10**9),
+            "endTimeUnixNano": str(t0 + (i + 1) * 10**9),
+            "attributes": [kv("mailroom.run_id", run), kv("mailroom.doc_id", "d1"), kv(
+                "llm.input_messages.0.message.content", "SECRET")],
+        }
+        for i, name in ((1, "mailroom.document"), (2, "mailroom.node.sorter"))
+    ]
+    doc = {"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+@pytest.fixture
+def replay_env(tmp_path, monkeypatch):
+    """Point settings and the default engine at ``tmp_path`` for one test."""
+    monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
+    from mailroom_reloaded import settings
+    from mailroom_reloaded.obs.replay.timeline import clear_cache
+    from mailroom_reloaded.storage import db
+
+    settings.get_settings.cache_clear()
+    monkeypatch.setattr(db, "_default_engine", None)
+    clear_cache()
+    try:
+        yield tmp_path
+    finally:
+        if db._default_engine is not None:
+            db._default_engine.dispose()
+        db._default_engine = None
+        settings.get_settings.cache_clear()
+        clear_cache()
+
+
+def test_replay_import_export_sessions(replay_env) -> None:
+    src = replay_env / "in.json"
+    _otlp_file(src)
+    res = runner.invoke(cli.app, ["replay", "import", str(src)])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout) == {
+        "parsed": 2, "stored": 2, "skipped": 0, "runs": ["run-cli-1"], "sessions": []
+    }
+    # a second import stores nothing new
+    refused = runner.invoke(cli.app, ["replay", "import", str(src)])
+    assert refused.exit_code == 2 and "--append" in refused.output
+    again = runner.invoke(cli.app, ["replay", "import", str(src), "--append"])
+    assert json.loads(again.stdout)["stored"] == 0
+    assert json.loads(again.stdout)["skipped"] == 2
+    assert "warning: 2 of 2 spans were not stored" in again.output
+    assert "SECRET" not in (replay_env / "traces.db").read_bytes().decode("latin-1")
+
+    out = replay_env / "tl.json"
+    res = runner.invoke(cli.app, ["replay", "export", "run:run-cli-1", "-o", str(out)])
+    assert res.exit_code == 0, res.output
+    assert json.loads(out.read_text())["version"] == "replay/v1"
+    res = runner.invoke(cli.app, ["replay", "export", "run-cli-1"])
+    assert json.loads(res.stdout)["session"]["id"] == "run:run-cli-1"
+
+    res = runner.invoke(cli.app, ["replay", "sessions", "--json", "--limit", "5"])
+    assert res.exit_code == 0, res.output
+    assert [s["id"] for s in json.loads(res.stdout)["sessions"]] == ["run:run-cli-1"]
+    res = runner.invoke(cli.app, ["replay", "sessions"])
+    assert "run:run-cli-1" in res.stdout
+
+
+def test_replay_import_run_id_override(replay_env) -> None:
+    src = replay_env / "in.json"
+    _otlp_file(src)
+    res = runner.invoke(cli.app, ["replay", "import", str(src), "--run-id", "other-1"])
+    assert json.loads(res.stdout)["runs"] == ["other-1"]
+
+
+def test_replay_errors(replay_env) -> None:
+    bad = replay_env / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    res = runner.invoke(cli.app, ["replay", "import", str(bad)])
+    assert res.exit_code == 2 and "error:" in res.output
+    assert "Traceback" not in res.output
+    res = runner.invoke(cli.app, ["replay", "import", str(replay_env / "missing.json")])
+    assert res.exit_code != 0
+    res = runner.invoke(cli.app, ["replay", "import", str(bad), "--run-id", "bad id"])
+    assert res.exit_code == 2 and "not a valid id" in res.output
+    res = runner.invoke(cli.app, ["replay", "export", "bad id"])
+    assert res.exit_code == 2 and "invalid session id" in res.output
+    res = runner.invoke(cli.app, ["replay", "export", "run:nothing-here"])
+    assert res.exit_code == 1 and "no timeline" in res.output
+    res = runner.invoke(cli.app, ["replay", "sessions", "--limit", "0"])
+    assert res.exit_code != 0
+    res = runner.invoke(cli.app, ["replay", "sessions"])
+    assert res.exit_code == 0 and "no sessions" in res.stdout
+
+
+def test_replay_pruned_run(replay_env) -> None:
+    from mailroom_reloaded.storage.db import get_engine
+    from mailroom_reloaded.storage.ledger import Ledger
+    from mailroom_reloaded.storage.retention import read_pruned_run_ids
+
+    src = replay_env / "in.json"
+    _otlp_file(src)
+    assert runner.invoke(cli.app, ["replay", "import", str(src)]).exit_code == 0
+    ledger = Ledger(get_engine())
+    payload = {"target": "run-cli-1", "digest": "x", "counts": {"spans": 2}}
+    assert ledger.append("pruned", "run-cli-1", payload=payload)
+    ledger.flush()
+    assert "run-cli-1" in read_pruned_run_ids()
+
+    res = runner.invoke(cli.app, ["replay", "import", str(src), "--append"])
+    assert res.exit_code == 2 and "pruned" in res.output
+    # spans still present: export succeeds and carries the marker
+    res = runner.invoke(cli.app, ["replay", "export", "run:run-cli-1"])
+    assert json.loads(res.stdout)["session"]["data_pruned"] is True
+    res = runner.invoke(cli.app, ["replay", "sessions", "--json"])
+    assert json.loads(res.stdout)["sessions"][0]["data_pruned"] is True
+    # spans gone: exit 3
+    from mailroom_reloaded.storage.span_store import SpanStore, default_span_store_path
+
+    st = SpanStore(default_span_store_path())
+    st.delete_runs(["run-cli-1"])
+    st.close()
+    res = runner.invoke(cli.app, ["replay", "export", "run:run-cli-1"])
+    assert res.exit_code == 3 and "data pruned" in res.output
+
+
+def test_replay_import_refuses_showcase(replay_env) -> None:
+    src = replay_env / "in.json"
+    _otlp_file(src)
+    res = runner.invoke(cli.app, ["replay", "import", str(src), "--run-id", "showcase-clean"])
+    assert res.exit_code == 2 and "showcase" in res.output

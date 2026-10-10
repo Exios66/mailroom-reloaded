@@ -57,6 +57,7 @@ __all__ = [
     "SqliteSpanExporter",
     "default_span_store_path",
     "filter_attributes",
+    "filter_event",
 ]
 
 logger = structlog.get_logger(__name__)
@@ -165,26 +166,34 @@ def filter_attributes(
     return out
 
 
+def filter_event(
+    name: str, t: int | None, attrs: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """The stored form of one span event, or ``None`` when it is not kept.
+
+    Only ``exception`` (type only) and ``mailroom.*`` events survive, with the
+    pipeline's event keys.
+    """
+    if name == "exception":
+        kind = (attrs or {}).get("exception.type")
+        return {
+            "name": "exception",
+            "t": t,
+            "attrs": {"exception.type": str(kind)[:_MAX_STR]},
+        }
+    if name.startswith("mailroom."):
+        kept = {
+            k: b
+            for k, v in (attrs or {}).items()
+            if k in _EVENT_KEYS and (b := _bound(v)) is not None
+        }
+        return {"name": name[:64], "t": t, "attrs": kept}
+    return None
+
+
 def _filter_events(span: ReadableSpan) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for ev in span.events[:200]:
-        if ev.name == "exception":
-            kind = (ev.attributes or {}).get("exception.type")
-            out.append(
-                {
-                    "name": "exception",
-                    "t": ev.timestamp,
-                    "attrs": {"exception.type": str(kind)[:_MAX_STR]},
-                }
-            )
-        elif ev.name.startswith("mailroom."):
-            attrs = {
-                k: b
-                for k, v in (ev.attributes or {}).items()
-                if k in _EVENT_KEYS and (b := _bound(v)) is not None
-            }
-            out.append({"name": ev.name[:64], "t": ev.timestamp, "attrs": attrs})
-    return out
+    out = (filter_event(ev.name, ev.timestamp, ev.attributes) for ev in span.events[:200])
+    return [e for e in out if e is not None]
 
 
 def _hex(value: int | None, width: int) -> str | None:
