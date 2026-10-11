@@ -4,7 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mailroom · runs</title>
-  <!-- Shared design tokens (the same vendored file /tui uses), then this page's layout. -->
+  <link rel="icon" href="data:," />
+  <!-- Same typeface and tokens as /tui, then this page's layout. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" />
   <link rel="stylesheet" href="/tui/assets/tokens.css" />
   <link rel="stylesheet" href="/ui/assets/ui.css" />
 </head>
@@ -25,7 +29,7 @@
   <main>
     <noscript><p class="hint">this page needs javascript; the <a href="/tui">terminal</a> and the <a href="/v1/documents">/v1 API</a> work without it.</p></noscript>
 
-    <section>
+    <section class="span-2">
       <h2>Documents</h2>
       <div class="row">
         <label class="hint" for="statusFilter">status</label>
@@ -51,7 +55,7 @@
       </table>
     </section>
 
-    <section>
+    <section class="span-2">
       <h2>Eval runs</h2>
       <table id="runs">
         <thead><tr><th>run_id</th><th>documents</th><th>replay</th><th>grafana</th><th>phoenix</th></tr></thead>
