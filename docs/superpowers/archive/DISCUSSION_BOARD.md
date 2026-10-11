@@ -23,6 +23,32 @@ this is a ledger, not a governance board.
 
 ---
 
+### [Coverage sweep / #98] Test-suite audit + gap pins (TUI, UI, ingest, replay) — test-suite-auditor
+- **Status:** done (PR #103 merged)
+- **Files:** `src/mailroom_reloaded/api/ui/app.js` (new), `src/mailroom_reloaded/api/ui/index.html`,
+  `src/mailroom_reloaded/api/app.py` (`/ui/assets` mount), `src/mailroom_reloaded/api/tui/main.js` (`loadText` export);
+  tests `tests/ui/{__init__.py,test_ui_js.py,js/ui-app.test.mjs}`, `tests/tui/js/{main,terminal}.test.mjs`,
+  `tests/llm/test_retry.py`, `tests/eval/{test_cost_units.py,test_conformance.py}`, `tests/agents/test_specialists.py`,
+  `tests/api/{test_api,test_tui_serving,test_replay_routes}.py`, `tests/test_watcher_review_units.py`,
+  `tests/storage/test_anchor.py`; `AGENTS.md`, `docs/TESTING.md`, `CHANGELOG.md`.
+- **Evidence:**
+  - Audit: `uv run --with pytest-cov pytest -q --cov=src/mailroom_reloaded` → 84.0% total;
+    `node --test --experimental-test-coverage tests/tui/js/*.test.mjs` → per-file table.
+  - Post: `uv run pytest -q` → **1639 passed, 3 skipped, 0 failed** (baseline 1597);
+    `node --test tests/tui/js/*.test.mjs` → **294/0**; `node --test tests/ui/js/*.test.mjs` → **12/0**;
+    `uv run ruff check .` → All checks passed!
+  - Coverage delta: python TOTAL **84.0% → 85.1%** (specialists 82→96, retry 81→97, cost 72→96, watcher 82→90);
+    new `api/ui/app.js` **100%** line/branch/func; `main.js` 35.6→43.6% (remainder is browser-only `start()`).
+  - Live `/ui` (Playwright, `scripts/tui_dev.sh up`): 4 docs `pill ok:archived`, links resolved from `/links`,
+    row-click detail populated, **zero page/console/request errors**.
+- **Commit:** `bf4a873` test(coverage): pin the highest-risk seams across TUI, UI, ingest, replay (merged as `7aa5a99`, PR #103).
+- **Notes:** `/ui` was the one real blind spot — 287 lines including a URL-sanitization guard at 0% coverage; it now
+  imports a DOM-free module whose guard (`isHttpBase`/`mergeLinks`) rejects `javascript:`/`data:`/credentialed URLs.
+  `registerAll`/`MODULES` were already pinned by `plugins.test.mjs`, so the `main.js` pin targets `loadText` instead.
+  `respx` is declared in the dev extra but unused (left as-is). Vendored `scoring/` low coverage is expected (byte-pinned).
+
+---
+
 ### [P6-A / #63] TUI plugin boundary, tui/lib helpers, api/routes, GET /ready — Claude Code
 - **Status:** done (PR open)
 - **Files:** `src/mailroom_reloaded/api/tui/{plugins.js,main.js,lib/http.js,lib/table.js,lib/poll.js,lib/fmt.js}`,
