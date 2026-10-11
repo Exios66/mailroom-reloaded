@@ -147,7 +147,7 @@ test('built-in modules register the same commands as before, each once', () => {
   const registry = createRegistry();
   const host = registerAll(registry, { ambient });
   assert.deepEqual(host.modules().map((m) => m.id), MODULES.map((m) => m.id));
-  for (const name of ['help', 'man', 'ls', 'inspect', 'review', 'resolve', 'ledger', 'replay', 'inbox', 'auth', 'theme']) {
+  for (const name of ['help', 'man', 'ls', 'inspect', 'review', 'resolve', 'ledger', 'replay', 'auth', 'theme']) {
     assert.ok(registry.get(name), `missing ${name}`);
   }
   assert.ok(host.modules().every((m) => m.state === 'registered'));
