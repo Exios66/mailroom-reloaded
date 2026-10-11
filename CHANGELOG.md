@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-11
+
 ### Fixed
 
 - `/ui` layout defects found by a headless-Chromium review of the new design (`api/ui/ui.css`, `api/ui/index.html`): the page ground is now `--term-bg` (the ground `/tui` uses) instead of the darker `--term-bg-deep`, so the two screens sit on the same colour; the page loads the same JetBrains Mono webfont as `/tui`; table cells no longer break mid-word (`statu/s`, `arc hiv ed`, `docum/ents`) — every cell stays whole and only the documents table's filename column wraps, a panel scrolls rather than crushing its table; and the wide Documents and Eval runs panels span two grid tracks so all of their columns fit without clipping the `phoenix` link.
