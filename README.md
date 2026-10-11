@@ -83,6 +83,7 @@ scripts/smoke.sh       # drops a fixture in the inbox and waits for "archived"
 | --- | --- |
 | API, `/ui` | http://localhost:8000 |
 | `/tui` browser terminal ([docs/TUI.md](docs/TUI.md)) | http://localhost:8000/tui |
+| Sandbox ingress simulator ([docs/SANDBOX_SERVER.md](docs/SANDBOX_SERVER.md)) | http://localhost:8100/ui |
 | Phoenix traces | http://localhost:6006 |
 | Prometheus | http://localhost:9090 |
 | Grafana (Pipeline, Serving & GPU, Quality) | http://localhost:3000 |
@@ -91,7 +92,7 @@ Compose profiles (`deploy/docker-compose.yml`):
 
 | Profile | Adds | Notes |
 | --- | --- | --- |
-| *(default)* | `app`, `otel-collector`, `phoenix`, `prometheus`, `grafana`, `vllm-targets` | API + embedded watcher + observability. |
+| *(default)* | `app`, `sandbox`, `otel-collector`, `phoenix`, `prometheus`, `grafana`, `vllm-targets` | API + embedded watcher + the ingress sandbox + observability. |
 | `local-llm` | `llamafile` | CPU/GPU llamafile sidecar. |
 | `gpu` | `vllm`, `dcgm-exporter` | Local vLLM and GPU metrics. |
 | `split-watcher` | `watcher` | Standalone watcher; run `app` with `MAILROOM_EMBED_WATCHER=0`. |

@@ -96,6 +96,56 @@ services:
       timeout: 5s
       retries: 10
 
+  # Offline ingress simulator (docs/SANDBOX_SERVER.md). The /tui status-bar
+  # `inbox ↗` link and the `inbox` command open it (MAILROOM_SANDBOX_URL on `app`,
+  # default http://localhost:8100). Loopback-published with no token, so the
+  # sandbox UI opens without a prompt.
+  sandbox:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.sandbox
+      args:
+        APP_UID: ${APP_UID:-1000}
+    image: mailroom-sandbox:latest
+    restart: unless-stopped
+    command:
+      - mailroom
+      - sandbox
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+      - --content
+      - ${SANDBOX_CONTENT:-smoke}
+      - --data-dir
+      - /state
+      - --egress
+      - ${SANDBOX_EGRESS:-closed}
+    ports: ["${SANDBOX_BIND:-127.0.0.1}:${SANDBOX_PORT:-8100}:8100"]
+    environment:
+      # Deliberately no token: the published port is loopback-only, so the sandbox
+      # is unauthenticated (the same posture as `scripts/sandbox.sh run`).
+      MAILROOM_API_TOKEN: ""
+      MAILROOM_ALLOW_UNAUTHENTICATED_BIND: "1"
+      OTEL_SDK_DISABLED: "true"
+    volumes:
+      - sandbox_state:/state
+      - ${SANDBOX_CONTENT_DIR:-../src/mailroom_reloaded/sandbox/fixtures/smoke}:/content:ro
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
     restart: unless-stopped
@@ -244,3 +294,4 @@ volumes:
   prometheus_data:
   grafana_data:
   otel_targets:
+  sandbox_state:

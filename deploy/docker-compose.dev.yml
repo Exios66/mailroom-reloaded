@@ -36,6 +36,8 @@ x-dev-app-env: &dev-app-env
   OTEL_SERVICE_NAME: mailroom-dev
   HF_HOME: /hf_cache
   PYTHONPATH: /app/src
+  # The /tui status-bar `inbox ↗` link target (the `sandbox` service below).
+  MAILROOM_SANDBOX_URL: ${MAILROOM_SANDBOX_URL:-http://localhost:8100}
 
 x-dev-build: &dev-build
   context: ..
@@ -125,6 +127,52 @@ services:
         condition: service_started
     healthcheck:
       disable: true
+
+  # Offline ingress simulator (docs/SANDBOX_SERVER.md) — the /tui `inbox ↗` link
+  # target. Loopback-published with no token, so the UI opens without a prompt.
+  sandbox:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.sandbox
+      args:
+        APP_UID: ${APP_UID:-1000}
+    image: mailroom-sandbox:latest
+    restart: unless-stopped
+    command:
+      - mailroom
+      - sandbox
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8100"
+      - --content
+      - ${SANDBOX_CONTENT:-smoke}
+      - --data-dir
+      - /state
+      - --egress
+      - ${SANDBOX_EGRESS:-closed}
+    ports: ["127.0.0.1:${SANDBOX_PORT:-8100}:8100"]
+    environment:
+      MAILROOM_API_TOKEN: ""
+      MAILROOM_ALLOW_UNAUTHENTICATED_BIND: "1"
+      OTEL_SDK_DISABLED: "true"
+    volumes:
+      - sandbox_state:/state
+      - ${SANDBOX_CONTENT_DIR:-../src/mailroom_reloaded/sandbox/fixtures/smoke}:/content:ro
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
 
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.116.1
@@ -239,3 +287,4 @@ volumes:
   grafana_data:
   otel_targets:
   llamafile_models:
+  sandbox_state:
