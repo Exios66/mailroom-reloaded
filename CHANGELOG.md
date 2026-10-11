@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The offline ingress simulator (`mailroom sandbox …`, `make sandbox`, `Dockerfile.sandbox`, root `schemas/`, `sandbox/content.lock`) moved off `main`. It is preserved, runnable, on the `feature/ingress-sandbox` branch (tag `pre-trim`). Issue #98.
+- `/tui` `inbox` command, `#inbox` deep link and `inbox ↗` status-bar link; `sandbox_url` in `GET /links` and `MAILROOM_SANDBOX_URL`. The replay viewer is unchanged. Issue #98.
 - `.github/workflows/docker-smoke.yml`, the repository's only GitHub Actions workflow: the owner's account cannot run Actions right now, so every PR showed a failing `docker-smoke` check that never started ("account is locked due to a billing issue"). `scripts/docker_smoke.sh` and `tests/deploy/test_docker_smoke.py` are unchanged and still run locally. References updated in `AGENTS.md` §8.2, `deploy/README.md` and the master plan. Docs/config only; no code change.
 
 ### Added

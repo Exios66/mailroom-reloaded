@@ -28,7 +28,6 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
 | `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
 | `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N] [--follow]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
-| `inbox` | `inbox [--tab ingress\|boss\|outbox\|events] [--scenario ID] [--message ID] [--thread ID] [--no-mailbox] [--print]` | Opens the sandbox UI's Correspondent inbox (Ingress queue plus the Boss mailbox dock filtered to `role=correspondent`) in a new tab and prints the link. `--print` only prints. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
 | `health` | `health` | Checks the API. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
@@ -36,7 +35,7 @@ like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 | `auth` | `auth <token> \| --clear` | Sets or clears the API token. |
 
 Sources: `src/mailroom_reloaded/api/tui/commands/shell.js`,
-`commands/pipeline.js`, `commands/ledger.js`, `commands/replay.js` (with `replay/`) and `commands/sandbox.js` (each command carries its man page). Keys: Tab ghost
+`commands/pipeline.js`, `commands/ledger.js` and `commands/replay.js` (with `replay/`) (each command carries its man page). Keys: Tab ghost
 completion, Up/Down history, Ctrl+L clear, Ctrl+C stop `watch`, any key skips
 the boot animation.
 
@@ -114,30 +113,8 @@ pass its token on. The same `/ui` row also carries outbound `grafana ↗` and `p
 links (built from `GET /links`), and inside the viewer `o`/`g` open the run's Phoenix /
 Grafana URLs directly.
 
-`/tui#inbox` runs `inbox`, and `/tui#inbox=<tab>` runs `inbox --tab <tab>`; the tab must be one of
-`ingress`, `boss`, `outbox`, `events`, and anything else prints `inbox: invalid deep link`.
-
-### `inbox` and the sandbox link
-
-`inbox` reads `GET /links` for `sandbox_url` (server setting `MAILROOM_SANDBOX_URL`), re-checks it
-client-side (plain `http(s)`, no credentials) and opens
-`<sandbox_url>/ui#tab=messages&mailbox=open&role=correspondent` in a new tab, so the owner can watch
-a sandbox simulation live. It is a new tab because the sandbox is a different origin with no CORS or
-frame permission, so `/tui` cannot embed or call it; the sandbox UI polls its own API every 2 s.
-The hash keys the sandbox UI accepts are `tab` (`messages|boss|outbox|events|conformance|docs|policy`),
-`scenario`, `sel` and `thread` (ids matching `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`), `mailbox` (`open|closed`) and
-`role` (`correspondent|boss`). `--tab` maps `ingress` to `messages`; `--message` sets `sel`;
-`--no-mailbox` sets `mailbox=closed`. The API token is never put in the link: if the sandbox asks
-for one, paste it into its API token field. Without a valid `sandbox_url` the command prints
-`inbox: sandbox URL not configured (set MAILROOM_SANDBOX_URL)`. In the replay viewer's inspector a
-`sandbox` row shows the same link when `/links` carries `sandbox_url` (there is no key for it). `sandbox_url` is the configured `MAILROOM_SANDBOX_URL` (default `http://localhost:8100`), so the `sandbox` row and the `inbox` target appear even when no sandbox is running.
-
-The **status bar** at the top of `/tui` carries the outbound links. `ui ↗` opens `/ui` in the same
-tab; `inbox ↗` opens the sandbox ingress simulator in a new tab, with the same
-`<sandbox_url>/ui#tab=messages&mailbox=open&role=correspondent` target as the `inbox` command. The
-`inbox ↗` link is added once `GET /links` resolves (`terminal.js` `addSisterLink`, wired in
-`main.js`); it is omitted when `sandbox_url` is not configured or the fetch fails, and boot never
-depends on it.
+The **status bar** at the top of `/tui` carries the outbound `ui ↗` link, which opens `/ui` in the
+same tab.
 
 ## Themes
 
@@ -236,7 +213,7 @@ restart (`down`, `up`) after editing them.
 ## Modules and the plugin boundary
 
 `tui/plugins.js` is the one way a module adds to the terminal. `main.js` keeps a
-`MODULES` list (`pipeline`, `ledger`, `replay`, `sandbox`, `shell`) and
+`MODULES` list (`pipeline`, `ledger`, `replay`, `shell`) and
 `registerAll` registers each through `createModuleHost(registry)`:
 
 ```js
@@ -330,12 +307,12 @@ light scheme beyond a selectable theme.
 | `.../tui/api.js` | Fetch wrapper and token storage. |
 | `.../tui/boot.js` | Boot sequence. |
 | `.../tui/ambient.js` | Themes, skyline, CRT, sparks. |
-| `.../tui/commands/shell.js`, `pipeline.js`, `ledger.js`, `replay.js`, `sandbox.js` | Commands (each carries its man page). |
+| `.../tui/commands/shell.js`, `pipeline.js`, `ledger.js`, `replay.js` | Commands (each carries its man page). |
 | `.../tui/replay/` (`clock.js`, `model.js`, `grid.js`, `stations.js`, `panels.js`, `live.js`) | Pure viewer core: playback clock, timeline model, character-grid renderer, station table, the pluggable panel registry and the follow-live SSE reader. |
-| `.../tui/lib/links.js` | Shared `GET /links` helpers: URL re-check, Phoenix/Grafana URLs, `inboxUrl` (pure, allow-listed). |
+| `.../tui/lib/links.js` | Shared `GET /links` helpers: URL re-check, Phoenix/Grafana URLs. |
 | `.../tui/lib/http.js`, `table.js`, `poll.js`, `fmt.js` | Shared command helpers (see "Shared helpers"). |
 | `src/mailroom_reloaded/api/routes/ready.py` | `GET /ready` aggregate readiness. |
-| `.../tui/deeplink.js` | `#replay=` and `#inbox` deep-link parsing. |
+| `.../tui/deeplink.js` | `#replay=` deep-link parsing. |
 | `.../tui/tokens.css`, `tui.css`, `banner*.txt` | Brand tokens, styles, banners. |
 | `scripts/tui_dev.sh`, `scripts/tui_seed/` | Local harness and fixtures. |
 | `scripts/tui_replay_check.mjs` | Headless-Chromium check of the replay viewer. |
