@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
 ### Fixed
 
 - Replay viewer: the station track lost every station colour. `api/tui/replay/grid.js` compared each station's `color_token` (a CSS variable name such as `--term-cyan`, from `obs/attrs.STATIONS`) against the grid's class set (`dim|ok|warn|err|info|hot|sel`), so no token ever matched and every station row rendered unstyled. A `TOKEN_CLASS` map now resolves the `--term-*` tokens and an unknown token stays unstyled. The `replay-grid` test fixture used a *grid class* (`info`) as a stand-in for a token and never asserted colour, so it could not catch this; it now uses the real grammar and asserts the mapping.
