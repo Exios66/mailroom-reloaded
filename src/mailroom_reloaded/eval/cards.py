@@ -199,10 +199,16 @@ def build_card(
     )
 
     spec_kpi = specialist_kpis(rows, doc_type)
-    overall = [
+    scorer_scores = [
         float(row["overall_score"])
         for row in rows
         if row.get("overall_score") is not None
+    ]
+    # The judge scores the run; the deterministic field score is reported beside it.
+    judge_scores = [
+        float(row["judge_overall"])
+        for row in rows
+        if row.get("judge_overall") is not None
     ]
     error_kinds = Counter(
         _error_kind(row.get("error_kind")) for row in rows if row.get("error_kind")
@@ -277,13 +283,28 @@ def build_card(
                 else None
             ),
             "overall_mean": (
-                round(statistics.mean(overall), 4) if overall else spec_kpi["suite_mean"]
+                round(statistics.mean(scorer_scores), 4)
+                if scorer_scores
+                else spec_kpi["suite_mean"]
             ),
             "overall_sd": (
-                round(statistics.pstdev(overall), 4) if len(overall) > 1 else spec_kpi["sd"]
+                round(statistics.pstdev(scorer_scores), 4)
+                if len(scorer_scores) > 1
+                else spec_kpi["sd"]
             ),
-            "overall_min": min(overall) if overall else spec_kpi["min"],
-            "overall_max": max(overall) if overall else spec_kpi["max"],
+            "overall_min": min(scorer_scores) if scorer_scores else spec_kpi["min"],
+            "overall_max": max(scorer_scores) if scorer_scores else spec_kpi["max"],
+            "judge_mean": (
+                round(statistics.mean(judge_scores), 4) if judge_scores else None
+            ),
+            "judge_sd": (
+                round(statistics.pstdev(judge_scores), 4)
+                if len(judge_scores) > 1
+                else None
+            ),
+            "judge_min": min(judge_scores) if judge_scores else None,
+            "judge_max": max(judge_scores) if judge_scores else None,
+            "judge_graded": len(judge_scores),
             "clause": spec_kpi["clause"],
             "maud": spec_kpi["maud"],
             "precision": spec_kpi["precision"],
@@ -301,7 +322,8 @@ def build_card(
                 "doc_id": row.get("doc_id"),
                 "ok": str(row.get("status") or "").lower() in {"ok", "archived"}
                 or bool(row.get("schema_valid")),
-                "score": row.get("overall_score"),
+                "score": row.get("judge_overall"),
+                "field_score": row.get("overall_score"),
                 "latency_seconds": row.get("latency_s"),
                 "prompt_tokens": row.get("prompt_tokens"),
                 "completion_tokens": row.get("completion_tokens"),
@@ -424,7 +446,12 @@ def render_card_md(card: Mapping[str, Any]) -> str:
         f"| **Quality** ok / total | {quality.get('ok')} / {quality.get('documents')} |",
         f"| Schema-valid rate | {_fmt(quality.get('schema_valid_rate'), 2)} |",
         (
-            f"| Overall score mean (sd) | {_fmt(quality.get('overall_mean'))} "
+            f"| **Judge** overall mean (sd) | {_fmt(quality.get('judge_mean'))} "
+            f"({_fmt(quality.get('judge_sd'), 3)}) |"
+        ),
+        f"| Judge-graded documents | {quality.get('judge_graded')} |",
+        (
+            f"| Overall field score mean (sd) | {_fmt(quality.get('overall_mean'))} "
             f"({_fmt(quality.get('overall_sd'), 3)}) |"
         ),
         (
@@ -507,6 +534,9 @@ def _card_score(card: Mapping[str, Any]) -> float | None:
     maud = quality.get("maud") or {}
     if maud.get("accuracy") is not None:
         return maud.get("accuracy")
+    # The judge owns the headline score; fall back to the deterministic field score.
+    if quality.get("judge_mean") is not None:
+        return quality.get("judge_mean")
     return quality.get("overall_mean")
 
 

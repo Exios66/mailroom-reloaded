@@ -124,8 +124,8 @@ def _counts_for_pair(
 def _row_counts(
     row: Mapping[str, Any], doc_type: str | None, threshold: float
 ) -> dict[str, Any]:
-    explicit = _get(row, "field_counts")
-    if isinstance(explicit, Mapping):
+    explicit = _as_mapping(_get(row, "field_counts"))
+    if explicit:
         return {
             "tp": int(explicit.get("tp") or 0),
             "fp": int(explicit.get("fp") or 0),

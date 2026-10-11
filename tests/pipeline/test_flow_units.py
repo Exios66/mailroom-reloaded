@@ -463,6 +463,25 @@ def test_driver_handles_boss_terminal_decisions(flow, monkeypatch, action, expec
         }
 
 
+def test_driver_parks_boss_reassign_to_unknown_class(flow, monkeypatch):
+    """An off-taxonomy boss reassignment must park, not crash the next extract."""
+    flow._resume_from = "boss"
+
+    def boss():
+        flow.state.boss = BossDecision(action="reassign_class", doc_type="not_a_class")
+
+    monkeypatch.setattr(flow, "_node_boss", boss)
+    extract = Mock()
+    monkeypatch.setattr(flow, "extract", extract)
+    state = flow._drive()
+    assert state.status == "parked"
+    extract.assert_not_called()
+    assert state.route_trail[-1] == "human_review"
+    assert flow_mod.audit_log.append.call_args.args[-1] == {
+        "reason": "boss_unknown_class"
+    }
+
+
 def test_driver_reextracts_after_arbiter_request(flow, monkeypatch):
     """Verify an arbiter retry increments attempts and re-extracts before archival."""
     flow._resume_from = "gate_extract"

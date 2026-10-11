@@ -223,6 +223,34 @@ def test_card_has_all_sand37_blocks():
     assert "Per-document results" in markdown
 
 
+def test_card_reports_judge_and_field_scores_side_by_side():
+    """The judge is the headline score; the deterministic field KPIs keep their spot."""
+    rows = [
+        {
+            "filename": "a",
+            "doc_type": "contract",
+            "status": "ok",
+            "schema_valid": True,
+            "latency_s": 1.0,
+            "overall_score": 0.4,
+            "judge_overall": 0.9,
+            "predicted": {"parties": ["Acme"]},
+            "expected": {"parties": ["Acme"]},
+        }
+    ]
+    card = build_card("run-1", "contract", rows=rows)
+    q = card["quality"]
+    assert q["judge_mean"] == 0.9 and q["judge_graded"] == 1
+    assert q["overall_mean"] == 0.4  # deterministic field score, still reported
+    assert q["micro_f1"] == 1.0  # F-measures retain their spot
+    assert card["documents"][0]["score"] == 0.9
+    assert card["documents"][0]["field_score"] == 0.4
+    markdown = render_card_md(card)
+    assert "Judge" in markdown
+    assert "Overall field score mean" in markdown
+    assert "Micro precision / recall / F1 / F2" in markdown
+
+
 def test_master_md_has_tables():
     cards = [
         build_card("run-1", "correspondence", rows=_card_rows()),

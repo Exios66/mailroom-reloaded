@@ -15,6 +15,8 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -77,6 +79,9 @@ CREATE TABLE IF NOT EXISTS eval_docs (
     judge_classification TEXT,
     gate_features TEXT,
     route_trail TEXT,
+    overall_score REAL,
+    field_scores TEXT,
+    field_counts TEXT,
     PRIMARY KEY (run_id, filename)
 )
 """
@@ -107,6 +112,9 @@ _COLUMNS = (
     "judge_classification",
     "gate_features",
     "route_trail",
+    "overall_score",
+    "field_scores",
+    "field_counts",
 )
 
 _INSERT = (
@@ -248,8 +256,15 @@ def _ensure_table(engine: Engine) -> None:
     """
     with engine.begin() as conn:
         conn.execute(text(_EVAL_DDL))
-        if "content_sha256" not in {c["name"] for c in inspect(conn).get_columns("eval_docs")}:
-            conn.execute(text("ALTER TABLE eval_docs ADD COLUMN content_sha256 TEXT"))
+        columns = {c["name"] for c in inspect(conn).get_columns("eval_docs")}
+        for name, decl in (
+            ("content_sha256", "TEXT"),
+            ("overall_score", "REAL"),
+            ("field_scores", "TEXT"),
+            ("field_counts", "TEXT"),
+        ):
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE eval_docs ADD COLUMN {name} {decl}"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS eval_runs (
                 run_id TEXT PRIMARY KEY,
@@ -296,18 +311,68 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def _field_scores(
+    doc_type: str | None, data: dict | None, gt: GroundTruth | None
+) -> dict[str, Any]:
+    """Deterministic field scores and micro counts for one document, or ``{}``.
+
+    The SAND-37 card reads these back through ``eval.metrics`` (``overall_score``
+    for the suite mean, ``field_counts`` for micro P/R/F1, ``field_scores`` for
+    judge/scorer agreement). Without them a perfect extraction scores 0.0. Ground
+    truth and prediction are both in hand at record time, so score once here.
+    """
+    if not data or gt is None or not gt.fields or not doc_type:
+        return {}
+    from mailroom_reloaded.scoring import score_extraction
+    from mailroom_reloaded.scoring.extraction_metrics import extraction_binary_metrics
+
+    classes = load_taxonomy().classes
+    types = dict(classes[doc_type].field_types) if doc_type in classes else {}
+    try:
+        result = score_extraction(doc_type, types, data, gt.fields)
+        metrics = extraction_binary_metrics(
+            gt.fields, data, field_types=types, doc_class=doc_type, result=result
+        )
+    except Exception as exc:  # scoring must never fail a document
+        logger.warning(
+            "eval_field_scoring_failed", doc_type=doc_type, error=str(exc), exc_info=True
+        )
+        return {}
+    return {
+        "overall_score": result.overall_score,
+        "field_scores": _json(result.field_scores),
+        "field_counts": _json(
+            {"tp": metrics["tp"], "fp": metrics["fp"], "fn": metrics["fn"]}
+        ),
+    }
+
+
 # --------------------------------------------------------------------------- records
 
 
 def _write_doc(doc: BlindDoc) -> Path:
-    """Write blind document text to the configured inbox and return its path.
+    """Write blind document text into the inbox atomically and return its path.
 
     Some dataset filenames are nested paths (Enron ``owner/folder/n.``), so the
-    inbox parent directory is created before writing.
+    inbox parent directory is created before writing. The text is staged under a
+    hidden name and renamed into place so a concurrently draining watcher never
+    reads a half-written document. An absolute name or a ``..`` component is
+    rejected: the name comes from the dataset and must not escape the inbox.
     """
-    path = Bins(get_settings().base_dir).inbox / doc.filename
+    name = doc.filename.replace("\\", "/")
+    if name in ("", ".") or name.startswith("/") or "\x00" in name or ".." in name.split("/"):
+        raise ValueError(f"unsafe dataset filename: {doc.filename!r}")
+    path = Bins(get_settings().base_dir).inbox / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(doc.doc_text, encoding="utf-8")
+    fd, tmp = tempfile.mkstemp(prefix=".eval-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(doc.doc_text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        Path(tmp).unlink(missing_ok=True)
     return path
 
 
@@ -446,6 +511,9 @@ def _pipeline_row(
         gate_features=_json(_gate_features(state, doc_type, extract)),
         route_trail=_json(list(getattr(state, "route_trail", []) or [])),
     )
+    row.update(
+        _field_scores(doc_type, extract.data if extract is not None else None, gt)
+    )
     overall, fields_json, classification_json = _grade_parts(getattr(state, "grade", None))
     row.update(
         judge_overall=overall,
@@ -479,6 +547,7 @@ def _cell_row(
         completion_tokens=result.usage.completion_tokens,
         calls=result.calls or result.usage.calls,
     )
+    row.update(_field_scores(result.doc_type, result.data, gt))
     return row
 
 

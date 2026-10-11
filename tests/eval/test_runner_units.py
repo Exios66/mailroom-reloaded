@@ -1,6 +1,7 @@
 """Evaluation error isolation and ground-truth boundaries without model calls."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -214,6 +215,54 @@ def test_write_doc_creates_nested_parent_dirs(tmp_path, monkeypatch):
     assert path.exists()
     assert path.parent.is_dir()
     assert path.read_text(encoding="utf-8") == "nested body"
+
+
+@pytest.mark.parametrize(
+    "bad", ["../escape.txt", "/etc/escape.txt", "a/../../escape.txt", "..\\escape.txt"]
+)
+def test_write_doc_rejects_traversal(tmp_path, monkeypatch, bad):
+    """A traversal or absolute dataset filename must not write outside the inbox."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(runner, "get_settings", lambda: SimpleNamespace(base_dir=tmp_path))
+    with pytest.raises(ValueError):
+        runner._write_doc(BlindDoc(bad, "body", sha256_text("body")))
+    assert not (tmp_path.parent / "escape.txt").exists()
+
+
+def test_card_quality_reads_persisted_scores(engine, document, monkeypatch):
+    """A perfect graded row must yield a non-zero quality card over real eval_docs rows."""
+    from mailroom_reloaded.eval.cards import build_card
+
+    gt = GroundTruth(
+        document.filename,
+        expected="contract",
+        expected_subclass="other",
+        fields={"parties": ["Acme Corp"], "effective_date": "2021-03-19"},
+    )
+    result = ExtractResult(
+        "contract",
+        {"parties": ["Acme Corp"], "effective_date": "2021-03-19"},
+        True,
+        None,
+        1.0,
+        None,
+        1,
+        Usage(calls=1),
+    )
+    state = MailroomState(
+        doc_id=document.content_sha256[:16], status="archived", extract=result
+    )
+    row = runner._pipeline_row("run-x", document, gt, state, graded=True, latency_s=0.5)
+    assert row["overall_score"] == 1.0
+    assert json.loads(row["field_counts"]) == {"tp": 2, "fp": 0, "fn": 0}
+    runner._insert(engine, row)
+
+    monkeypatch.setattr(runner, "_engine", lambda: engine)
+    card = build_card("run-x", "contract")
+    assert card["quality"]["micro_f1"] == 1.0
+    assert card["quality"]["overall_mean"] == 1.0
+    assert card["documents"][0]["field_score"] == 1.0
 
 
 @pytest.mark.parametrize("already_recorded", [False, True])

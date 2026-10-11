@@ -939,6 +939,10 @@ class MailroomFlow(Flow[MailroomState]):
                     if state.boss_reassignments >= 1:
                         self._escalation("human_review", "boss_reassignments_spent")
                         return self._park("boss_reassignments_spent")
+                    if state.boss.doc_type not in load_taxonomy().classes:
+                        # a free-string boss class would crash the next extract; park instead
+                        self._escalation("human_review", "boss_unknown_class")
+                        return self._park("boss_unknown_class")
                     state.boss_reassignments += 1
                     self._retry_kind = "retry_extract"
                     self._resume_done.discard("extract")
