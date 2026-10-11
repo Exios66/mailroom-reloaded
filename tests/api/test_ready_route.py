@@ -68,9 +68,12 @@ def test_default_stack_is_ok_with_every_component(client):
     assert by_name["db"]["status"] == "ok"
     assert by_name["ledger"]["status"] == "ok"
     assert by_name["ledger"]["detail"] == "empty"
-    for name in ("collector", "phoenix", "prometheus", "grafana", "llm_provider"):
+    for name in ("collector", "phoenix", "grafana", "prometheus", "llm_provider"):
         assert by_name[name]["status"] == "unconfigured"
+    for name in ("prometheus", "llm_provider"):
         assert "not wired yet" in by_name[name]["detail"]
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT" in by_name["collector"]["detail"]
+    assert "MAILROOM_PHOENIX_PROBE_URL" in by_name["phoenix"]["detail"]
     assert by_name["watcher"]["status"] == "unconfigured"
     for c in body["components"]:
         assert c["status"] in ready.STATUSES
@@ -273,3 +276,39 @@ def test_aggregate_rules():
     assert ready.aggregate(rows("ok", "down"), probes) == "degraded"
     assert ready.aggregate(rows("degraded", "ok"), probes) == "degraded"
     assert ready.aggregate(rows("down", "ok"), probes) == "down"
+
+
+def test_collector_probe_reports_ok_when_the_otlp_endpoint_answers(monkeypatch):
+    import socket
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    _setenv(monkeypatch, "OTEL_EXPORTER_OTLP_ENDPOINT", f"http://127.0.0.1:{port}")
+    try:
+        assert ready._probe_collector(None) == ("ok", None)
+    finally:
+        server.close()
+
+
+def test_collector_probe_is_down_not_500_on_a_closed_port(monkeypatch):
+    import socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()  # nothing is listening now
+    _setenv(monkeypatch, "OTEL_EXPORTER_OTLP_ENDPOINT", f"127.0.0.1:{port}")
+    status, detail = ready._probe_collector(None)
+    assert status == "down"
+    assert str(port) in detail
+
+
+def test_phoenix_and_grafana_probes_use_the_server_side_url_and_never_500(monkeypatch):
+    monkeypatch.delenv("MAILROOM_PHOENIX_PROBE_URL", raising=False)
+    monkeypatch.delenv("MAILROOM_GRAFANA_PROBE_URL", raising=False)
+    assert ready._probe_phoenix(None)[0] == "unconfigured"
+    assert ready._probe_grafana(None)[0] == "unconfigured"
+    _setenv(monkeypatch, "MAILROOM_PHOENIX_PROBE_URL", "http://127.0.0.1:1")
+    assert ready._probe_phoenix(None)[0] == "down"  # refused, still a status

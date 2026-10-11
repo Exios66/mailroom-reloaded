@@ -387,8 +387,9 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
         altKey: !!e.altKey,
         metaKey: !!e.metaKey,
       });
-    } catch {
-      /* a faulty handler must not wedge the keyboard */
+    } catch (err) {
+      // A faulty handler must not wedge the keyboard, but it must not fail silently either.
+      out.line(`viewer error: ${err && err.message ? err.message : String(err)}`, 'error');
     }
   }
 
@@ -406,8 +407,12 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     const aborted = new Promise((resolve) => {
       mine.signal.addEventListener('abort', () => resolve(ABORTED), { once: true });
     });
-    const running = dispatch(registry, ctx, text);
-    running.catch(() => {});
+    const running = dispatch(registry, ctx, text).catch((err) => {
+      // dispatch prints a command's own errors; this catches anything else (a broken ctx, a
+      // renderer throw) so a command never fails silently.
+      out.line(`internal error: ${err && err.message ? err.message : String(err)}`, 'error');
+      return 'error';
+    });
     try {
       const result = await Promise.race([running, aborted]);
       return result === ABORTED ? 'aborted' : result;

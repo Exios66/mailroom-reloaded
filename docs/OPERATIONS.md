@@ -258,6 +258,8 @@ Observability and engine ports bind to `127.0.0.1` only in the prod compose
 | Watcher crash mid-document | `resume_processing` restarts from the manifest's last completed node (`watcher.py:121-149`). |
 | Catalog write fails | Logged and ignored — the catalog is best-effort; the manifest and archive remain authoritative (`pipeline/flow.py:255-256`). |
 | Eval document raises | Recorded as an error row; the run continues (`eval/runner.py:404-411`). |
+| OTLP collector unreachable (e.g. no Docker) | Spans are still recorded in the local store (`<base_dir>/traces.db`) and replayed; the batch OTLP exporter drops the failed shipments and never raises into the pipeline (`obs/tracing.py`). `GET /ready` reports `collector` `down` (endpoint set, nothing listening) or `unconfigured` (no endpoint), so the loss is visible rather than silent. |
+| Phoenix / Grafana unreachable | The replay viewer, `/ui` and the local span store are unaffected (they read the store, not Phoenix). When `MAILROOM_PHOENIX_PROBE_URL` / `MAILROOM_GRAFANA_PROBE_URL` are set, `GET /ready` reports the component `down`; the outbound `phoenix ↗` / `grafana ↗` links still render (they are browser-side). |
 
 The `failed/` bin is the terminal sink for rejected and error documents
 (`storage/bins.py:48-50`; `review.py:68-78`). Inspect the manifest

@@ -57,8 +57,14 @@ export async function start() {
     loadText('banner-compact.txt'),
   ]);
   term.ctx.banner = banner;
-  // Module init never blocks boot: failures are logged and isolated per module.
-  host.initAll(term.ctx).catch(() => {});
+  // Module init never blocks boot: failures are isolated per module and reported in the terminal.
+  host.initAll(term.ctx).then((failures) => {
+    for (const f of failures || []) {
+      term.ctx.out.line(`module '${f.id}' init failed: ${f.message}`, 'error');
+    }
+  }).catch((err) => {
+    term.ctx.out.line(`module init failed: ${err && err.message ? err.message : String(err)}`, 'error');
+  });
   const st = ambient.state();
   term.ctx.setStatus('theme', st.label);
   term.ctx.setStatus('crt', st.crt ? 'on' : 'off');
@@ -85,7 +91,8 @@ export async function start() {
   term.focus();
   const hash = globalThis.location ? globalThis.location.hash : '';
   const link = deepLinkCommand(hash);
-  if (link) term.run(link).catch(() => {});
+  // run() reports its own failures in the terminal; it never rejects.
+  if (link) await term.run(link);
   else {
     const kind = deepLinkKind(hash);
     if (kind) term.ctx.out.line(`${kind}: invalid deep link`, 'error');
@@ -97,5 +104,12 @@ if (typeof document !== 'undefined') {
   start().catch((err) => {
     // A failed start must not leave the page silently dead.
     console.error('tui start failed', err);
+    const out = document.getElementById('output');
+    if (out) {
+      const line = document.createElement('div');
+      line.className = 'line error';
+      line.textContent = `tui failed to start: ${err && err.message ? err.message : String(err)}`;
+      out.appendChild(line);
+    }
   });
 }

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Replay viewer: the station track lost every station colour. `api/tui/replay/grid.js` compared each station's `color_token` (a CSS variable name such as `--term-cyan`, from `obs/attrs.STATIONS`) against the grid's class set (`dim|ok|warn|err|info|hot|sel`), so no token ever matched and every station row rendered unstyled. A `TOKEN_CLASS` map now resolves the `--term-*` tokens and an unknown token stays unstyled. The `replay-grid` test fixture used a *grid class* (`info`) as a stand-in for a token and never asserted colour, so it could not catch this; it now uses the real grammar and asserts the mapping.
+- `/tui` no longer fails silently. `api/tui/terminal.js` `run()` swallowed any rejection that escaped `dispatch` (and `dispatch`'s own catch still prints a command's message), and a throwing replay-view key handler was caught and dropped; both now print `internal error: <message>` / `viewer error: <message>`. `api/tui/main.js` reports a module whose `onInit` failed in the terminal instead of only the console, and reports a failed `start()` to the output pane rather than only `console.error`.
+
+### Added
+
+- Replay viewer F1-parity visualisation (`api/tui/replay/{grid,panels}.js`, `api/tui/commands/replay.js`):
+  - the station track groups stations under dim **phase** ("sector") headers when the payload carries `phase`, and drops the headers on a terminal too short to keep every station row;
+  - the scrub bar shades station-phase sectors (alternating heavy/light fill, a rule at each boundary) via `model.phaseSpans()`;
+  - **per-document elapsed time, tokens and cost** at the playhead: `model.stateAt()` now carries `elapsed_s`, `tokens` and `cost_usd` per document, shown in the leaderboard and the inspector;
+  - two built-in insight panels join the `p` cycle — `leaderboard` (documents ranked by progress, finished documents ahead, the selected one highlighted, with elapsed, tokens and a progress bar) and `ticker` (the most recent events with time, kind, station and doc);
+  - the `tokens` panel draws token- and cost-rate **sparklines**;
+  - the footer legend now includes `f follow` and `o/g open`;
+  - two keys were added: `r` restarts from the start, and `?` shows a key-list overlay that any other key dismisses. The `replay` man page and `docs/TUI.md` were updated.
+- `GET /ready` now probes the observability backends honestly instead of reporting them `unconfigured` unconditionally (`api/routes/ready.py`): `collector` TCP-probes `OTEL_EXPORTER_OTLP_ENDPOINT` (set by compose to `http://otel-collector:4318`; unset without Docker), and `phoenix` / `grafana` HTTP-probe `MAILROOM_PHOENIX_PROBE_URL` / `MAILROOM_GRAFANA_PROBE_URL` (server-side addresses, since the browser-facing `MAILROOM_PHOENIX_URL` is not reachable inside a container). Both compose files set the two probe URLs so a Docker stack reports `ok`; a probe that cannot reach its backend reports `down`, and none is ever a 500. `prometheus` and `llm_provider` remain `unconfigured` (#66, #70). Documented in `docs/CONFIGURATION.md` and `docs/OPERATIONS.md` (failure modes).
+
 ## [0.3.0] - 2026-10-10
 
 ### Changed

@@ -18,10 +18,15 @@ credential. Components whose backend wiring lands with a later issue report
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
+from urllib.request import urlopen
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request
@@ -102,6 +107,85 @@ def _pending(issue: str) -> Check:
     return check
 
 
+#: How long a socket/HTTP probe waits before it is called unreachable.
+_REACH_TIMEOUT_S = 1.5
+
+
+def _split_host_port(target: str) -> tuple[str, int] | None:
+    """``host:port`` from a URL or a bare ``host:port``; ``None`` when it cannot be parsed."""
+    raw = target.strip()
+    if "://" not in raw:
+        raw = f"//{raw}"
+    parts = urlsplit(raw)
+    host = parts.hostname
+    if not host:
+        return None
+    port = parts.port
+    if port is None:
+        port = 443 if parts.scheme == "https" else 80
+    return host, port
+
+
+def _tcp_probe(target: str) -> tuple[str, str | None]:
+    """Reachable when a TCP connection opens (works for a gRPC or HTTP OTLP endpoint)."""
+    hp = _split_host_port(target)
+    if hp is None:
+        return "unconfigured", "endpoint is not a host:port or URL"
+    host, port = hp
+    try:
+        with socket.create_connection((host, port), timeout=_REACH_TIMEOUT_S):
+            return "ok", None
+    except OSError as exc:
+        return "down", f"{host}:{port} unreachable ({type(exc).__name__})"
+
+
+def _http_probe(url: str) -> tuple[str, str | None]:
+    """Reachable when the URL answers; a 5xx is ``degraded``, a 4xx is still ``ok``."""
+    try:
+        with urlopen(url, timeout=_REACH_TIMEOUT_S) as resp:  # operator-configured status URL
+            code = int(getattr(resp, "status", 200))
+    except HTTPError as exc:
+        return ("degraded", f"http {exc.code}") if exc.code >= 500 else ("ok", f"http {exc.code}")
+    except Exception as exc:  # noqa: BLE001 - any failure is a down status, never a 500
+        return "down", f"unreachable ({type(exc).__name__})"
+    return ("ok", None) if code < 500 else ("degraded", f"http {code}")
+
+
+#: Server-side probe URLs. The public ``MAILROOM_PHOENIX_URL`` / ``MAILROOM_GRAFANA_URL``
+#: are browser-facing (e.g. ``http://localhost:6006``); inside a container the backend is at
+#: a service name, so reachability uses its own variable. Unset means "no backend wired".
+_PHOENIX_PROBE_ENV = "MAILROOM_PHOENIX_PROBE_URL"
+_GRAFANA_PROBE_ENV = "MAILROOM_GRAFANA_PROBE_URL"
+
+
+def _probe_collector(_request: Request) -> tuple[str, str | None]:
+    """The OTLP trace endpoint the exporter will use (with or without Docker)."""
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.environ.get(
+        "OTEL_EXPORTER_OTLP_ENDPOINT"
+    )
+    if not endpoint:
+        return "unconfigured", "set OTEL_EXPORTER_OTLP_ENDPOINT to export spans"
+    return _tcp_probe(endpoint)
+
+
+def _probe_phoenix(_request: Request) -> tuple[str, str | None]:
+    from mailroom_reloaded.settings import get_settings
+
+    target = os.environ.get(_PHOENIX_PROBE_ENV)
+    if not target:
+        return "unconfigured", f"set {_PHOENIX_PROBE_ENV} (public URL {get_settings().phoenix_url})"
+    return _http_probe(target)
+
+
+def _probe_grafana(_request: Request) -> tuple[str, str | None]:
+    from mailroom_reloaded.settings import get_settings
+
+    target = os.environ.get(_GRAFANA_PROBE_ENV)
+    if not target:
+        return "unconfigured", f"set {_GRAFANA_PROBE_ENV} (public URL {get_settings().grafana_url})"
+    return _http_probe(target)
+
+
 def _probe_llm_provider(_request: Request) -> tuple[str, str | None]:
     from mailroom_reloaded.settings import get_settings
 
@@ -114,10 +198,10 @@ PROBES: list[Probe] = [
     Probe("db", _probe_db, critical=True),
     Probe("ledger", _probe_ledger, critical=True),
     Probe("span_store", _probe_span_store),
-    Probe("collector", _pending("#67")),
-    Probe("phoenix", _pending("#66")),
+    Probe("collector", _probe_collector),
+    Probe("phoenix", _probe_phoenix),
     Probe("prometheus", _pending("#66")),
-    Probe("grafana", _pending("#66")),
+    Probe("grafana", _probe_grafana),
     Probe("llm_provider", _probe_llm_provider),
     Probe("watcher", _probe_watcher),
 ]

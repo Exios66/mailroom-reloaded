@@ -68,6 +68,8 @@ block → a default (`_jev_env`/`_jev_field`/`_jev_scalar`). `jev_config()` is
 | `MAILROOM_INSTANCE_ID` | `obs/tracing.py:113-115` | `hostname:pid` | `service.instance.id`. |
 | `MAILROOM_GPU_REPLICA` (or `GPU_REPLICA`) | `obs/tracing.py:118-124` | `0` | `gpu.replica` resource attribute. |
 | `MAILROOM_PHOENIX_PROJECT` | `settings.py` (`phoenix_project`), `obs/tracing.py:133-135` | `mailroom-live` | `openinference.project.name` (Phoenix project); `GET /links` returns it as `phoenix_project`. |
+| `MAILROOM_PHOENIX_PROBE_URL` | `api/routes/ready.py` (`_probe_phoenix`) | unset | Server-side URL `GET /ready` probes for Phoenix. The browser-facing `MAILROOM_PHOENIX_URL` is not reachable from inside a container, so the probe has its own variable; compose sets `http://phoenix:6006`. Unset means the component reports `unconfigured`. |
+| `MAILROOM_GRAFANA_PROBE_URL` | `api/routes/ready.py` (`_probe_grafana`) | unset | As above for Grafana; compose sets `http://grafana:3000`. |
 
 ### Docker / build (compose and Modal)
 

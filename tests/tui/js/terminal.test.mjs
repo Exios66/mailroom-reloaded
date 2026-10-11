@@ -513,3 +513,25 @@ test('lines entered while a command runs are queued and drained in order', async
     'both queued lines ran after the first finished'
   );
 });
+
+test('an engine failure is printed loudly instead of swallowed', async () => {
+  const doc = fakeTerminalDoc();
+  const history = { push() {}, reset() {}, prev() {}, next() {} };
+  const registry = { get: () => { throw new Error('kb'); }, complete: () => ({ matches: [], ghost: '' }) };
+  createTerminal({ root: doc, registry, history, api: {} });
+  const input = doc.nodes['.prompt-line'].children[1].children[1];
+  input.value = 'ls';
+  input.selectionStart = input.selectionEnd = 2;
+  input.fire('input');
+  input.fire('keydown', { key: 'Enter', keyCode: 0 });
+  await new Promise((r) => setImmediate(r));
+  const texts = doc.nodes['#output'].children.map((c) => c.textContent);
+  assert.ok(texts.some((t) => t.includes('internal error: kb')), texts.join(' | '));
+});
+
+test('a throwing viewer key handler is reported, not swallowed', () => {
+  const { term, key, texts } = mkTerm();
+  term.ctx.takeover({ onKey: () => { throw new Error('kb'); } });
+  key('a');
+  assert.ok(texts().some((t) => t.includes('viewer error: kb')), texts().join(' | '));
+});

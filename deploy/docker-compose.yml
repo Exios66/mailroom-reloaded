@@ -24,6 +24,10 @@ x-app-env: &app-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_SERVICE_NAME: mailroom
+  # Server-side reachability probes for GET /ready (the public MAILROOM_*_URL values the
+  # browser uses are not reachable from inside this container).
+  MAILROOM_PHOENIX_PROBE_URL: http://phoenix:6006
+  MAILROOM_GRAFANA_PROBE_URL: http://grafana:3000
   HF_HOME: /hf_cache
   # Optional passthroughs: forwarded only when set in the compose environment (or
   # `--env-file`), so app defaults are untouched. Each is read by src/mailroom_reloaded.

@@ -264,6 +264,23 @@ test('opens takeover, ticks, handles keys and quits', async () => {
   assert.deepEqual([l.t, l.c], ['replay closed', 'dim']);
 });
 
+test('? opens the key list, any key closes it, and r restarts from zero', async () => {
+  const { h, p } = await open('r1');
+  h.tk.opts.onKey(key(' ')); // pause
+  h.tk.opts.onKey(key('5')); // seek to 50s
+  assert.match(lastText(h.view), /00:50\.0/);
+  h.tk.opts.onKey(key('r'));
+  assert.match(lastText(h.view), /00:00\.0 \/ 01:40\.0/);
+  h.tk.opts.onKey(key('?'));
+  assert.match(lastText(h.view), /replay — keys/);
+  assert.match(lastText(h.view), /play \/ pause/);
+  h.tk.opts.onKey(key('z')); // any other key closes the help and does nothing
+  assert.doesNotMatch(lastText(h.view), /replay — keys/);
+  assert.match(lastText(h.view), /00:00\.0 \/ 01:40\.0/);
+  h.tk.opts.onKey(key('q'));
+  await p;
+});
+
 test('--at starts paused at t and --speed applies', async () => {
   const { h, p } = await open('r1 --at 42.5 --speed 4');
   const t = lastText(h.view);

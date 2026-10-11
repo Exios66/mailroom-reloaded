@@ -34,6 +34,9 @@ x-dev-app-env: &dev-app-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
   OTEL_SERVICE_NAME: mailroom-dev
+  # Server-side reachability probes for GET /ready; see deploy/docker-compose.yml.
+  MAILROOM_PHOENIX_PROBE_URL: http://phoenix:6006
+  MAILROOM_GRAFANA_PROBE_URL: http://grafana:3000
   HF_HOME: /hf_cache
   PYTHONPATH: /app/src
 

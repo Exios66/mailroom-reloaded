@@ -198,6 +198,18 @@ export function createModel(timeline) {
     const docs = entities.map((e) => {
       if (finite(e.t_start, 0) <= at) started += 1;
       const d = docState(e, segsByDoc.get(keyOf(e.doc_id)) ?? [], at);
+      // Per-document spend and elapsed wall time, for the leaderboard and the inspector.
+      const tEnd = finite(e.t_end);
+      const tStop = tEnd === null ? at : Math.min(at, tEnd);
+      d.elapsed_s = Math.max(0, tStop - finite(e.t_start, 0));
+      let tokens = 0;
+      let cost = 0;
+      for (const g of generationsFor(keyOf(e.doc_id), at)) {
+        tokens += finite(g.prompt_tokens, 0) + finite(g.completion_tokens, 0);
+        cost += finite(g.cost_usd, 0);
+      }
+      d.tokens = tokens;
+      d.cost_usd = cost;
       if (d.station !== null) counts[d.station] = (counts[d.station] ?? 0) + 1;
       if (d.finished) {
         if (d.final_status === 'failed' || d.station === 'failed') failed += 1;
@@ -316,6 +328,33 @@ export function createModel(timeline) {
     return { tokens: p.tokens, cost_usd: p.cost_usd, llm_calls: p.llm_calls };
   }
 
+  /**
+   * Time spans per station phase, for the scrub bar's "sector" bands: each phase's
+   * earliest segment start to its latest segment end. Sorted by start; phases with no
+   * segments are omitted. Empty when the stations carry no phase.
+   */
+  function phaseSpans() {
+    const idsByPhase = new Map();
+    for (const s of stations) {
+      const phase = typeof s.phase === 'string' ? s.phase : '';
+      if (!phase) continue;
+      if (!idsByPhase.has(phase)) idsByPhase.set(phase, new Set());
+      idsByPhase.get(phase).add(s.id);
+    }
+    const out = [];
+    for (const [phase, ids] of idsByPhase) {
+      let t0 = Infinity;
+      let t1 = -Infinity;
+      for (const seg of segments) {
+        if (!ids.has(seg.station)) continue;
+        t0 = Math.min(t0, seg.t0);
+        t1 = Math.max(t1, seg.t1);
+      }
+      if (Number.isFinite(t0) && Number.isFinite(t1)) out.push({ phase, t0, t1 });
+    }
+    return out.sort((a, b) => a.t0 - b.t0);
+  }
+
   return {
     duration,
     stations,
@@ -332,6 +371,7 @@ export function createModel(timeline) {
     segmentsFor,
     runningTotalsAt,
     stationLatencyAt,
+    phaseSpans,
     firstPassAt,
   };
 }

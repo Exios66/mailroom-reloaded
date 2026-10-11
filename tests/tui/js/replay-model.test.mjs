@@ -273,3 +273,49 @@ test('stationLatencyAt uses only segments that ended by t', () => {
   assert.equal(later.specialist.n, 2); // the running segment never counts
   assert.equal(later.specialist.p50_s, 2.5);
 });
+
+// --- phase spans and per-document totals -----------------------------------
+
+function phaseModel() {
+  return createModel({
+    session: { id: 'run:p', duration_s: 60 },
+    stations: [
+      { id: 'intake', label: 'intake', phase: 'intake_sort', kind: 'main' },
+      { id: 'sorter', label: 'sorter', phase: 'intake_sort', kind: 'main' },
+      { id: 'specialist', label: 'specialist', phase: 'extraction', kind: 'main' },
+    ],
+    entities: [{ doc_id: 'd', filename: 'd.pdf', t_start: 0, t_end: 40, final_status: 'archived' }],
+    segments: [
+      { doc_id: 'd', station: 'intake', t0: 1, t1: 4, status: 'ok' },
+      { doc_id: 'd', station: 'sorter', t0: 4, t1: 9, status: 'ok' },
+      { doc_id: 'd', station: 'specialist', t0: 9, t1: 25, status: 'ok' },
+    ],
+    generations: [
+      { doc_id: 'd', span_id: 'g1', t0: 5, t1: 8, prompt_tokens: 100, completion_tokens: 20, cost_usd: 0.01 },
+      { doc_id: 'd', span_id: 'g2', t0: 10, t1: 20, prompt_tokens: 200, completion_tokens: 50, cost_usd: 0.02 },
+    ],
+    events: [],
+    scores: [],
+    rollups: {},
+  });
+}
+
+test('phaseSpans groups stations by phase, in start order', () => {
+  assert.deepEqual(phaseModel().phaseSpans(), [
+    { phase: 'intake_sort', t0: 1, t1: 9 },
+    { phase: 'extraction', t0: 9, t1: 25 },
+  ]);
+  assert.deepEqual(createModel({ stations: [{ id: 's', label: 's', kind: 'main' }] }).phaseSpans(), []);
+});
+
+test('stateAt carries per-document elapsed, tokens and cost, gated on t', () => {
+  const m = phaseModel();
+  const early = m.stateAt(8).docs[0];
+  assert.equal(early.tokens, 120);
+  assert.equal(early.cost_usd, 0.01);
+  assert.equal(early.elapsed_s, 8);
+  const late = m.stateAt(40).docs[0];
+  assert.equal(late.tokens, 370);
+  assert.equal(late.elapsed_s, 40);
+  assert.deepEqual(m.stateAt(0).docs[0].tokens, 0);
+});

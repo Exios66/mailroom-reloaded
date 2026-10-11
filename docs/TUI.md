@@ -4,7 +4,11 @@
 Terminal edition (amber phosphor CRT, boot sequence, ambient skyline). It is
 static ES modules served by FastAPI, with no build step and no npm dependency.
 Every printed value comes from a live `/v1` call; if the API is unreachable the
-terminal says so and prints nothing canned. `/tui` and its assets are public
+terminal says so and prints nothing canned. A command that fails prints the reason
+(the API's error body when there is one, otherwise `api unreachable`, `401 — type
+'auth <token>'`, and so on); an unexpected failure inside the shell prints
+`internal error: <message>` and a throwing replay-view key handler prints
+`viewer error: <message>`, so nothing fails silently. `/tui` and its assets are public
 like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 
 ## Commands
@@ -42,19 +46,27 @@ the boot animation.
 ### `replay` viewer
 
 `replay <run_id>` reads `GET /v1/replay/sessions/{id}/timeline` (the `replay/v1`
-payload) and takes over the output area with a character grid: a station track,
-a scrub bar with event ticks, run metrics, and an inspector or ledger panel. All
+payload) and takes over the output area with a character grid: a station track
+(grouped under phase headers when the payload carries phases), a scrub bar with
+event ticks, run metrics, and an inspector, ledger or insight panel. All
 text is rendered with `textContent`; bidi and control characters are replaced.
-Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]` speed, `0`-`9`
-jump, `j`/`k` select a document, `i` inspector, `l` ledger panel (fetched on
+Station colours come from each station's `color_token` (`--term-*`, mapped to the
+grid's classes). Keys: Space play/pause, Left/Right seek 5s (Shift 30s), `[` `]`
+speed, `0`-`9` jump, `r` restart from the start, `j`/`k` select a document, `i`
+inspector, `l` ledger panel (fetched on
 demand, with a chain-verify line), `p` cycles insight panels (metrics, tokens,
-decisions, latency, fields — pluggable via `registerPanel` in `replay/panels.js`: a panel is
+decisions, latency, fields, leaderboard, ticker — pluggable via `registerPanel` in `replay/panels.js`: a panel is
 `{ id, title, render }`; the id is 1-32 letters, digits, `_` or `-` and may not be `none`,
 `inspector`, `ledger` or a built-in id; the title is cleaned and clamped to 40 characters;
 the grid sanitises the rows `render` returns; there is no per-panel key, `p` cycles them),
 `e` next event, `f` follow the live stream, `o` opens the run's Phoenix project and `g` the Grafana quality
-dashboard in a new tab, `q`/Esc quit. Ctrl+C always
-releases the keyboard. A pruned run answers 410 and points at `ledger --run`.
+dashboard in a new tab, `?` shows the key list, `q`/Esc quit. Ctrl+C always
+releases the keyboard. The tokens panel draws token- and cost-rate sparklines; the
+leaderboard ranks documents by how far they have progressed (finished documents
+first) and highlights the selected one; the ticker lists the most recent events. The
+scrub bar shades the run's station-phase "sectors" (alternating heavy/light fill with
+a rule at each boundary) and the leaderboard and inspector show each document's
+elapsed time, tokens and cost at the playhead. A pruned run answers 410 and points at `ledger --run`.
 The viewer fetches `GET /links` once on open for the Phoenix and Grafana base URLs;
 the inspector lists both URLs for the run (the Grafana one carries `var-run_id`), and
 `o`/`g` are a no-op when the config or a browser opener is unavailable.

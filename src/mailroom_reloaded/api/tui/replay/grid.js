@@ -70,9 +70,26 @@ export function clip(segs, cols) {
   return out;
 }
 
+// Station `color_token`s are CSS variable names (`--term-*`, mirroring obs/attrs.STATIONS);
+// the grid can only paint its own class set, so map them. An unknown token stays unstyled.
+const TOKEN_CLASS = {
+  '--term-cyan': 'info',
+  '--term-amber': 'hot',
+  '--term-amber-bright': 'hot',
+  '--term-phosphor': 'ok',
+  '--term-green': 'ok',
+  '--term-red': 'err',
+  '--term-yellow': 'warn',
+  '--term-fg-dim': 'dim',
+  '--term-station-judge': 'info',
+  '--term-station-review': 'hot',
+};
+
 function stationCls(token) {
-  const t = typeof token === 'string' ? token.replace(/^g-/, '') : '';
-  return CLASSES.has(t) && t !== 'sel' ? t : '';
+  if (typeof token !== 'string' || token === '') return '';
+  const t = token.startsWith('g-') ? token.slice(2) : token;
+  if (CLASSES.has(t) && t !== 'sel') return t;
+  return TOKEN_CLASS[token] || '';
 }
 
 const KIND_INDENT = { main: '', detour: '  ', bay: '    ' };
@@ -117,15 +134,24 @@ function headerRow({ model, clock, sess, notice }) {
   return segs;
 }
 
-function trackRows({ model, st, sel, cols }) {
+function trackRows({ model, st, sel, cols, showPhases }) {
   const stations = Array.isArray(model.stations) ? model.stations : [];
   const docs = Array.isArray(st.docs) ? st.docs : [];
   // Bars scale to the documents started by t, so the count of future documents does not show.
   const total = Math.max(1, typeof st.started === 'number' ? st.started : docs.length);
   const counts = st.counts && typeof st.counts === 'object' ? st.counts : {};
   const out = [];
+  let lastPhase = null;
   for (const s of stations) {
     const x = s && typeof s === 'object' ? s : {};
+    // A phase header groups stations into "sectors"; only drawn when the payload carries phases.
+    if (showPhases) {
+      const phase = typeof x.phase === 'string' ? x.phase : '';
+      if (phase && phase !== lastPhase) {
+        lastPhase = phase;
+        out.push(clip([[' ─ ', 'dim'], [truncate(phase, Math.max(1, cols - 4)), 'dim']], cols));
+      }
+    }
     const cls = stationCls(x.color_token);
     const indent = Object.hasOwn(KIND_INDENT, x.kind) ? KIND_INDENT[x.kind] : '';
     const n = Math.max(0, Math.floor(num(counts[x.id])));
@@ -145,12 +171,26 @@ function scrubRow({ model, clock, cols }) {
   const dur = num(clock.duration);
   const frac = dur > 0 ? clamp(num(clock.t) / dur, 0, 1) : 0;
   const cells = Array(w).fill('─');
+  const boundaries = new Set();
+  // "Sectors": alternate heavy/light fill per station phase, with a rule at each boundary.
+  const spans = safe(() => model.phaseSpans(), []);
+  if (Array.isArray(spans) && dur > 0) {
+    spans.forEach((s, i) => {
+      const a = clamp(Math.round((num(s && s.t0) / dur) * (w - 1)), 0, w - 1);
+      const b = clamp(Math.round((num(s && s.t1) / dur) * (w - 1)), 0, w - 1);
+      for (let k = a; k <= b; k += 1) cells[k] = i % 2 ? '━' : '─';
+      if (a > 0) boundaries.add(a);
+    });
+  }
   const events = safe(() => model.eventsBetween(-Infinity, dur), []);
   if (Array.isArray(events) && dur > 0) {
     for (const e of events) {
       const i = clamp(Math.round((num(e && e.t) / dur) * (w - 1)), 0, w - 1);
       cells[i] = '┼';
     }
+  }
+  for (const b of boundaries) {
+    if (cells[b] !== '┼') cells[b] = '│';
   }
   const head = clamp(Math.round(frac * (w - 1)), 0, w - 1);
   const left = cells.slice(0, head).join('');
@@ -228,6 +268,16 @@ function inspectorRows({ model, st, clock, sel, cols, links, sess }) {
     ),
   );
   const causes = Array.isArray(outcome.review_causes) && outcome.review_causes.length ? outcome.review_causes.map(clean).join(',') : '—';
+  out.push(
+    clip(
+      [
+        [' elapsed ', 'dim'], [`${num(d.elapsed_s).toFixed(1)}s`, ''],
+        ['  tokens ', 'dim'], [compact(d.tokens), ''],
+        ['  cost ', 'dim'], [money(d.cost_usd), ''],
+      ],
+      cols,
+    ),
+  );
   const finalCells = done
     ? [
         [' final ', 'dim'], [truncate(d.final_status ?? outcome.final_status, 12), ''],
@@ -301,9 +351,11 @@ const LEGEND_ITEMS = [
   ['0-9 jump', 8],
   ['j/k select', 6],
   ['i inspect', 5],
-  ['l ledger', 7],
   ['p panels', 2],
+  ['f follow', 5],
+  ['l ledger', 7],
   ['e event', 9],
+  ['o/g open', 9],
   ['q quit', 0],
 ];
 
@@ -322,6 +374,35 @@ export function legendFor(cols) {
     kept = kept.filter((i) => i !== drop);
   }
   return ` ${kept.map((i) => i[0]).join('  ')}`;
+}
+
+/**
+ * The `?` help overlay: the viewer's key list, one text row per key, wrapped to
+ * `cols` and capped at `rows`. Drawn instead of a frame; any key dismisses it.
+ */
+export function helpRows(cols = 100, rows = 30) {
+  const C = clamp(Math.floor(num(cols)) || 100, MIN_COLS, MAX_COLS);
+  const R = clamp(Math.floor(num(rows)) || 30, MIN_ROWS, MAX_ROWS);
+  const lines = [
+    ' replay — keys',
+    '',
+    ' space        play / pause',
+    ' left right   seek -/+ 5s (shift: 30s)',
+    ' [ ] - +      slower / faster',
+    ' Home End     seek to start / end',
+    ' 0-9          jump to 0%..90%',
+    ' j k up down  select document',
+    ' e            jump to next event',
+    ' i or enter   toggle inspector',
+    ' l            toggle ledger panel',
+    ' p            cycle insight panels',
+    ' f            follow the live stream',
+    ' o / g        open phoenix / grafana',
+    ' r            restart from the beginning',
+    ' ?            close this help',
+    ' Esc or q     quit',
+  ];
+  return lines.slice(0, R).map((t) => clip([[t, 'dim']], C));
 }
 
 /**
@@ -372,6 +453,12 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const selIdx = Number.isInteger(sel) ? sel : -1;
   const ctxo = { model: m, st: s, clock: ck, sel: selIdx, cols: C, ledger, sess, links, notice };
 
+  const budget = R - 4; // header, scrub, metrics, footer
+  // Phase headers only when every station still fits, so a small terminal keeps all stations.
+  const stationList = Array.isArray(m.stations) ? m.stations : [];
+  const phased = stationList.filter((x) => x && typeof x.phase === 'string' && x.phase);
+  ctxo.showPhases = phased.length > 0 && budget >= stationList.length + new Set(phased.map((x) => x.phase)).size;
+
   const head = clip(headerRow(ctxo), C);
   const scrub = clip(scrubRow(ctxo), C);
   const metrics = metricsRow(ctxo);
@@ -379,7 +466,6 @@ export function renderFrame({ model, st, clock, sel = -1, cols, rows, ledger = n
   const track = trackRows(ctxo);
   const panelRows = resolvePanel(panel, ctxo);
 
-  const budget = R - 4; // header, scrub, metrics, footer
   let panelBudget = 0;
   if (panelRows.length) panelBudget = Math.min(panelRows.length, Math.max(4, Math.floor(budget / 2)));
   const trackBudget = Math.max(0, budget - panelBudget);

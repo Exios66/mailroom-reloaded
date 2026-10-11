@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderFrame, truncate, bar, fmtTime } from '../../../src/mailroom_reloaded/api/tui/replay/grid.js';
+import { renderFrame, truncate, bar, fmtTime, helpRows } from '../../../src/mailroom_reloaded/api/tui/replay/grid.js';
 import { createModel } from '../../../src/mailroom_reloaded/api/tui/replay/model.js';
 
 const HOSTILE = '<img src=x onerror=alert(1)>';
@@ -67,19 +67,58 @@ test('frame has header, track, scrub, metrics and footer within bounds', () => {
   rows.forEach((r) => assert.ok(len(r) <= 100, r));
 });
 
-test('the footer keeps q quit at 80 and 60 columns and the full legend at 100', () => {
+test('the footer keeps q quit at every width and the full legend at 160', () => {
   for (const cols of [60, 80, 99, 100, 160]) {
     const foot = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols, rows: 30 })).at(-1);
     assert.match(foot, /q quit/, `cols ${cols}`);
     assert.ok(len(foot) <= cols, `cols ${cols}`);
   }
-  const wide = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 100, rows: 30 })).at(-1);
-  for (const k of ['spc play', '</> seek', '[ ] speed', '0-9 jump', 'j/k select', 'i inspect', 'l ledger', 'p panels', 'e event']) {
+  const wide = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 160, rows: 30 })).at(-1);
+  for (const k of ['spc play', '</> seek', '[ ] speed', '0-9 jump', 'j/k select', 'i inspect', 'p panels', 'f follow', 'l ledger', 'e event', 'o/g open', 'q quit']) {
     assert.ok(wide.includes(k), k);
   }
   const narrow = flat(renderFrame({ model: fakeModel(), st, clock, sel: 1, cols: 80, rows: 30 })).at(-1);
   assert.match(narrow, /spc play/);
   assert.match(narrow, /p panels/);
+});
+
+test('station colour tokens map to grid classes; an unknown token stays unstyled', () => {
+  const stations = [
+    { id: 'a', label: 'aaa', kind: 'main', color_token: '--term-cyan' },
+    { id: 'b', label: 'bbb', kind: 'main', color_token: '--term-amber' },
+    { id: 'c', label: 'ccc', kind: 'main', color_token: '--term-bogus' },
+  ];
+  const rows = renderFrame({ model: fakeModel({ stations }), st: { t: 1, docs: [], counts: {} }, clock, cols: 100, rows: 30 });
+  const clsFor = (label) => rows.flat().find((s) => s[0].includes(label))[1];
+  assert.equal(clsFor('aaa'), 'info');
+  assert.equal(clsFor('bbb'), 'hot');
+  assert.equal(clsFor('ccc'), '');
+});
+
+test('phase headers group the track when the payload carries phases', () => {
+  const stations = [
+    { id: 'intake', label: 'intake', kind: 'main', phase: 'intake_sort', color_token: '--term-fg-dim' },
+    { id: 'sorter', label: 'sorter', kind: 'main', phase: 'intake_sort', color_token: '--term-cyan' },
+    { id: 'specialist', label: 'specialist', kind: 'main', phase: 'extraction', color_token: '--term-amber' },
+  ];
+  const st2 = { t: 1, docs: [], counts: {} };
+  const rows = flat(renderFrame({ model: fakeModel({ stations }), st: st2, clock, cols: 100, rows: 30 }));
+  assert.equal(rows.filter((r) => r.includes('─ intake_sort')).length, 1, 'one header per phase');
+  assert.ok(rows.some((r) => r.includes('─ extraction')));
+  // Too short for station rows + headers: the headers give way so every station still shows.
+  const many = Array.from({ length: 12 }, (_, i) => ({ id: `s${i}`, label: `s${i}`, kind: 'main', phase: `p${i % 4}` }));
+  const short = flat(renderFrame({ model: fakeModel({ stations: many }), st: st2, clock, cols: 100, rows: 14 }));
+  assert.ok(!short.some((r) => /─ p\d/.test(r)), 'headers drop on a short terminal');
+  assert.ok(short.some((r) => r.includes('s0')));
+});
+
+test('helpRows lists the keys and fits the grid', () => {
+  const rows = flat(helpRows(80, 30));
+  assert.ok(rows.some((r) => r.includes('play / pause')));
+  assert.ok(rows.some((r) => r.includes('restart')));
+  assert.ok(rows.some((r) => r.includes('quit')));
+  rows.forEach((r) => assert.ok(len(r) <= 80));
+  assert.ok(rows.length <= 30);
 });
 
 test('markers: failed, finished, selection class', () => {
@@ -307,4 +346,25 @@ test('hostile strings in the inspector stay literal text, and wait for the finis
   const after = inspectorAt(m, 12);
   for (const lit of ['<img src=x onerror=alert(1)>', '<b>x</b>', '<script>', '<i>c</i>']) assert.ok(after.includes(lit), lit);
   assert.doesNotMatch(after.replace(/\n/g, ' '), CTRL_OR_BIDI);
+});
+
+// --- scrub-bar sectors and per-document inspector figures -------------------
+
+test('the scrub bar shades station-phase sectors and marks their boundaries', () => {
+  const m = fakeModel({ phaseSpans: () => [{ phase: 'a', t0: 0, t1: 30 }, { phase: 'b', t0: 30, t1: 60 }] });
+  const rows = flat(renderFrame({ model: m, st, clock: { ...clock, t: 15 }, cols: 100, rows: 30 }));
+  assert.ok(rows.some((r) => r.includes('━')), 'second-sector band drawn');
+  assert.ok(rows.some((r) => r.includes('│')), 'phase boundary marked');
+  assert.ok(rows.some((r) => r.includes('┼') && r.includes('█')), 'event ticks and playhead still on top');
+});
+
+test('the inspector shows per-document elapsed, tokens and cost', () => {
+  const st2 = {
+    ...st,
+    docs: [{ doc_id: 'd1', filename: 'a.pdf', station: 'intake', status: 'ok', finished: false, elapsed_s: 12.5, tokens: 3100, cost_usd: 0.008 }],
+  };
+  const out = flat(renderFrame({ model: fakeModel(), st: st2, clock, sel: 0, cols: 120, rows: 40, panel: 'inspector' })).join('\n');
+  assert.match(out, /elapsed\s+12\.5s/);
+  assert.match(out, /tokens\s+3\.1k/);
+  assert.match(out, /cost\s+\$0\.0080/);
 });

@@ -5,7 +5,7 @@
 // grid's truncate()/clip() so control and bidi characters are neutralised and
 // every row fits. Nothing here touches the DOM, the clock or the network.
 
-import { clip, truncate } from './grid.js';
+import { bar, clip, fmtTime, truncate } from './grid.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -35,6 +35,38 @@ function pct(v) {
 
 function header(title, cols) {
   return clip([[' ─ ' + title + ' ' + '─'.repeat(Math.max(0, num(cols))), 'dim']], cols);
+}
+
+const SPARK_BLOCKS = '▁▂▃▄▅▆▇█';
+
+/** Map a numeric series to `▁▂▃▄▅▆▇█`, at most `width` cells. */
+function sparkline(values, width) {
+  const w = Math.max(1, Math.floor(num(width)));
+  const vals = Array.isArray(values) ? values.filter((v) => typeof v === 'number' && Number.isFinite(v)) : [];
+  if (vals.length === 0) return '';
+  const lo = Math.min(...vals);
+  const hi = Math.max(...vals);
+  const span = hi - lo || 1;
+  const out = [];
+  for (let i = 0; i < w; i += 1) {
+    const v = vals[Math.min(vals.length - 1, Math.round((i * (vals.length - 1)) / Math.max(1, w - 1)))];
+    const k = Math.round(((v - lo) / span) * (SPARK_BLOCKS.length - 1));
+    out.push(SPARK_BLOCKS[Math.max(0, Math.min(SPARK_BLOCKS.length - 1, k))]);
+  }
+  return out.join('');
+}
+
+/** Per-interval growth of a running total, sampled `n` times over [0, playhead]. */
+function rateSeries(ctx, key, n) {
+  const model = isObj(ctx) ? ctx.model : {};
+  const t = playhead(ctx);
+  const N = Math.max(2, Math.floor(num(n)));
+  const cum = [];
+  for (let i = 0; i < N; i += 1) {
+    const tot = safe(() => model.runningTotalsAt((t * i) / (N - 1)), {}) || {};
+    cum.push(num(tot[key]));
+  }
+  return cum.map((v, i) => (i === 0 ? 0 : Math.max(0, v - cum[i - 1])));
 }
 
 function playhead(ctx) {
@@ -89,6 +121,7 @@ function tokensPanel(ctx) {
   const totals = safe(() => model.runningTotalsAt(playhead(ctx)), {}) || {};
   const tokens = num(totals.tokens);
   const cost = num(totals.cost_usd);
+  const w = Math.max(8, Math.min(48, Math.floor(num(cols)) - 20));
   return [
     header('tokens', cols),
     clip(
@@ -99,6 +132,8 @@ function tokensPanel(ctx) {
       ],
       cols,
     ),
+    clip([[' token rate ', 'dim'], [sparkline(rateSeries(ctx, 'tokens', w), w), 'info']], cols),
+    clip([[' cost  rate ', 'dim'], [sparkline(rateSeries(ctx, 'cost_usd', w), w), 'hot']], cols),
   ];
 }
 
@@ -206,12 +241,90 @@ function fieldsPanel(ctx) {
   return out;
 }
 
+function leaderboardPanel(ctx) {
+  const model = isObj(ctx) ? ctx.model : {};
+  const st = isObj(ctx) ? ctx.st : {};
+  const cols = isObj(ctx) ? ctx.cols : 100;
+  const sel = isObj(ctx) && Number.isInteger(ctx.sel) ? ctx.sel : -1;
+  const docs = Array.isArray(st.docs) ? st.docs : [];
+  const stations = Array.isArray(model.stations) ? model.stations : [];
+  const order = new Map();
+  stations.forEach((s, i) => {
+    if (isObj(s) && typeof s.id === 'string') order.set(s.id, i);
+  });
+  const span = Math.max(1, stations.length);
+  const ranked = docs
+    .map((d, i) => {
+      const doc = isObj(d) ? d : {};
+      const at = typeof doc.station === 'string' ? order.get(doc.station) : undefined;
+      const progress = doc.finished === true ? 1 : at === undefined ? 0 : (at + 1) / span;
+      return { doc, i, progress };
+    })
+    .sort((a, b) => b.progress - a.progress || a.i - b.i);
+
+  const out = [header('leaderboard', cols)];
+  if (ranked.length === 0) {
+    out.push(clip([[' no documents', 'dim']], cols));
+    return out;
+  }
+  const fileW = Math.max(8, Math.min(30, Math.floor(num(cols)) - 56));
+  out.push(clip([[`  #   ${'doc'.padEnd(9)} ${'station'.padEnd(12)} ${'elapsed'.padEnd(7)} ${'tokens'.padEnd(6)} ${'progress'.padEnd(10)} file`, 'dim']], cols));
+  ranked.forEach(({ doc, i, progress }, pos) => {
+    const failed = doc.status === 'failed' || doc.final_status === 'failed';
+    const glyph = failed ? '✕' : doc.finished === true ? '✓' : '·';
+    out.push(
+      clip(
+        [
+          [`${String(pos + 1).padStart(3)} `, 'dim'],
+          [glyph, failed ? 'err' : doc.finished === true ? 'ok' : 'dim'],
+          [` ${truncate(doc.doc_id, 9).padEnd(9)}`, ''],
+          [` ${truncate(doc.station, 12).padEnd(12)}`, 'info'],
+          [` ${`${num(doc.elapsed_s).toFixed(1)}s`.padStart(7)}`, ''],
+          [` ${compact(doc.tokens).padStart(6)}`, 'dim'],
+          [` ${bar(progress, 10)}`, progress >= 1 ? 'ok' : 'hot'],
+          [` ${truncate(doc.filename, fileW)}`, i === sel ? 'sel' : ''],
+        ],
+        cols,
+      ),
+    );
+  });
+  return out;
+}
+
+function tickerPanel(ctx) {
+  const model = isObj(ctx) ? ctx.model : {};
+  const cols = isObj(ctx) ? ctx.cols : 100;
+  const events = safe(() => model.eventsUpTo(playhead(ctx), 8), null);
+  const out = [header('ticker', cols)];
+  if (!Array.isArray(events) || events.length === 0) {
+    out.push(clip([[' no events yet', 'dim']], cols));
+    return out;
+  }
+  for (const raw of events) {
+    const e = isObj(raw) ? raw : {};
+    out.push(
+      clip(
+        [
+          [` ${fmtTime(e.t)} `, 'dim'],
+          [truncate(e.kind, 18).padEnd(18), 'info'],
+          [` ${truncate(e.station, 12).padEnd(12)}`, ''],
+          [` ${truncate(e.doc_id, 10)}`, 'dim'],
+        ],
+        cols,
+      ),
+    );
+  }
+  return out;
+}
+
 const BUILTINS = [
   { id: 'metrics', title: 'Metrics', render: metricsPanel },
   { id: 'tokens', title: 'Tokens', render: tokensPanel },
   { id: 'decisions', title: 'Decisions', render: decisionsPanel },
   { id: 'latency', title: 'Latency', render: latencyPanel },
   { id: 'fields', title: 'Fields', render: fieldsPanel },
+  { id: 'leaderboard', title: 'Leaderboard', render: leaderboardPanel },
+  { id: 'ticker', title: 'Ticker', render: tickerPanel },
 ];
 
 // ------------------------------------------------------------------ registry

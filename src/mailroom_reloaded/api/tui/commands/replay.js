@@ -7,7 +7,7 @@ import { SPEEDS, createClock } from '../replay/clock.js';
 import { createModel } from '../replay/model.js';
 import { listPanels } from '../replay/panels.js';
 import { createFollowReader } from '../replay/live.js';
-import { fmtTime, renderFrame } from '../replay/grid.js';
+import { fmtTime, helpRows, renderFrame } from '../replay/grid.js';
 import { externalUrls, loadLinks } from '../lib/links.js';
 
 const PREFIXES = new Set(['run', 'session', 'doc', 'window']);
@@ -105,6 +105,7 @@ KEYS
     0-9          seek to 0%..90%        up/down j/k  select document
     Enter or i   toggle inspector       l            toggle ledger panel
     p            cycle insight panels   e            jump to next event
+    r            restart from the start ?            show / hide this key list
     o / g        open Phoenix / Grafana
     Esc or q     quit (Ctrl+C aborts)
     The view is text only; every value is shown literally.`,
@@ -213,6 +214,7 @@ async function openViewer(ctx, arg, flags) {
   let closed = false;
   let follow = Boolean(opts.follow);
   let reader = null;
+  let help = false; // the `?` key list overlay
   let notice = null; // a one-line viewer notice (e.g. the server's row-cap error), shown in the header
   const doc = ctx.document ?? (typeof globalThis.document !== 'undefined' ? globalThis.document : null);
 
@@ -230,12 +232,12 @@ async function openViewer(ctx, arg, flags) {
     if (closed || !view) return;
     const ck = clock.state();
     const st = model.stateAt(ck.t);
-    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}|${linksVersion}|${notice}`;
+    const key = `${ck.t.toFixed(2)}|${ck.playing}|${ck.speed}|${sel}|${panel}|${ledgerVersion}|${linksVersion}|${notice}|${help}`;
     if (!force && key === lastKey) return;
     lastKey = key;
     const size = ctx.gridSize?.() ?? { cols: 100, rows: 30 };
     try {
-      view.draw(renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel, links, notice }));
+      view.draw(help ? helpRows(size.cols, size.rows) : renderFrame({ model, st, clock: ck, sel, cols: size.cols, rows: size.rows, ledger, panel, links, notice }));
     } catch {
       // A frame that cannot be drawn ends the viewer rather than leaving it blank and wedged.
       close();
@@ -414,7 +416,7 @@ async function openViewer(ctx, arg, flags) {
     (ctx.open ?? globalThis.open)?.(url, '_blank', 'noopener');
   };
 
-  // none -> metrics -> tokens -> decisions -> latency -> fields -> none.
+  // none -> metrics -> tokens -> decisions -> latency -> fields -> leaderboard -> ticker -> none.
   // From the inspector or ledger, p starts the insight cycle at its first panel.
   const cyclePanel = () => {
     const ids = listPanels().map((p) => p.id);
@@ -426,6 +428,17 @@ async function openViewer(ctx, arg, flags) {
     if (closed || !e || typeof e.key !== 'string') return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     const k = e.key;
+    // `?` opens the key list; any other key closes it before it acts.
+    if (k === '?') {
+      help = !help;
+      redraw(true);
+      return;
+    }
+    if (help) {
+      help = false;
+      redraw(true);
+      return;
+    }
     const big = e.shiftKey ? STEP_BIG_S : STEP_S;
     const dur = clock.state().duration;
     // A backward scrub (or a jump/seek) leaves follow; `f` re-enters.
@@ -437,7 +450,12 @@ async function openViewer(ctx, arg, flags) {
     else if (k === ']' || k === '+' || k === '=') clock.faster(nowFn());
     else if (k === 'Home') clock.seek(0);
     else if (k === 'End') clock.seek(dur);
-    else if (/^[0-9]$/.test(k)) clock.seek((dur * Number(k)) / 10);
+    else if (k === 'r') {
+      // Restart from the beginning (leaving follow, so the pin cannot jump the playhead back).
+      if (follow) setFollow(false);
+      clock.seek(0);
+      clock.play(nowFn());
+    } else if (/^[0-9]$/.test(k)) clock.seek((dur * Number(k)) / 10);
     else if (k === 'ArrowDown' || k === 'j') {
       const n = docCount();
       sel = n ? Math.min(n - 1, sel + 1) : -1;

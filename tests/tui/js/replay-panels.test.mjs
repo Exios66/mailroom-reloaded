@@ -83,7 +83,7 @@ test('every built-in panel renders on a minimal model and a hostile timeline', (
 });
 
 test('registerPanel rejects reserved ids and bad ids, and cleans the title', () => {
-  for (const id of ['none', 'inspector', 'ledger', 'metrics', 'tokens', 'decisions', 'latency', 'fields']) {
+  for (const id of ['none', 'inspector', 'ledger', 'metrics', 'tokens', 'decisions', 'latency', 'fields', 'leaderboard', 'ticker']) {
     assert.throws(() => registerPanel({ id, render: () => [] }), /reserved/, id);
   }
   for (const id of ['', 'a b', 'x'.repeat(33), 'a\u202eb', '<x>', 7]) {
@@ -196,12 +196,13 @@ test('p cycles insight panels, starts from another panel, and never fetches the 
   const p = dispatch(r, h.ctx, 'replay r1');
   await nextTick();
   const last = () => textOf(h.view.frames.at(-1));
-  for (const id of ['metrics', 'tokens', 'decisions', 'latency', 'fields']) {
+  const ids = ['metrics', 'tokens', 'decisions', 'latency', 'fields', 'leaderboard', 'ticker'];
+  for (const id of ids) {
     h.tk.opts.onKey(key('p'));
     assert.match(last(), new RegExp(`─ ${id}`), id);
   }
   h.tk.opts.onKey(key('p'));
-  assert.ok(!/─ (metrics|tokens|decisions|latency|fields)/.test(last()), 'wraps back to none');
+  assert.ok(!new RegExp(`─ (${ids.join('|')})`).test(last()), 'wraps back to none');
   h.tk.opts.onKey(key('i'));
   assert.match(last(), /─ inspector/);
   h.tk.opts.onKey(key('p'));
@@ -271,4 +272,29 @@ test('after the run ends the panels show the full totals', () => {
   assert.match(tokens, /tokens 3\.7k/);
   assert.match(tokens, /\$0\.7500/);
   assert.match(panelAt('latency', m, 40), /sorter\s+4\.00\s+5\.80 n 2/);
+});
+
+test('leaderboard ranks by progress and marks the selected document', () => {
+  const m = runModel();
+  const rows = getPanel('leaderboard').render({ model: m, st: m.stateAt(20), clock: { t: 20 }, cols: 100, sel: 0 });
+  const text = rows.map((r) => r.map((s) => s[0]).join(''));
+  assert.match(text[0], /─ leaderboard/);
+  const ai = text.findIndex((r) => r.includes('a.pdf'));
+  const bi = text.findIndex((r) => r.includes('b.pdf'));
+  assert.ok(ai > 0 && ai < bi, 'the finished document ranks ahead of the in-progress one');
+  assert.ok(rows[ai].some((s) => s[1] === 'sel'), 'the selected document is highlighted');
+});
+
+test('ticker lists recent events with time, kind, station and doc', () => {
+  const m = fakeModel({ eventsUpTo: () => [{ t: 3.5, kind: 'retry_sort', station: 'gate', doc_id: 'd1' }] });
+  const out = textOf(getPanel('ticker').render({ model: m, st, clock: { t: 12 }, cols: 100 }));
+  assert.match(out, /─ ticker/);
+  assert.match(out, /00:03\.5\s+retry_sort\s+gate\s+d1/);
+});
+
+test('the leaderboard reports each document elapsed time and token spend', () => {
+  const m = runModel();
+  const out = textOf(getPanel('leaderboard').render({ model: m, st: m.stateAt(20), clock: { t: 20 }, cols: 120, sel: 0 }));
+  assert.match(out, /9\.0s/);
+  assert.match(out, /1\.2k/);
 });
