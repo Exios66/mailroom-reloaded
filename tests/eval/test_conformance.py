@@ -315,3 +315,33 @@ def test_sorter_runs_record_real_tool_calls(mock_provider):
     assert all(run.tool_calls for run in runs)
     assert all(tc.ok for run in runs for tc in run.tool_calls)
     assert cf.build_role_stats(runs).invariant_pass_rate == 1.0
+
+
+def test_role_runs_isolates_a_role_failure(monkeypatch):
+    """A role that raises is recorded as one failed RoleRun; the other roles still
+    run, so the card reports the failing role instead of producing nothing."""
+    from mailroom_reloaded.eval.dataset import BlindDoc
+
+    doc = BlindDoc("correspondence_01.txt", "text", "sha")
+    gt = type("GT", (), {"expected": "correspondence"})()
+
+    monkeypatch.setattr(
+        cf, "load_split", lambda revision, split, local_dir=None: ([doc], {doc.filename: gt})
+    )
+    monkeypatch.setattr(cf, "sample", lambda docs, gts, per_class=None: [doc])
+    monkeypatch.setattr(
+        cf, "_sorter_runs", lambda d, g: (_ for _ in ()).throw(RuntimeError("sorter boom"))
+    )
+    monkeypatch.setattr(cf, "_specialist_runs", lambda d, g: [])
+    monkeypatch.setattr(cf, "_judge_runs", lambda d, g, data: [])
+    monkeypatch.setattr(cf, "_arbiter_runs", lambda d, g, data: [])
+    monkeypatch.setattr(cf, "_boss_runs", lambda d, g: [])
+
+    runs = cf._collect_runs(per_class=1, revision="r", split="test", local_dir=None)
+
+    (failed,) = runs["sorter"]
+    assert failed.schema_valid is False
+    assert isinstance(failed.result, RuntimeError)
+    assert "sorter boom" in str(failed.result)
+    assert runs["specialists"] == []
+    assert runs["judge"] == []

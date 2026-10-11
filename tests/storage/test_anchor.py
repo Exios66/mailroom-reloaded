@@ -374,10 +374,13 @@ def test_supabase_rejected_insert_without_row_is_unreachable() -> None:
 
 
 def test_supabase_lost_response_with_row_stored_is_ok() -> None:
+    """A 502 whose row actually committed is treated as success (read-back equal)."""
     store = FakeStore()
     store.rows[5] = H1
     store.post_status = 502
     store.backend().push(5, H1)
+    assert store.rows == {5: H1}
+    assert store.backend().head() == Head(5, H1)
 
 
 @pytest.mark.parametrize("exc", [httpx.ConnectError("x"), httpx.ReadTimeout("x")])
@@ -462,6 +465,9 @@ def test_sql_backend_lost_response_same_hash_is_success(
     sql_backend.push(
         1, H1
     )  # IntegrityError -> AnchorUnreachable -> read-back equal -> ok
+    assert sql_backend.get(1) == H1  # the row is really there, not a silent no-op
+    monkeypatch.setattr(sql_backend, "head", real_head)
+    assert sql_backend.head() == Head(1, H1)
 
 
 def test_sql_backend_db_error_is_unreachable(sql_backend) -> None:
@@ -872,11 +878,15 @@ def test_schedule_push_noop_when_not_remote(ledger, monkeypatch) -> None:
 
 
 def test_schedule_push_never_raises(ledger, monkeypatch) -> None:
+    started: list[object] = []
+    monkeypatch.setattr(anchor.threading, "Thread", lambda **kw: started.append(kw))
+
     def explode():
         raise RuntimeError("settings broke")
 
     monkeypatch.setattr(anchor, "_configured_backend", explode)
     anchor.schedule_push(ledger)
+    assert started == []  # a broken settings lookup starts no worker and never raises
 
 
 def test_schedule_push_starts_one_daemon_thread(ledger, monkeypatch) -> None:

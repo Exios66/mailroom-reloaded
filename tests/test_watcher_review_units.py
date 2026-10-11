@@ -451,3 +451,71 @@ def test_startup_sweeps_only_stale_upload_staging_files(bins):
     assert not stale.exists()
     assert fresh.exists()
     assert document.exists()
+
+
+def test_start_observer_schedules_inbox_and_starts(bins, monkeypatch):
+    """Verify the watchdog observer is pointed at the inbox and started."""
+    import sys
+    import threading
+    import types
+
+    scheduled: dict = {}
+    started: dict = {}
+
+    class FakeObserver:
+        def schedule(self, handler, path, recursive):
+            scheduled["args"] = (handler, path, recursive)
+
+        def start(self):
+            started["yes"] = True
+
+    fake_events = types.ModuleType("watchdog.events")
+    fake_events.FileSystemEventHandler = object
+    fake_observers = types.ModuleType("watchdog.observers")
+    fake_observers.Observer = FakeObserver
+    monkeypatch.setitem(sys.modules, "watchdog", types.ModuleType("watchdog"))
+    monkeypatch.setitem(sys.modules, "watchdog.events", fake_events)
+    monkeypatch.setitem(sys.modules, "watchdog.observers", fake_observers)
+
+    instance = watcher.Watcher(bins, "worker")
+    observer = instance._start_observer(threading.Event())
+    assert isinstance(observer, FakeObserver)
+    _handler, path, recursive = scheduled["args"]
+    assert path == str(bins.inbox) and recursive is False
+    assert started.get("yes") is True
+
+
+def test_start_observer_returns_none_when_watchdog_unavailable(bins, monkeypatch):
+    """Verify a missing watchdog is non-fatal: the observer is disabled, not raised."""
+    import sys
+    import threading
+
+    monkeypatch.setitem(sys.modules, "watchdog.events", None)
+    monkeypatch.setitem(sys.modules, "watchdog.observers", None)
+    instance = watcher.Watcher(bins, "worker")
+    assert instance._start_observer(threading.Event()) is None
+
+
+def test_start_observer_returns_none_when_start_fails(bins, monkeypatch):
+    """Verify an observer that fails to start is disabled, not raised."""
+    import sys
+    import threading
+    import types
+
+    class BoomObserver:
+        def schedule(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise RuntimeError("inotify exhausted")
+
+    fake_events = types.ModuleType("watchdog.events")
+    fake_events.FileSystemEventHandler = object
+    fake_observers = types.ModuleType("watchdog.observers")
+    fake_observers.Observer = BoomObserver
+    monkeypatch.setitem(sys.modules, "watchdog", types.ModuleType("watchdog"))
+    monkeypatch.setitem(sys.modules, "watchdog.events", fake_events)
+    monkeypatch.setitem(sys.modules, "watchdog.observers", fake_observers)
+
+    instance = watcher.Watcher(bins, "worker")
+    assert instance._start_observer(threading.Event()) is None

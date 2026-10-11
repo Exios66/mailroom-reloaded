@@ -9,6 +9,7 @@ from mailroom_reloaded.agents.specialists import (
     _coverage,
     extract,
     extraction_confidence,
+    merge_merger_windows,
     prepare_input,
 )
 from mailroom_reloaded.ingest.bert import Handoff, SortMode
@@ -232,3 +233,40 @@ def test_no_ground_truth_in_messages(mock_provider):
     extract("policy document text", "insurance_claim", None, tools=False)
 
     assert_no_gt(mock_provider.requests, gt_row)
+
+
+# --------------------------------------------------------------- merger merge
+
+
+def test_merge_merger_windows_unions_windows():
+    """The per-window merger: list fields dedupe, scalars keep the first value,
+    confidence keeps the max, and MAUD clauses are keyed by question (first wins)."""
+    merged = merge_merger_windows(
+        [
+            {
+                "maud_clauses": ["Governing law: Delaware", "Governing law: ignored dup"],
+                "parties": ["Acme"],
+                "effective_date": "2026-01-01",
+                "confidence": 0.5,
+            },
+            "not a dict",  # a malformed window is skipped, never crashes the merge
+            {
+                "maud_clauses": ["Closing: March", "Governing law: New York"],
+                "parties": ["ACME", "Beta"],  # "ACME" dedupes against "Acme"
+                "effective_date": None,  # empty scalars never overwrite a set one
+                "confidence": 0.9,
+            },
+            {"confidence": "bogus"},  # non-numeric confidence is ignored
+        ]
+    )
+    assert merged["parties"] == ["Acme", "Beta"]
+    assert merged["effective_date"] == "2026-01-01"
+    assert merged["confidence"] == 0.9
+    assert merged["maud_clauses"] == ["Governing law: Delaware", "Closing: March"]
+
+
+def test_merge_merger_windows_empty_and_tolerant_of_non_list_maud():
+    """An empty window list yields the empty agreement; a non-list MAUD value and
+    a window that is not a dict are tolerated rather than raising."""
+    assert merge_merger_windows([]) == {"maud_clauses": [], "confidence": 0.0}
+    assert merge_merger_windows([{"maud_clauses": None}, {"x": 1}])["x"] == 1

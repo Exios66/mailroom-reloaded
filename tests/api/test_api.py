@@ -259,7 +259,7 @@ def test_review_resolve_endpoint(env, mock_provider, monkeypatch, client):
 
 
 def test_ui_served(client):
-    """Verify the UI serves HTML containing the observability links."""
+    """Verify the UI serves HTML containing the observability links and its module."""
     resp = client.get("/ui")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
@@ -267,9 +267,8 @@ def test_ui_served(client):
     assert "mailroom" in text.lower()
     assert "6006" in text  # Phoenix link
     assert "3000" in text  # Grafana link
-    assert '"/tui#replay=run:" + encodeURIComponent(r.run_id)' in text  # per-run replay link
+    assert "/ui/assets/app.js" in text  # the page loads its (unit-tested) module
     assert "ev.stopPropagation()" in text  # the link must not also open the cards
-    assert "/d/mailroom-quality?var-run_id=" in text  # per-run Grafana link expression
     assert "phoenix ↗" in text  # per-run Phoenix link
     assert "td a { color:var(--accent)" in text  # run links in table cells are styled
     assert "/links" in text  # the header links are refreshed from the public config
@@ -796,3 +795,32 @@ def test_review_response_reports_the_extracted_class(client, monkeypatch, extrac
     response = client.post("/v1/review/abc/resolve", json={"action": "correct", "doc_type": "contract"})
     assert response.status_code == 200
     assert response.json()["doc_type"] == expected
+
+
+def test_documents_list_filters_by_status(env, mock_provider, monkeypatch, client):
+    """GET /v1/documents?status= is the review queue's data source: it must
+    return only documents in that status, and nothing else."""
+    # one archived document (fast path)
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    _reply(mock_provider, CORR_EXTRACT)
+    archived_id = _upload(client, name="archived.txt", content=b"A business letter about the deal.")
+    bins = Bins(env)
+    assert Watcher(bins, "w1", 1).drain_once() == 1
+
+    # one parked document (low confidence), distinct content so the doc_id differs
+    _patch_bert_unavailable(monkeypatch)
+    for _ in range(3):
+        _reply(mock_provider, LOW_CLASS)
+    parked_id = _upload(client, name="parked.txt", content=b"A different letter needing review.")
+    assert Watcher(bins, "w2", 1).drain_once() == 1
+    assert archived_id != parked_id
+
+    parked = client.get("/v1/documents", params={"status": "parked"}).json()
+    assert [d["doc_id"] for d in parked["documents"]] == [parked_id]
+    assert parked["count"] == 1
+
+    archived = client.get("/v1/documents", params={"status": "archived"}).json()
+    assert [d["doc_id"] for d in archived["documents"]] == [archived_id]
+
+    assert client.get("/v1/documents").json()["count"] == 2

@@ -39,6 +39,7 @@ Tests are grouped by module under `tests/`:
 | Scoring | `tests/scoring/` | vendored dojo subset + upstream parity |
 | Schemas/Storage | `tests/schemas/`, `tests/storage/` | extraction schemas, audit chain, bins |
 | Top-level | `tests/test_*.py` | dependency fence, prompt lock, settings, tools, watcher/review |
+| UI | `tests/ui/` | the `/ui` page's JS module (`api/ui/app.js`) via `node --test` |
 
 Fixtures and helpers: `tests/fakes/openai_server.py` (scripted OpenAI-compatible
 fake), `tests/helpers.py` (`assert_no_gt` ground-truth leak check), and
@@ -53,6 +54,22 @@ uv run pytest tests/pipeline -v
 uv run pytest tests/eval -v
 uv run pytest tests/api -v
 ```
+
+## JS unit tests
+
+The browser `/tui` and `/ui` modules are tested with Node's built-in runner
+(`node --test`), independent of a browser:
+
+```bash
+node --test tests/tui/js/*.test.mjs   # /tui engine, terminal, commands, replay
+node --test tests/ui/js/*.test.mjs    # /ui page module (api/ui/app.js)
+```
+
+Both suites are also wired into `pytest` (`tests/tui/test_engine_js.py`,
+`tests/ui/test_ui_js.py`) so `uv run pytest` runs them too; they skip only when
+`node` is absent. The `/ui` page's DOM wiring is served from `api/ui/index.html`
+and imports its pure helpers from `/ui/assets/app.js` (`app.py` mounts
+`/ui/assets`), which is what these tests exercise.
 
 ## Live tests
 

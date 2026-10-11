@@ -82,7 +82,8 @@ _ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS
 #: Hosts considered loopback; anything else is an off-loopback bind.
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
-_UI_INDEX = Path(__file__).parent / "ui" / "index.html"
+_UI_DIR = Path(__file__).parent / "ui"
+_UI_INDEX = _UI_DIR / "index.html"
 _TUI_DIR = Path(__file__).parent / "tui"
 
 
@@ -1156,6 +1157,11 @@ def create_app() -> FastAPI:
     if _TUI_DIR.is_dir():
         application.mount(
             "/tui/assets", StaticFiles(directory=_TUI_DIR), name="tui-assets"
+        )
+
+    if _UI_DIR.is_dir():
+        application.mount(
+            "/ui/assets", StaticFiles(directory=_UI_DIR), name="ui-assets"
         )
 
     return application

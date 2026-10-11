@@ -83,205 +83,195 @@
     </section>
   </main>
 
-<script>
-(function () {
-  const $ = (id) => document.getElementById(id);
+<script type="module">
+import { auditSummary, mergeLinks, runLinks, statusPill } from '/ui/assets/app.js';
 
-  // Observability base URLs. The static defaults match the header's initial
-  // hrefs; loadLinks() replaces them from the public GET /links.
-  const LINKS = {
-    public_url: "http://localhost:8000",
-    phoenix_url: "http://localhost:6006",
-    grafana_url: "http://localhost:3000",
-    phoenix_project: "mailroom-live",
-  };
+const $ = (id) => document.getElementById(id);
 
-  async function loadLinks() {
-    try {
-      const res = await fetch("/links", { headers: { Accept: "application/json" } });
-      if (!res.ok) return;
-      const body = await res.json();
-      for (const key of ["public_url", "phoenix_url", "grafana_url", "phoenix_project"]) {
-        const v = body[key];
-        if (typeof v !== "string" || !v) continue;
-        // Only plain http(s) bases are linked; anything else keeps the static default.
-        if (key !== "phoenix_project" && !/^https?:\/\/[^\s@]+$/i.test(v)) continue;
-        LINKS[key] = key === "phoenix_project" ? v : v.replace(/\/+$/, "");
-      }
-      $("phoenixLink").href = LINKS.phoenix_url;
-      $("grafanaLink").href = LINKS.grafana_url;
-    } catch (err) {
-      // Links are optional: keep the static defaults if /links is unreachable.
+// Observability base URLs. The static defaults match the header's initial
+// hrefs; loadLinks() replaces them from the public GET /links.
+const DEFAULT_LINKS = {
+  public_url: 'http://localhost:8000',
+  phoenix_url: 'http://localhost:6006',
+  grafana_url: 'http://localhost:3000',
+  phoenix_project: 'mailroom-live',
+};
+let LINKS = { ...DEFAULT_LINKS };
+
+async function loadLinks() {
+  try {
+    const res = await fetch('/links', { headers: { Accept: 'application/json' } });
+    if (!res.ok) return;
+    // mergeLinks drops anything that is not a plain http(s) base.
+    LINKS = mergeLinks(DEFAULT_LINKS, await res.json());
+    $('phoenixLink').href = LINKS.phoenix_url;
+    $('grafanaLink').href = LINKS.grafana_url;
+  } catch (err) {
+    // Links are optional: keep the static defaults if /links is unreachable.
+  }
+}
+
+function externalLink(href, label, onClick) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.textContent = label;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.onclick = onClick;
+  return a;
+}
+
+function headers() {
+  const t = $('token').value.trim();
+  const h = {};
+  if (t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+
+async function api(path) {
+  const res = await fetch(path, { headers: headers() });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(res.status + ' ' + path + ' — ' + text.slice(0, 200));
+  }
+  return res.json();
+}
+
+function textSpan(text, className) {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  return span;
+}
+
+function setError(target, err) {
+  $(target).replaceChildren(textSpan(String(err.message || err), 'bad'));
+}
+
+function statusPillEl(status) {
+  const { status: label, className } = statusPill(status);
+  return textSpan(label, className);
+}
+
+function addTextCells(tr, values) {
+  for (const value of values) {
+    const td = document.createElement('td');
+    td.textContent = value;
+    tr.appendChild(td);
+  }
+}
+
+async function loadDocuments() {
+  const status = $('statusFilter').value;
+  const q = status ? ('?status=' + encodeURIComponent(status)) : '';
+  const body = await api('/v1/documents' + q);
+  const tb = $('documents').querySelector('tbody');
+  tb.innerHTML = '';
+  for (const d of body.documents || []) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+    addTextCells(tr, [d.doc_id || '', d.filename || '', d.doc_type || '—']);
+    const statusCell = document.createElement('td');
+    statusCell.appendChild(statusPillEl(d.status));
+    tr.appendChild(statusCell);
+    tr.onclick = () => selectDocument(d.doc_id);
+    tb.appendChild(tr);
+  }
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="4" class="muted">none</td></tr>';
+}
+
+async function loadReview() {
+  const body = await api('/v1/documents?status=parked');
+  const tb = $('review').querySelector('tbody');
+  tb.innerHTML = '';
+  for (const d of body.documents || []) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+    addTextCells(tr, [d.doc_id || '', d.filename || '', d.doc_type || '—']);
+    tr.onclick = () => selectDocument(d.doc_id);
+    tb.appendChild(tr);
+  }
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">empty</td></tr>';
+}
+
+async function loadRuns() {
+  const body = await api('/v1/runs');
+  const tb = $('runs').querySelector('tbody');
+  tb.innerHTML = '';
+  for (const r of body.runs || []) {
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+    addTextCells(tr, [r.run_id, r.documents ?? '—']);
+    const links = runLinks(LINKS, r.run_id);
+    const replayCell = document.createElement('td');
+    const replay = document.createElement('a');
+    replay.href = links.replay;
+    replay.textContent = 'replay ↗';
+    replay.onclick = (ev) => ev.stopPropagation();
+    replayCell.appendChild(replay);
+    tr.appendChild(replayCell);
+    const grafanaCell = document.createElement('td');
+    grafanaCell.appendChild(
+      externalLink(links.grafana, 'grafana ↗', (ev) => ev.stopPropagation())
+    );
+    tr.appendChild(grafanaCell);
+    const phoenixCell = document.createElement('td');
+    phoenixCell.appendChild(
+      externalLink(links.phoenix, 'phoenix ↗', (ev) => ev.stopPropagation())
+    );
+    tr.appendChild(phoenixCell);
+    tr.onclick = () => loadCards(r.run_id);
+    tb.appendChild(tr);
+  }
+  if (!tb.children.length) tb.innerHTML = '<tr><td colspan="5" class="muted">no eval runs yet</td></tr>';
+}
+
+async function loadCards(runId) {
+  try {
+    const body = await api('/v1/runs/' + encodeURIComponent(runId) + '/cards');
+    $('cards').classList.remove('muted');
+    $('cards').textContent = JSON.stringify(body.cards, null, 2) || '[]';
+    if (!body.cards || !body.cards.length) {
+      $('cards').textContent = 'no cards yet for ' + runId + ' (Task 21)';
+      $('cards').classList.add('muted');
     }
-  }
+  } catch (err) { setError('cards', err); }
+}
 
-  function externalLink(href, label, onClick) {
-    const a = document.createElement("a");
-    a.href = href;
-    a.textContent = label;
-    a.target = "_blank";
-    a.rel = "noopener";
-    a.onclick = onClick;
-    return a;
-  }
+async function selectDocument(docId) {
+  $('auditDocId').value = docId;
+  try {
+    const body = await api('/v1/documents/' + encodeURIComponent(docId));
+    $('detail').classList.remove('muted');
+    $('detail').textContent = JSON.stringify(body, null, 2);
+  } catch (err) { setError('detail', err); }
+}
 
-  function headers() {
-    const t = $("token").value.trim();
-    const h = {};
-    if (t) h["Authorization"] = "Bearer " + t;
-    return h;
-  }
+async function verifyAudit() {
+  const docId = $('auditDocId').value.trim();
+  if (!docId) return;
+  try {
+    const body = await api('/v1/audit/' + encodeURIComponent(docId));
+    const { text, className, entries } = auditSummary(body.chain, (body.entries || []).length);
+    $('auditResult').replaceChildren(
+      textSpan(text, className),
+      document.createTextNode(' · ' + entries + ' entries')
+    );
+  } catch (err) { setError('auditResult', err); }
+}
 
-  async function api(path) {
-    const res = await fetch(path, { headers: headers() });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(res.status + " " + path + " — " + text.slice(0, 200));
-    }
-    return res.json();
-  }
+async function refresh() {
+  try { await loadLinks(); } catch (err) { /* static defaults are fine */ }
+  try { await loadDocuments(); } catch (err) { setError('documents', err); }
+  try { await loadReview(); } catch (err) { setError('review', err); }
+  try { await loadRuns(); } catch (err) { setError('runs', err); }
+}
 
-  function textSpan(text, className) {
-    const span = document.createElement("span");
-    span.className = className;
-    span.textContent = text;
-    return span;
-  }
-
-  function setError(target, err) {
-    $(target).replaceChildren(textSpan(String(err.message || err), "bad"));
-  }
-
-  function statusPill(s) {
-    const status = ["processing", "parked", "archived", "failed"].includes(s) ? s : "?";
-    const cls = status === "archived" ? "ok" : (status === "failed" ? "bad" : "muted");
-    return textSpan(status, "pill " + cls);
-  }
-
-  function addTextCells(tr, values) {
-    for (const value of values) {
-      const td = document.createElement("td");
-      td.textContent = value;
-      tr.appendChild(td);
-    }
-  }
-
-  async function loadDocuments() {
-    const status = $("statusFilter").value;
-    const q = status ? ("?status=" + encodeURIComponent(status)) : "";
-    const body = await api("/v1/documents" + q);
-    const tb = $("documents").querySelector("tbody");
-    tb.innerHTML = "";
-    for (const d of body.documents || []) {
-      const tr = document.createElement("tr");
-      tr.className = "clickable";
-      addTextCells(tr, [d.doc_id || "", d.filename || "", d.doc_type || "—"]);
-      const statusCell = document.createElement("td");
-      statusCell.appendChild(statusPill(d.status));
-      tr.appendChild(statusCell);
-      tr.onclick = () => selectDocument(d.doc_id);
-      tb.appendChild(tr);
-    }
-    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="4" class="muted">none</td></tr>';
-  }
-
-  async function loadReview() {
-    const body = await api("/v1/documents?status=parked");
-    const tb = $("review").querySelector("tbody");
-    tb.innerHTML = "";
-    for (const d of body.documents || []) {
-      const tr = document.createElement("tr");
-      tr.className = "clickable";
-      addTextCells(tr, [d.doc_id || "", d.filename || "", d.doc_type || "—"]);
-      tr.onclick = () => selectDocument(d.doc_id);
-      tb.appendChild(tr);
-    }
-    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="3" class="muted">empty</td></tr>';
-  }
-
-  async function loadRuns() {
-    const body = await api("/v1/runs");
-    const tb = $("runs").querySelector("tbody");
-    tb.innerHTML = "";
-    for (const r of body.runs || []) {
-      const tr = document.createElement("tr");
-      tr.className = "clickable";
-      addTextCells(tr, [r.run_id, r.documents ?? "—"]);
-      const replayCell = document.createElement("td");
-      const replay = document.createElement("a");
-      replay.href = "/tui#replay=run:" + encodeURIComponent(r.run_id);
-      replay.textContent = "replay ↗";
-      replay.onclick = (ev) => ev.stopPropagation();
-      replayCell.appendChild(replay);
-      tr.appendChild(replayCell);
-      const grafanaCell = document.createElement("td");
-      grafanaCell.appendChild(
-        externalLink(
-          `${LINKS.grafana_url}/d/mailroom-quality?var-run_id=${encodeURIComponent(r.run_id)}`,
-          "grafana ↗",
-          (ev) => ev.stopPropagation()
-        )
-      );
-      tr.appendChild(grafanaCell);
-      const phoenixCell = document.createElement("td");
-      phoenixCell.appendChild(
-        externalLink(LINKS.phoenix_url, "phoenix ↗", (ev) => ev.stopPropagation())
-      );
-      tr.appendChild(phoenixCell);
-      tr.onclick = () => loadCards(r.run_id);
-      tb.appendChild(tr);
-    }
-    if (!tb.children.length) tb.innerHTML = '<tr><td colspan="5" class="muted">no eval runs yet</td></tr>';
-  }
-
-  async function loadCards(runId) {
-    try {
-      const body = await api("/v1/runs/" + encodeURIComponent(runId) + "/cards");
-      $("cards").classList.remove("muted");
-      $("cards").textContent = JSON.stringify(body.cards, null, 2) || "[]";
-      if (!body.cards || !body.cards.length) {
-        $("cards").textContent = "no cards yet for " + runId + " (Task 21)";
-        $("cards").classList.add("muted");
-      }
-    } catch (err) { setError("cards", err); }
-  }
-
-  async function selectDocument(docId) {
-    $("auditDocId").value = docId;
-    try {
-      const body = await api("/v1/documents/" + encodeURIComponent(docId));
-      $("detail").classList.remove("muted");
-      $("detail").textContent = JSON.stringify(body, null, 2);
-    } catch (err) { setError("detail", err); }
-  }
-
-  async function verifyAudit() {
-    const docId = $("auditDocId").value.trim();
-    if (!docId) return;
-    try {
-      const body = await api("/v1/audit/" + encodeURIComponent(docId));
-      const ok = body.chain && body.chain.ok;
-      const summary = ok ? "chain OK" : "chain BROKEN at " + (body.chain && body.chain.broken_at);
-      $("auditResult").replaceChildren(
-        textSpan(summary, ok ? "ok" : "bad"),
-        document.createTextNode(" · " + (body.entries || []).length + " entries")
-      );
-    } catch (err) { setError("auditResult", err); }
-  }
-
-  async function refresh() {
-    try { await loadLinks(); } catch (err) { /* static defaults are fine */ }
-    try { await loadDocuments(); } catch (err) { setError("documents", err); }
-    try { await loadReview(); } catch (err) { setError("review", err); }
-    try { await loadRuns(); } catch (err) { setError("runs", err); }
-  }
-
-  $("refresh").onclick = refresh;
-  $("statusFilter").onchange = () => loadDocuments().catch((e) => setError("documents", e));
-  $("auditGo").onclick = verifyAudit;
-  $("token").oninput = refresh;
-  refresh();
-})();
+$('refresh').onclick = refresh;
+$('statusFilter').onchange = () => loadDocuments().catch((e) => setError('documents', e));
+$('auditGo').onclick = verifyAudit;
+$('token').oninput = refresh;
+refresh();
 </script>
 </body>
 </html>

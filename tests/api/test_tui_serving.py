@@ -84,3 +84,19 @@ def test_ui_unchanged(client):
 def test_ui_header_links_to_tui(client):
     """Verify the /ui header carries the tui link."""
     assert 'href="/tui"' in client.get("/ui").text
+
+
+def test_ui_page_imports_its_module(client):
+    """Verify /ui loads its pure helpers as an ES module (the tested seam)."""
+    assert "/ui/assets/app.js" in client.get("/ui").text
+
+
+def test_ui_module_served(client):
+    """Verify the /ui ES module is served for the browser to import."""
+    resp = client.get("/ui/assets/app.js")
+    assert resp.status_code == 200
+    assert "javascript" in resp.headers["content-type"]
+    assert "export function mergeLinks" in resp.text
+    # the per-run link expressions the page depends on live here now
+    assert "/tui#replay=run:" in resp.text
+    assert "/d/mailroom-quality?var-run_id=" in resp.text
