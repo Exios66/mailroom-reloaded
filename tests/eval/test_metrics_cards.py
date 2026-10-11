@@ -241,13 +241,13 @@ def test_card_reports_judge_and_field_scores_side_by_side():
     card = build_card("run-1", "contract", rows=rows)
     q = card["quality"]
     assert q["judge_mean"] == 0.9 and q["judge_graded"] == 1
-    assert q["overall_mean"] == 0.4  # deterministic field score, still reported
+    assert q["field_score_mean"] == 0.4  # deterministic field score, still reported
     assert q["micro_f1"] == 1.0  # F-measures retain their spot
     assert card["documents"][0]["score"] == 0.9
     assert card["documents"][0]["field_score"] == 0.4
     markdown = render_card_md(card)
     assert "Judge" in markdown
-    assert "Overall field score mean" in markdown
+    assert "Field score mean" in markdown
     assert "Micro precision / recall / F1 / F2" in markdown
 
 
@@ -283,7 +283,7 @@ def test_master_md_has_tables():
 @pytest.mark.parametrize("accuracy", [0.0, 0.75, None])
 def test_master_uses_maud_accuracy(accuracy):
     card = {"doc_type": "merger_agreement", "quality": {
-        "maud": {"accuracy": accuracy}, "overall_mean": 0.25,
+        "maud": {"accuracy": accuracy}, "field_score_mean": 0.25,
     }}
     master, _ = build_master(["run"], cards=[card])
     assert master["by_specialist"]["merger_agreement"]["score"] == (

@@ -282,18 +282,18 @@ def build_card(
                 if schema_values
                 else None
             ),
-            "overall_mean": (
+            "field_score_mean": (
                 round(statistics.mean(scorer_scores), 4)
                 if scorer_scores
                 else spec_kpi["suite_mean"]
             ),
-            "overall_sd": (
+            "field_score_sd": (
                 round(statistics.pstdev(scorer_scores), 4)
                 if len(scorer_scores) > 1
                 else spec_kpi["sd"]
             ),
-            "overall_min": min(scorer_scores) if scorer_scores else spec_kpi["min"],
-            "overall_max": max(scorer_scores) if scorer_scores else spec_kpi["max"],
+            "field_score_min": min(scorer_scores) if scorer_scores else spec_kpi["min"],
+            "field_score_max": max(scorer_scores) if scorer_scores else spec_kpi["max"],
             "judge_mean": (
                 round(statistics.mean(judge_scores), 4) if judge_scores else None
             ),
@@ -451,8 +451,8 @@ def render_card_md(card: Mapping[str, Any]) -> str:
         ),
         f"| Judge-graded documents | {quality.get('judge_graded')} |",
         (
-            f"| Overall field score mean (sd) | {_fmt(quality.get('overall_mean'))} "
-            f"({_fmt(quality.get('overall_sd'), 3)}) |"
+            f"| Field score mean (sd) | {_fmt(quality.get('field_score_mean'))} "
+            f"({_fmt(quality.get('field_score_sd'), 3)}) |"
         ),
         (
             f"| Micro precision / recall / F1 / F2 | {_fmt(quality.get('precision'), 3)} / "
@@ -537,7 +537,7 @@ def _card_score(card: Mapping[str, Any]) -> float | None:
     # The judge owns the headline score; fall back to the deterministic field score.
     if quality.get("judge_mean") is not None:
         return quality.get("judge_mean")
-    return quality.get("overall_mean")
+    return quality.get("field_score_mean")
 
 
 def _md_table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> list[str]:

@@ -261,7 +261,7 @@ def test_card_quality_reads_persisted_scores(engine, document, monkeypatch):
     monkeypatch.setattr(runner, "_engine", lambda: engine)
     card = build_card("run-x", "contract")
     assert card["quality"]["micro_f1"] == 1.0
-    assert card["quality"]["overall_mean"] == 1.0
+    assert card["quality"]["field_score_mean"] == 1.0
     assert card["documents"][0]["field_score"] == 1.0
 
 
