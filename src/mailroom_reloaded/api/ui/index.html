@@ -4,6 +4,23 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>mailroom · runs</title>
+  <script>
+    // Share /tui's saved theme (same origin, same localStorage key) so the two
+    // screens never disagree; /tui remains the only theme switcher. Dark is the
+    // brand default, so an absent or unknown value leaves the markup as it is.
+    try {
+      const saved = JSON.parse(localStorage.getItem('mailroom.tui.theme') || 'null');
+      const base = ['dark', 'light', 'hc'];
+      const phos = ['green', 'cyan'];
+      if (saved && base.includes(saved.theme)) {
+        document.documentElement.setAttribute('data-theme', saved.theme);
+        // as in /tui: hc drops the phosphor variant
+        if (saved.theme !== 'hc' && phos.includes(saved.phosphor)) {
+          document.documentElement.setAttribute('data-phosphor', saved.phosphor);
+        }
+      }
+    } catch (err) { /* keep the dark default */ }
+  </script>
   <link rel="icon" href="data:," />
   <!-- Same typeface and tokens as /tui, then this page's layout. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -27,6 +44,7 @@
   </header>
 
   <main>
+    <h1 class="sr-only">mailroom runs console</h1>
     <noscript><p class="hint">this page needs javascript; the <a href="/tui">terminal</a> and the <a href="/v1/documents">/v1 API</a> work without it.</p></noscript>
 
     <section class="span-2">
@@ -41,33 +59,33 @@
           <option>failed</option>
         </select>
       </div>
-      <table id="documents">
-        <thead><tr><th>doc_id</th><th>filename</th><th>type</th><th>status</th></tr></thead>
+      <table id="documents" aria-label="Documents">
+        <thead><tr><th scope="col">doc_id</th><th scope="col">filename</th><th scope="col">type</th><th scope="col">status</th></tr></thead>
         <tbody></tbody>
       </table>
     </section>
 
     <section>
       <h2>Review queue</h2>
-      <table id="review">
-        <thead><tr><th>doc_id</th><th>filename</th><th>type</th></tr></thead>
+      <table id="review" aria-label="Review queue">
+        <thead><tr><th scope="col">doc_id</th><th scope="col">filename</th><th scope="col">type</th></tr></thead>
         <tbody></tbody>
       </table>
     </section>
 
     <section class="span-2">
       <h2>Eval runs</h2>
-      <table id="runs">
-        <thead><tr><th>run_id</th><th>documents</th><th>replay</th><th>grafana</th><th>phoenix</th></tr></thead>
+      <table id="runs" aria-label="Eval runs">
+        <thead><tr><th scope="col">run_id</th><th scope="col">documents</th><th scope="col">replay</th><th scope="col">grafana</th><th scope="col">phoenix</th></tr></thead>
         <tbody></tbody>
       </table>
       <h2>Cards</h2>
-      <pre id="cards" class="muted">run not selected</pre>
+      <pre id="cards" class="muted" aria-live="polite">run not selected</pre>
     </section>
 
     <section>
       <h2>Document detail</h2>
-      <pre id="detail" class="muted">no document selected</pre>
+      <pre id="detail" class="muted" aria-live="polite">no document selected</pre>
     </section>
 
     <section>
@@ -77,7 +95,7 @@
         <input id="auditDocId" placeholder="doc_id" aria-label="doc_id to verify" />
         <button id="auditGo">verify</button>
       </div>
-      <div id="auditResult" class="muted">—</div>
+      <div id="auditResult" class="muted" aria-live="polite">—</div>
     </section>
   </main>
 
@@ -170,6 +188,23 @@ function emptyRow(tbody, cols, label) {
   tbody.appendChild(tr);
 }
 
+/**
+ * A clickable row's first cell: the row's action as a real button, so the
+ * keyboard and screen readers can reach it. The row keeps its own onclick as a
+ * mouse convenience; the button stops propagation so the action fires once.
+ */
+function openCell(id, kind, onOpen) {
+  const td = document.createElement('td');
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'linkish';
+  b.textContent = id || '—';
+  b.setAttribute('aria-label', ('open ' + kind + ' ' + (id || '')).trim());
+  b.onclick = (ev) => { ev.stopPropagation(); onOpen(); };
+  td.appendChild(b);
+  return td;
+}
+
 async function loadDocuments() {
   const status = $('statusFilter').value;
   const q = status ? ('?status=' + encodeURIComponent(status)) : '';
@@ -179,7 +214,8 @@ async function loadDocuments() {
   for (const d of body.documents || []) {
     const tr = document.createElement('tr');
     tr.className = 'clickable';
-    addTextCells(tr, [d.doc_id || '', d.filename || '', d.doc_type || '—']);
+    tr.appendChild(openCell(d.doc_id, 'document', () => selectDocument(d.doc_id)));
+    addTextCells(tr, [d.filename || '', d.doc_type || '—']);
     const statusCell = document.createElement('td');
     statusCell.appendChild(statusPillEl(d.status));
     tr.appendChild(statusCell);
@@ -196,7 +232,8 @@ async function loadReview() {
   for (const d of body.documents || []) {
     const tr = document.createElement('tr');
     tr.className = 'clickable';
-    addTextCells(tr, [d.doc_id || '', d.filename || '', d.doc_type || '—']);
+    tr.appendChild(openCell(d.doc_id, 'document', () => selectDocument(d.doc_id)));
+    addTextCells(tr, [d.filename || '', d.doc_type || '—']);
     tr.onclick = () => selectDocument(d.doc_id);
     tb.appendChild(tr);
   }
@@ -210,7 +247,8 @@ async function loadRuns() {
   for (const r of body.runs || []) {
     const tr = document.createElement('tr');
     tr.className = 'clickable';
-    addTextCells(tr, [r.run_id, r.documents ?? '—']);
+    tr.appendChild(openCell(r.run_id, 'run', () => loadCards(r.run_id)));
+    addTextCells(tr, [r.documents ?? '—']);
     const links = runLinks(LINKS, r.run_id);
     const replayCell = document.createElement('td');
     const replay = document.createElement('a');

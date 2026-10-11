@@ -119,6 +119,27 @@ def test_ui_stylesheet_served(client):
     assert "--obs-" not in resp.text
 
 
+def test_ui_page_is_accessible_by_construction(client):
+    """Pin the landmark, table names, live regions and focus ring the headless audit
+    checks, so a regression is caught without a browser."""
+    text = client.get("/ui").text
+    assert '<h1 class="sr-only">' in text
+    # detail/cards/audit result update asynchronously: each must announce itself
+    assert text.count('aria-live="polite"') == 3
+    # every header cell is scoped: documents 4 + review 3 + runs 5
+    assert text.count('scope="col"') == 12
+    for label in ("Documents", "Review queue", "Eval runs"):
+        assert f'aria-label="{label}"' in text
+    assert "outline: 2px solid var(--term-amber)" in client.get("/ui/assets/ui.css").text
+
+
+def test_ui_page_shares_the_tui_theme(client):
+    """Verify /ui reads the theme /tui persists instead of hardcoding dark."""
+    text = client.get("/ui").text
+    assert "mailroom.tui.theme" in text
+    assert "data-theme" in text
+
+
 def test_ui_module_served(client):
     """Verify the /ui ES module is served for the browser to import."""
     resp = client.get("/ui/assets/app.js")

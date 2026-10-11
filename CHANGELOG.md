@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `/ui` accessibility (`api/ui/index.html`, `api/ui/ui.css`): a page `h1`, an `aria-label` on each table with `scope="col"` headers, and `aria-live="polite"` on the document-detail / cards / audit-result regions. The real gap was the clickable rows: each row's action is now a real `<button>` (`.linkish`) so the keyboard and screen readers can reach it, with the row keeping its mouse `onclick`.
+- `/ui` reads the theme `/tui` persists (`mailroom.tui.theme`, same origin) instead of hardcoding dark, so the light and high-contrast themes now reach the runs console.
+
+### Fixed
+
+- `/ui` contrast and focus. On the dark theme the kit's `--term-fg-dim` is 4.0–4.3:1 — the vendored `tokens.css` documents this as a FLAG — and `/ui` was using it for real content (hints, placeholders, statuses); `/ui` now derives a passing dim locally (`--ui-dim`) and leaves the vendored file untouched, while light/hc keep the token as-is. The focus ring is 2px (was 1px) to meet WCAG 2.4.11's area minimum, and the reduced-motion block now covers animation as well as transition, as `tui.css` does.
+
 ## [0.4.2] - 2026-10-11
 
 ### Fixed
