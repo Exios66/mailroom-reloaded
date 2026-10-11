@@ -219,6 +219,7 @@ markers, `live` and `docker`.
 | Scoring | `tests/scoring/` | vendored dojo subset + upstream parity |
 | Schemas/Storage | `tests/schemas/`, `tests/storage/` | extraction schemas, audit chain, bins |
 | TUI | `tests/tui/` | Python engine/stations tests; JS under `tests/tui/js/` via `node --test` |
+| UI | `tests/ui/` | the `/ui` page's JS module (`api/ui/app.js`) via `node --test` |
 | Top-level | `tests/test_*.py` | dependency fence, prompt lock, settings, tools, watcher/review |
 
 Run:
@@ -230,6 +231,7 @@ uv run pytest tests/pipeline -v           # one tier
 MAILROOM_LIVE=1 uv run pytest -m live -v  # live tests (needs a configured provider)
 uv run ruff check .                       # lint (vendored scoring excluded)
 node --test tests/tui/js/*.test.mjs       # TUI JS unit tests
+node --test tests/ui/js/*.test.mjs        # /ui JS module unit tests
 uv run pytest tests/test_dependency_fence.py -q
 ```
 
@@ -400,6 +402,7 @@ parse an issue by heading. Field ids are stable; do not rename them.
 - **Gates for this repo:** `ruff check src tests`;
   `PYTHONPATH=src pytest -p no:cacheprovider tests -q`;
   `node --test tests/tui/js/*.test.mjs`;
+  `node --test tests/ui/js/*.test.mjs`;
   `scripts/tui_replay_check.mjs` for TUI changes; `scripts/docker_smoke.sh`
   (optional, only when `deploy/**` or a Dockerfile input changes; prune the build
   cache afterwards on a small disk). There are no GitHub Actions workflows (the
@@ -441,7 +444,7 @@ impersonate one; verify upstream docs before writing config.
 | Task type | Specialist subagent | Trigger surface | Deliverable | Evidence contract | Boundaries |
 | --- | --- | --- | --- | --- | --- |
 | Planning + dispatch of a multi-step mission | `orchestrator-governor` | "plan this", multi-file/multi-specialist work, a new card | Decomposed card(s): scope, owner, sync units, definition of done | The plan + which specialists were dispatched and why | Plans and delegates; does not implement specialist code itself |
-| API, TUI, board site (software/UI) | `software-ui` | `api/`, `api/ui/`, `api/tui/`, board-site assets | Code + tests; UI/JS kept textContent-only | The touched tier(s) green (`tests/api`, `node --test tests/tui/js/*`) | No prompt/model or credential changes |
+| API, TUI, board site (software/UI) | `software-ui` | `api/`, `api/ui/`, `api/tui/`, board-site assets | Code + tests; UI/JS kept textContent-only | The touched tier(s) green (`tests/api`, `node --test tests/tui/js/* tests/ui/js/*`) | No prompt/model or credential changes |
 | Repo hygiene, packaging, mirrors, sync units | `systems-repo-hygiene` | drift reports, package sync, wheel/packaging, path/ref rot | Clean `git status` for scope; sync evidence; regenerated artifacts | `git status --short`, sync `status`, `uv build`/import check | Never hand-edit a mirror; propagate only via the sync tooling |
 | Docs + board | `docs-board` (atom) | README/AGENTS/`docs/*`, `CHANGELOG.md`, `docs/superpowers/archive/DISCUSSION_BOARD.md`, wiki | Doc/changelog/board edit matching reality | Before/after drift sites + the gate command; board lane/Owner/Evidence | Docs/board only; never edits code to make docs true |
 | Code analysis / architecture tracing | `code-analysis` | "how does X route?", a change with unclear blast radius | A cited map of the code path (file:line) and risks | The traced path + any counterexample | Read-only; does not ship code |

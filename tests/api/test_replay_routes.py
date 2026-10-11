@@ -302,3 +302,34 @@ def test_live_row_cap_emits_error_frame_and_ends(client, monkeypatch):
     assert body.rstrip().endswith("}")
     assert body.index("event: error") > body.index("event: ready")
     assert _live_frame_names(body)[-1] == "error"
+
+
+def test_live_with_no_sessions_streams_error_frame(client, monkeypatch):
+    """With no sessions at all the stream says so and ends, rather than hanging."""
+    from mailroom_reloaded.obs.replay import sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "list_sessions", lambda *a, **k: [])
+    body = client.get("/v1/replay/live").text
+    assert '"detail": "no sessions"' in body
+
+
+def test_live_timeline_failure_streams_error_frame(client, monkeypatch):
+    """A timeline that raises mid-follow becomes one error frame, not a 500."""
+    from mailroom_reloaded.obs.replay import timeline as timeline_mod
+
+    monkeypatch.setattr(
+        timeline_mod,
+        "build_timeline",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    body = client.get(f"/v1/replay/live?session=run:{RUN}").text
+    assert '"detail": "no timeline"' in body
+
+
+def test_live_missing_timeline_streams_error_frame(client, monkeypatch):
+    """A timeline that vanishes becomes one error frame."""
+    from mailroom_reloaded.obs.replay import timeline as timeline_mod
+
+    monkeypatch.setattr(timeline_mod, "build_timeline", lambda *a, **k: None)
+    body = client.get(f"/v1/replay/live?session=run:{RUN}").text
+    assert '"detail": "no timeline"' in body

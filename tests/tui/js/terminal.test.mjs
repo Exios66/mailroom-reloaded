@@ -490,3 +490,26 @@ test('lines submitted during a takeover are queued', async () => {
   assert.ok(!t.texts().includes('ran'));
   view.release();
 });
+
+test('lines entered while a command runs are queued and drained in order', async () => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const t = mkTerm({ run: () => gate }); // the `slow` command blocks on the gate
+  t.type('slow');
+  t.key('Enter');
+  await tick(); // slow is now busy
+  t.type('echo');
+  t.key('Enter'); // queued, not run
+  t.type('echo');
+  t.key('Enter'); // queued
+  assert.equal(t.texts().filter((x) => x === 'ran').length, 0, 'nothing runs while busy');
+  release();
+  await tick();
+  await tick();
+  await tick();
+  assert.equal(
+    t.texts().filter((x) => x === 'ran').length,
+    2,
+    'both queued lines ran after the first finished'
+  );
+});

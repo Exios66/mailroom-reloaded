@@ -11,7 +11,7 @@ import { registerShell } from './commands/shell.js';
 import { createModuleHost } from './plugins.js';
 import { deepLinkCommand, deepLinkKind } from './deeplink.js';
 
-async function loadText(name) {
+export async function loadText(name) {
   try {
     const res = await fetch(`/tui/assets/${name}`);
     return res.ok ? await res.text() : '';
