@@ -11,6 +11,19 @@ terminal says so and prints nothing canned. A command that fails prints the reas
 `viewer error: <message>`, so nothing fails silently. `/tui` and its assets are public
 like `/ui`; `/v1` stays token-gated when `MAILROOM_API_TOKEN` is set.
 
+## `/ui` (runs console)
+
+`/ui` is the read-only runs console: documents (with a status filter), the review
+queue, eval runs with `replay ↗` / `grafana ↗` / `phoenix ↗` links, a document
+detail pane and an audit-verify box. It is the same Terminal edition as `/tui`: the
+page links the vendored `/tui/assets/tokens.css` for the palette and adds only
+`/ui/assets/ui.css` for layout, so both screens share one palette, the `light`/`hc`
+themes and the phosphor variants; headings, hairlines, 2–3 px radii, tables and
+status pills use the same `--term-*` tokens as `tui.css`. Its header is a status bar
+matching `/tui`'s, with the `tui ↗` sister link mirroring `/tui`'s `ui ↗` and the
+API-token field + `refresh` on the right. The HTML and its assets stay public while
+`/v1` is token-gated; the page renders only `textContent` (no `innerHTML`).
+
 ## Commands
 
 | Command | Usage | What it does |

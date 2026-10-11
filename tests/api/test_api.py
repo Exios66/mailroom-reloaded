@@ -270,7 +270,7 @@ def test_ui_served(client):
     assert "/ui/assets/app.js" in text  # the page loads its (unit-tested) module
     assert "ev.stopPropagation()" in text  # the link must not also open the cards
     assert "phoenix ↗" in text  # per-run Phoenix link
-    assert "td a { color:var(--accent)" in text  # run links in table cells are styled
+    assert 'href="/ui/assets/ui.css"' in text  # run-link styling lives in the /ui layout sheet
     assert "/links" in text  # the header links are refreshed from the public config
 
 

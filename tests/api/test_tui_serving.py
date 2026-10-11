@@ -91,6 +91,34 @@ def test_ui_page_imports_its_module(client):
     assert "/ui/assets/app.js" in client.get("/ui").text
 
 
+def test_ui_page_shares_the_terminal_tokens(client):
+    """Verify /ui links the vendored terminal tokens and its own layout sheet."""
+    text = client.get("/ui").text
+    assert 'href="/tui/assets/tokens.css"' in text
+    assert 'href="/ui/assets/ui.css"' in text
+
+
+def test_ui_page_keeps_the_ids_its_script_needs(client):
+    """Verify every element the page's inline script looks up still exists, and no markup path."""
+    text = client.get("/ui").text
+    for el_id in (
+        "token", "refresh", "statusFilter", "documents", "review", "auditDocId",
+        "auditGo", "auditResult", "runs", "cards", "detail", "phoenixLink", "grafanaLink",
+    ):
+        assert f'id="{el_id}"' in text, el_id
+    assert "innerHTML" not in text
+
+
+def test_ui_stylesheet_served(client):
+    """Verify the /ui layout sheet is served and only uses --term-* tokens."""
+    resp = client.get("/ui/assets/ui.css")
+    assert resp.status_code == 200
+    assert "css" in resp.headers["content-type"]
+    assert "--term-" in resp.text
+    # the terminal edition never mixes in the console/obs token sets
+    assert "--obs-" not in resp.text
+
+
 def test_ui_module_served(client):
     """Verify the /ui ES module is served for the browser to import."""
     resp = client.get("/ui/assets/app.js")
