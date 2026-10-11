@@ -11,9 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `/ui` accessibility (`api/ui/index.html`, `api/ui/ui.css`): a page `h1`, an `aria-label` on each table with `scope="col"` headers, and `aria-live="polite"` on the document-detail / cards / audit-result regions. The real gap was the clickable rows: each row's action is now a real `<button>` (`.linkish`) so the keyboard and screen readers can reach it, with the row keeping its mouse `onclick`.
 - `/ui` reads the theme `/tui` persists (`mailroom.tui.theme`, same origin) instead of hardcoding dark, so the light and high-contrast themes now reach the runs console.
+- `/tui` accessibility (`api/tui/index.html`, `api/tui/tui.css`): a page `h1` in the status-bar banner, the command line is now a `role="form"` landmark so its prompt and input are no longer page content outside one, and the scrollback (`#output`) is keyboard-focusable with a visible inset focus ring — it scrolls and holds no focusable content, so keyboard users previously could not scroll it at all.
 
 ### Fixed
 
+- `/tui` contrast: the same vendored dark `--term-fg-dim` (4.0–4.3:1) sits on real terminal content — boot lines, `ls` counts, kv keys, the status bar, the replay grid's `dim` station — so `/tui` derives a passing dim locally (`--tui-dim`) on dark only, exactly as `/ui` does. light/hc keep the token, and `tokens.css` is still untouched.
 - `/ui` contrast and focus. On the dark theme the kit's `--term-fg-dim` is 4.0–4.3:1 — the vendored `tokens.css` documents this as a FLAG — and `/ui` was using it for real content (hints, placeholders, statuses); `/ui` now derives a passing dim locally (`--ui-dim`) and leaves the vendored file untouched, while light/hc keep the token as-is. The focus ring is 2px (was 1px) to meet WCAG 2.4.11's area minimum, and the reduced-motion block now covers animation as well as transition, as `tui.css` does.
 
 ## [0.4.2] - 2026-10-11

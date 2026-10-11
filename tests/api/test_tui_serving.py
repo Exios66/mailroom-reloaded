@@ -140,6 +140,29 @@ def test_ui_page_shares_the_tui_theme(client):
     assert "data-theme" in text
 
 
+def test_tui_page_is_accessible_by_construction(client):
+    """Pin the landmark, heading, focusable scrollback and prompt landmark the headless
+    audit checks, so a regression is caught without a browser."""
+    text = client.get("/tui").text
+    # the h1 lives in the banner landmark, not in #output (which the trimmer and `clear` empty)
+    assert '<header class="status-bar"><h1 class="sr-only">' in text
+    # the scrollback scrolls, so keyboard users must be able to focus and scroll it
+    assert 'id="output"' in text and 'tabindex="0"' in text
+    # the command line is a landmark, so its prompt and input are not loose page content
+    assert 'role="form"' in text and 'aria-label="terminal command"' in text
+
+    css = client.get("/tui/assets/tui.css").text
+    assert ".sr-only" in css
+    # the dark theme derives an AA dim locally; the vendored token is only the light/hc value
+    assert "--tui-dim: var(--term-fg-dim)" in css
+    assert ':root[data-theme="dark"]' in css and "color-mix" in css
+    assert ".dim { color: var(--tui-dim); }" in css
+    # a focusable scrollback needs a visible indicator
+    assert ".terminal:focus-visible" in css
+    # and the vendored kit bytes stay upstream, still carrying its own flagged value
+    assert "--term-fg-dim: #6b7585" in client.get("/tui/assets/tokens.css").text
+
+
 def test_ui_module_served(client):
     """Verify the /ui ES module is served for the browser to import."""
     resp = client.get("/ui/assets/app.js")

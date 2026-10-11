@@ -12,10 +12,16 @@
   <link rel="stylesheet" href="/tui/assets/tui.css">
 </head>
 <body>
+  <!-- The page h1 sits inside the header so it stays within a landmark (and out of
+       #output, which the scrollback trimmer and `clear` empty). Visually hidden. -->
+  <header class="status-bar"><h1 class="sr-only">mailroom terminal</h1></header>
   <div class="ambient-skyline" aria-hidden="true"></div>
-  <header class="status-bar"></header>
-  <main id="output" class="terminal" aria-live="polite"></main>
-  <div class="prompt-line"></div>
+  <!-- tabindex: the scrollback scrolls, so keyboard users must be able to focus and
+       scroll it (axe scrollable-region-focusable); it holds no focusable content. -->
+  <main id="output" class="terminal" aria-live="polite" tabindex="0"></main>
+  <!-- role=form: the command line is a landmark, so its prompt and input are not
+       page content outside one. The class is unchanged for terminal.js. -->
+  <div class="prompt-line" role="form" aria-label="terminal command"></div>
   <div class="grain" aria-hidden="true"></div>
   <div class="crt-overlay" aria-hidden="true"></div>
   <noscript><p class="line">tui needs javascript — the runs page works without it: <a href="/ui">/ui</a></p></noscript>
