@@ -1,5 +1,7 @@
 # mailroom-reloaded
 
+> **Branch note:** this branch preserves the offline ingress simulator (`mailroom sandbox serve`, `make sandbox`) exactly as it was on `main` at tag `pre-trim`. It pairs with `Exios66/mailroom-sandbox-content`. `main` no longer carries the simulator (see issue #98).
+
 The compressed, deployment-ready **Digital Mailroom**: a CrewAI-Flows pipeline
 that ingests documents, classifies and extracts them, and archives them with a
 verifiable audit chain — plus an evaluation harness that scores runs against
