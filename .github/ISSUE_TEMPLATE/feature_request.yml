@@ -40,6 +40,6 @@ body:
     id: plan_item
     attributes:
       label: Master plan item
-      description: Item id in docs/superpowers/plans/2026-10-09-mailroom-core-plan.md (for example R-13), if any.
+      description: Item id in docs/superpowers/plans/v1.md, if any.
     validations:
       required: false
