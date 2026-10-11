@@ -3,18 +3,17 @@
 This is the governance and operating contract for **any** AI agent (OpenCode,
 Cursor, Claude Code, Codex) working in this repository. Read it first, every
 session. It is the truth for *how to work here*; `docs/` is the truth for
-*behavior*, and `DISCUSSION_BOARD.md` is the work log.
+*behavior*, and `docs/superpowers/archive/DISCUSSION_BOARD.md` (history only) is the work log.
 
 - **Canonical checkout:** a clone of `Exios66/mailroom-reloaded`. Work happens
   on a feature branch cut from `main` (see §8.1); `main` is the only
   long-lived branch.
-- **Master plan:** `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md` is
-  the single source of truth for what is done and what remains (item ids such
-  as `R-13`). Cite item ids in issues and PRs; update the plan in the same PR
-  that completes an item.
+- **Plan:** `docs/superpowers/plans/v1.md` (one page). New work must trace to an
+  eval finding or an issue listed there. Do not add workstreams to the plan; open
+  an issue instead. Older plans are history under `docs/superpowers/archive/`.
 - If a statement here conflicts with `README.md`, `docs/ARCHITECTURE.md`, the
   design spec (`docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`)
-  or the plan (`docs/superpowers/plans/2026-10-07-mailroom-reloaded.md`), the
+  or the plan (`docs/superpowers/plans/v1.md`), the
   more specific document wins, and this file must be corrected in the same
   change that reveals the conflict.
 
@@ -42,7 +41,7 @@ scores runs against `Lucius-Morningstar/mailroom-dataset`.
    under (OpenCode / Cursor / Claude Code / Codex) and the absolute path of the
    checkout you consider canonical. Do not silently operate in a mirror.
 2. **Read the governing documents for the mission scope**, in order:
-   `AGENTS.md` (this file) → `DISCUSSION_BOARD.md` (work log) → the relevant
+   `AGENTS.md` (this file) → `docs/superpowers/archive/DISCUSSION_BOARD.md` (work log, history only) → the relevant
    `docs/*.md` → the plan/spec under `docs/superpowers/`. For a package task,
    also read that package's own `AGENTS.md`/README if one exists.
 3. **Prefer read-only inspection and cheap mocks before live spend or deploy.**
@@ -135,7 +134,7 @@ ingest ─▶ bert_primary ─▶ sort ─▶ gate_classify ─┬─▶ extract
 | `deploy/` | Dockerfiles, compose files (base/dev), OTel collector, Prometheus, Grafana, Modal vLLM. |
 | `docs/` | Operator + design docs; `docs/superpowers/{plans,specs,reviews}`. |
 | `data/` | Local runtime state (gitignored): bins, SQLite, manifests, models, runs. |
-| `DISCUSSION_BOARD.md` | Agent work log: what landed, files, evidence, commit SHA. |
+| `docs/superpowers/archive/DISCUSSION_BOARD.md` | Agent work log (history): what landed, files, evidence, commit SHA. |
 | `CHANGELOG.md` | Keep-a-Changelog `[Unreleased]` + release sections. |
 | `Makefile` | Thin wrappers over `scripts/` and `uv` (see §5). |
 | `pyproject.toml` | Dependencies/extras, `mailroom` console script, pytest/ruff config. |
@@ -444,7 +443,7 @@ impersonate one; verify upstream docs before writing config.
 | Planning + dispatch of a multi-step mission | `orchestrator-governor` | "plan this", multi-file/multi-specialist work, a new card | Decomposed card(s): scope, owner, sync units, definition of done | The plan + which specialists were dispatched and why | Plans and delegates; does not implement specialist code itself |
 | API, TUI, board site (software/UI) | `software-ui` | `api/`, `api/ui/`, `api/tui/`, board-site assets | Code + tests; UI/JS kept textContent-only | The touched tier(s) green (`tests/api`, `node --test tests/tui/js/*`) | No prompt/model or credential changes |
 | Repo hygiene, packaging, mirrors, sync units | `systems-repo-hygiene` | drift reports, package sync, wheel/packaging, path/ref rot | Clean `git status` for scope; sync evidence; regenerated artifacts | `git status --short`, sync `status`, `uv build`/import check | Never hand-edit a mirror; propagate only via the sync tooling |
-| Docs + board | `docs-board` (atom) | README/AGENTS/`docs/*`, `CHANGELOG.md`, `DISCUSSION_BOARD.md`, wiki | Doc/changelog/board edit matching reality | Before/after drift sites + the gate command; board lane/Owner/Evidence | Docs/board only; never edits code to make docs true |
+| Docs + board | `docs-board` (atom) | README/AGENTS/`docs/*`, `CHANGELOG.md`, `docs/superpowers/archive/DISCUSSION_BOARD.md`, wiki | Doc/changelog/board edit matching reality | Before/after drift sites + the gate command; board lane/Owner/Evidence | Docs/board only; never edits code to make docs true |
 | Code analysis / architecture tracing | `code-analysis` | "how does X route?", a change with unclear blast radius | A cited map of the code path (file:line) and risks | The traced path + any counterexample | Read-only; does not ship code |
 | Test-suite auditing / adversarial review | `test-suite-auditor` | new suite, coverage gap, "review this PR", vacuous-pass risk | Findings with a verdict (accept/revise) + missing-test list | Each claim reproduced by a named test/command; no fabrication | Reviews; the caller applies fixes |
 | Data + databases (SQLite, schemas, storage) | `data-databases` | `storage/`, `schemas/`, migrations, chain/queries | Schema/query change + tests; back-compat note | `tests/schemas`, `tests/storage`, chain-verify output | No live data loss; derived files regenerated, not hand-edited |
@@ -502,11 +501,11 @@ Dispatch laws:
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — watcher, review, audit/ledger, observability, failure modes.
 - [docs/RUNBOOK.md](docs/RUNBOOK.md) — clone-to-demo paths A/B/C.
 - [docs/TESTING.md](docs/TESTING.md) — tiers, `live` marker, dependency fence, parity.
-- [docs/superpowers/plans/2026-10-09-mailroom-core-plan.md](docs/superpowers/plans/2026-10-09-mailroom-core-plan.md) — master plan: status, item ids, decisions.
+- [docs/superpowers/plans/v1.md](docs/superpowers/plans/v1.md) — the one-page plan.
 - [docs/TUI.md](docs/TUI.md) — `/tui` commands, replay viewer, themes, auth.
 - [docs/gmail-intake.md](docs/gmail-intake.md) — Gmail intake setup and limits.
 - [deploy/README.md](deploy/README.md) — Modal vLLM deployment and teardown.
-- [DISCUSSION_BOARD.md](DISCUSSION_BOARD.md) — agent work log (newest first).
+- [docs/superpowers/archive/DISCUSSION_BOARD.md](docs/superpowers/archive/DISCUSSION_BOARD.md) — agent work log (history).
 - [CHANGELOG.md](CHANGELOG.md) — Keep a Changelog.
 - [docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md](docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md)
   and [docs/superpowers/plans/](docs/superpowers/plans/) — design and plans.

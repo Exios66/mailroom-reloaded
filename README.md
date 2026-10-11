@@ -192,8 +192,7 @@ and click through to Phoenix (`:6006`) and Grafana (`:3000`).
 - [docs/DEV_SERVER.md](docs/DEV_SERVER.md) — local dev-server workflow.
 - [deploy/README.md](deploy/README.md) — Modal vLLM deployment.
 - Design: `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`.
-- Plan (single live plan, status ledger and file-placement rules):
-  `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`. Superseded plans:
+- Plan: `docs/superpowers/plans/v1.md` (one page). Older plans and the work log:
   `docs/superpowers/archive/`.
 
 ## Tests
