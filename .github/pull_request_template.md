@@ -26,8 +26,7 @@
 <!-- Tick what you actually ran; note every skip under "Not verified". -->
 
 - [ ] `ruff check src tests`
-- [ ] `PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox`
-- [ ] `pytest tests/sandbox -q` (sandbox changes)
+- [ ] `PYTHONPATH=src pytest -p no:cacheprovider tests -q`
 - [ ] `node --test tests/tui/js/*.test.mjs`
 - [ ] `scripts/tui_replay_check.mjs` browser check (TUI changes)
 
@@ -53,7 +52,6 @@ agent-report:
   gates:
     ruff: pass|fail|skipped
     pytest: pass|fail|skipped
-    pytest_sandbox: pass|fail|skipped
     node_test: pass|fail|skipped
     browser_check: pass|fail|skipped
   coderabbit: addressed|pending|none

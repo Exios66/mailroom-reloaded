@@ -28,23 +28,13 @@ archives them with a verifiable audit chain, plus an evaluation harness that
 scores runs against `Lucius-Morningstar/mailroom-dataset`.
 
 - **Dev source of truth.** This checkout is where all code, docs, schemas and
-  contracts are authored and reviewed. Do not treat a deployed image, a
-  `data/` tree or a sandbox state dir as authoritative.
-- **Two-repo sandbox split.** This repo owns the *contracts* (top-level
-  `schemas/`, loader, server, tests); the content lives in
-  `Exios66/mailroom-sandbox-content`. The **content pack is consumed, never
-  edited here**: it is pinned by `sandbox/content.lock` (repo, tag, commit,
-  `bundle_sha256`, `schema_version`, `dataset_revision`) and pulled with
-  `mailroom sandbox content pull`. Never hand-edit a pulled bundle or rewrite
-  the lock by hand — use `mailroom sandbox content bump`.
+  contracts are authored and reviewed. Do not treat a deployed image or a
+  `data/` tree as authoritative.
 - **Package/release law (DMR-074).** Where an external package repo mirrors a
   subtree, the monorepo is the dev source of truth and propagation is via the
   packaging/sync tooling — never by hand-editing a mirror or pushing a
   standalone repo directly. A deliverable that must reach an external repo is a
   **sync unit on the card**: plan it, execute it, and cite the sync evidence.
-- **Two capabilities live on `main`** (see §7.6 and §7.7): the
-  **Boss mailbox** (a durable Correspondent↔Boss channel over the sandbox API)
-  and **held-out scenarios** (`mailroom sandbox conformance --heldout`).
 
 ## 2. Startup ritual (every session)
 
@@ -56,9 +46,9 @@ scores runs against `Lucius-Morningstar/mailroom-dataset`.
    `docs/*.md` → the plan/spec under `docs/superpowers/`. For a package task,
    also read that package's own `AGENTS.md`/README if one exists.
 3. **Prefer read-only inspection and cheap mocks before live spend or deploy.**
-   The default provider is `mock`; the sandbox runs offline on an in-process
-   mock LLM. Do not reach for a live provider, a GPU, Modal, or a network pull
-   until a cheaper path has been ruled out and the task actually needs it.
+   The default provider is `mock`. Do not reach for a live provider, a GPU,
+   Modal, or a network pull until a cheaper path has been ruled out and the task
+   actually needs it.
 4. **Claim before you edit.** For board-tracked work, claim the card (lane +
    Owner) before touching code; label before code; close with proof.
 5. **Do not run git write commands** (add/commit/checkout/push/tag) unless the
@@ -110,28 +100,6 @@ ingest ─▶ bert_primary ─▶ sort ─▶ gate_classify ─┬─▶ extract
 | boss | `agents/boss.py` | Escalation / class reassignment | yes |
 | jev | `agents/jev.py` | Opt-in calibrated decision model backing the gate | yes (opt-in) |
 
-### 3.3 Sandbox: Correspondent + Boss-Desk
-
-The offline ingress simulator (`src/mailroom_reloaded/sandbox/server/`) runs two
-flows on the same simulated message:
-
-- **Flow A — Correspondent:** a clearly labelled deterministic **stand-in**
-  (`correspondent.py`, `rule-based-standin/v2`) behind the replaceable
-  `CorrespondentAgent` interface. It performs pre-filter, safety screen, trust
-  level, intent, signals, attachment lanes, relation proposals and drafts.
-  Intent is chosen by the scored triage in `triage.py` (intent lexicons, abstain
-  path). `llm_correspondent.py` is an optional, default-off Correspondent that
-  delegates only the triage step to a loopback endpoint and falls back to the
-  rules on any failure.
-- **Boss Desk:** a stand-in (`bossdesk.py`, `rule-based-standin-bossdesk/v1`)
-  that turns a Correspondent result into typed Boss actions from
-  `protocol/delegation_matrix.csv`.
-- **Flow B — the real pipeline:** runs in-process in an isolated data dir on an
-  offline mock LLM (`pipeline_runner.py`, `mock_llm.py`). Dataset-draw attachments
-  are materialised as deterministic placeholder PDFs (`synthetic.py`).
-- **Boss mailbox:** a durable, append-only SQLite two-way channel between the
-  Correspondent and the Boss (`sandbox/server/mailbox.py`; see §7.6).
-
 ### 3.4 How a task routes to a surface
 
 | If the task concerns… | Work surface |
@@ -140,8 +108,6 @@ flows on the same simulated message:
 | A model-backed agent or prompt | `src/mailroom_reloaded/agents/`, `prompts/`, `config/taxonomy.yaml` |
 | API / read surface | `src/mailroom_reloaded/api/` |
 | Browser UIs | `src/mailroom_reloaded/api/ui/` (`/ui`), `src/mailroom_reloaded/api/tui/` (`/tui`) |
-| Sandbox server / Correspondent / triage / LLM Correspondent / Boss Desk / mailbox | `src/mailroom_reloaded/sandbox/server/` |
-| Content contracts / loader / pin | top-level `schemas/`, `src/mailroom_reloaded/sandbox/content/`, `sandbox/content.lock` |
 | Evaluation / cards / calibration | `src/mailroom_reloaded/eval/`, `cli.py` (`eval`, `card`, `train-gate`, `conformance`) |
 | Observability / replay / ledger | `src/mailroom_reloaded/obs/`, `storage/{ledger,span_store,retention,anchor}.py` |
 | Deploy / compose / Modal | `deploy/` |
@@ -160,16 +126,13 @@ flows on the same simulated message:
 | `src/mailroom_reloaded/obs/` | OpenTelemetry + OpenInference tracing, metrics, run context, scores. |
 | `src/mailroom_reloaded/pipeline/` | `state.py`, `flow.py` (`MailroomFlow`), `guards.py`, `report.py`, `archivist.py`. |
 | `src/mailroom_reloaded/prompts/` | Frozen prompts: `frozen_v1/`, `sand37/`, sorter/judge/boss/arbiter, `loader.py`, `lineage.json`. |
-| `src/mailroom_reloaded/sandbox/` | `content/` (loader, compat, lock, bundle, CLI), `server/` (offline ingress sim; `triage.py` scored intent triage, `llm_correspondent.py` optional loopback LLM Correspondent, `synthetic.py` placeholder PDFs, `conformance.py` + LOFO, `mailbox.py`), `fixtures/` (smoke + vendored policy), `showcase/`. |
 | `src/mailroom_reloaded/schemas/` | Extraction response schemas, manifest, audit, ledger models. |
 | `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` v0.21.0 subset (`PARITY.md`); lint-excluded. |
 | `src/mailroom_reloaded/storage/` | Bins, SQLite DB/catalog/audit, ledger, span store, retention, anchor. |
 | `src/mailroom_reloaded/config/` | `taxonomy.yaml` — classes, field types, bands, agents, maps. |
-| `schemas/` | JSON Schema contracts (scenario v2, registry v1, overlay, gen_spec, persona_behavior, enums, `content_files.json`). |
-| `sandbox/content.lock` | The content pin (repo/tag/commit/sha256/schema_version/dataset_revision). |
-| `scripts/` | Dev/sandbox/smoke helpers and JEV harvest tools (see §5). |
+| `scripts/` | Dev/smoke helpers and JEV harvest tools (see §5). |
 | `tests/` | Tiered test suite (see §6). |
-| `deploy/` | Dockerfiles, compose files (base/dev/sandbox), OTel collector, Prometheus, Grafana, Modal vLLM. |
+| `deploy/` | Dockerfiles, compose files (base/dev), OTel collector, Prometheus, Grafana, Modal vLLM. |
 | `docs/` | Operator + design docs; `docs/superpowers/{plans,specs,reviews}`. |
 | `data/` | Local runtime state (gitignored): bins, SQLite, manifests, models, runs. |
 | `DISCUSSION_BOARD.md` | Agent work log: what landed, files, evidence, commit SHA. |
@@ -191,16 +154,13 @@ flows on the same simulated message:
 | `make dev-status` | `scripts/dev.sh status` |
 | `make dev-reset` | `scripts/dev.sh reset` |
 | `make dev-test` | `scripts/dev_test.sh` |
-| `make sandbox` | `scripts/sandbox.sh run` |
-| `make sandbox-down` | `scripts/sandbox.sh down` |
-| `make sandbox-status` | `scripts/sandbox.sh status` |
 | `make lint` | `uv run ruff check .` |
 | `make test` | `uv run pytest` |
 | `make smoke` | `scripts/dev.sh smoke` |
 | `make eval` | `uv run mailroom eval` |
 | `make gmail` | `uv run mailroom gmail` |
 
-### 5.2 `mailroom` CLI groups (defined in `src/mailroom_reloaded/cli.py` + the two sandbox CLIs)
+### 5.2 `mailroom` CLI groups (defined in `src/mailroom_reloaded/cli.py`)
 
 Console script `mailroom = mailroom_reloaded.cli:main` (`pyproject.toml`). There
 is **no `mailroom tui` subcommand** — `/tui` is a browser route served by the
@@ -223,13 +183,6 @@ API (see §7.5).
 | `mailroom gmail auth` | OAuth installed-app flow; caches a token. |
 | `mailroom gmail poll [--limit] [--process/--no-process] [--worker-id]` | Fetch Gmail attachments into `inbox/`. |
 | `mailroom gmail watch [--interval] [--limit] [--process/--no-process] [--worker-id]` | Poll Gmail on an interval until Ctrl-C. |
-| `mailroom sandbox serve [--host] [--port] [--content smoke\|locked\|<dir>] [--data-dir] [--egress closed\|egress] [--autonomy human\|sandbox] [--expected/--no-expected]` | Offline ingress sandbox. |
-| `mailroom sandbox conformance [--content] [--data-dir] [--json] [--only ID]... [--heldout] [--slim] [--lofo PATH]` | Isolated-scenario conformance + LOFO tables. |
-| `mailroom sandbox content status [--lock]` | Pin, smoke version/tag match, validity, scenario count. |
-| `mailroom sandbox content validate [path]` | Validate a content dir (default: committed smoke). |
-| `mailroom sandbox content pull (--from-bundle \| --from-dir \| --url) [--allow-network] [--dest] [--lock]` | Materialize pinned content. |
-| `mailroom sandbox content build [--from-dir] [--out]` | Validate content and regenerate smoke fixtures via its `tools/export_smoke.py`. |
-| `mailroom sandbox content bump --bundle B --tag T --commit C [--lock]` | Rewrite `content.lock` for a new bundle. |
 
 ### 5.3 `scripts/`
 
@@ -237,8 +190,6 @@ API (see §7.5).
 | --- | --- |
 | `scripts/dev.sh` | `up`, `down`, `logs`, `ps`, `reset`, `status`, `smoke` (docker-compose dev stack). |
 | `scripts/dev_test.sh` | `[--live] [--no-lint] [-- <pytest args>]`; the only entry point that runs `uv sync`. |
-| `scripts/sandbox.sh` | `up [--expose]`, `down`, `status`, `logs`, `run`, `smoke`, `reset`. |
-| `scripts/sandbox_lofo.sh` | `<content dir> [out_dir]` — leave-one-family-out conformance report. |
 | `scripts/smoke.sh` | End-to-end compose smoke (copies a fixture into the app inbox; prints `SMOKE OK`). |
 | `scripts/tui_dev.sh` | `up`, `down`, `status` — host-only mock stack for `/tui` (no Docker). |
 | `scripts/tui_replay_check.mjs` | Headless-browser check of the replay viewer. |
@@ -268,7 +219,6 @@ markers, `live` and `docker`.
 | LLM | `tests/llm/` | client resolve/structured calls, tooling, retry |
 | Scoring | `tests/scoring/` | vendored dojo subset + upstream parity |
 | Schemas/Storage | `tests/schemas/`, `tests/storage/` | extraction schemas, audit chain, bins |
-| Sandbox | `tests/sandbox/` | content loader/pin, sandbox API, Correspondent, triage (`test_server_triage.py`), LLM Correspondent (`test_server_llm_correspondent.py`), ingress/egress, conformance, mailbox, UI |
 | TUI | `tests/tui/` | Python engine/stations tests; JS under `tests/tui/js/` via `node --test` |
 | Top-level | `tests/test_*.py` | dependency fence, prompt lock, settings, tools, watcher/review |
 
@@ -296,7 +246,7 @@ uv run pytest tests/test_dependency_fence.py -q
 - **Prompt lock.** `tests/test_prompts.py` verifies every vendored prompt's
   sha256 against `lineage.json`.
 - **Extras:** `bert`, `eval`, `gmail`, `embeddings`, `deploy`, `anchor`,
-  `sandbox`, `dev`, `parity` (`pyproject.toml`). Never `uv sync --all-extras`
+  `dev`, `parity` (`pyproject.toml`). Never `uv sync --all-extras`
   (torch).
 
 ## 7. Workflows
@@ -315,20 +265,6 @@ Brings up `app` (`--reload`), a **separate** `watcher`, the `mock` provider,
 `otel-collector`, `phoenix`, `prometheus`, `grafana`. All ports loopback.
 Never run the embedded watcher and the standalone watcher against the same data
 dir (the `watcher.lock` flock admits one draining process).
-
-### 7.2 Offline sandbox (smoke vs locked content)
-
-```bash
-scripts/sandbox.sh run                 # or: make sandbox — host mode, uv, :8100
-scripts/sandbox.sh smoke               # inject A1 + E1, print trace summary
-SANDBOX_CONTENT=locked scripts/sandbox.sh run
-```
-
-- `smoke` = committed fixtures under `src/mailroom_reloaded/sandbox/fixtures/smoke/`.
-- `locked` = the `content.lock` pull result (verify + point at it with
-  `SANDBOX_CONTENT`; the server never downloads).
-- Network is blocked while it runs (`sandbox/server/guard.py`); outbound mail is
-  captured, never sent. See `docs/SANDBOX_SERVER.md` for what is real vs stand-in.
 
 ### 7.3 Evaluation posture
 
@@ -364,53 +300,6 @@ Needs the `gmail` extra; OAuth token/state live under the base dir
   watcher; state under `data/tui-dev/`). `JEV=1` also starts/calibrates the mock
   Jev.
 
-### 7.6 Boss mailbox
-
-A named, durable, two-way Correspondent↔Boss channel stored in the sandbox data
-dir as `boss_mailbox.sqlite` (`src/mailroom_reloaded/sandbox/server/mailbox.py`;
-wired in `service.py`). Entries are append-only (DB triggers reject UPDATE and
-DELETE); status changes (`new → read → acted | expired`) go to a separate
-append-only status log and are mirrored as `mailbox.*` events. Reading it as an
-operator changes nothing.
-
-Sandbox API surface (`/api/sandbox/v1`, bearer-token gated when
-`MAILROOM_API_TOKEN` is set):
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/boss/mailbox` | List entries (filters: `direction`, `role`, `thread`, `message`, `status`, `kind`, `since`, `limit`); never marks read. |
-| GET | `/boss/mailbox/{entry_id}` | One entry + status history; 404 if absent. |
-| GET | `/boss/pending` | Pending review cases + count; no state change. |
-| GET | `/boss/decisions` | Non-pending review cases + count. |
-| POST | `/boss/decisions` | Record a decision (`legitimate` / `quarantine`, optional `category`) and apply release/quarantine effects; 404/409/403 as documented. |
-
-The sandbox `/ui` exposes a mailbox panel (`sandbox/server/ui/mailbox.js`).
-Tests: `tests/sandbox/test_server_boss_review.py`,
-`tests/sandbox/test_server_ui_mailbox.py`.
-
-### 7.7 Held-out scenarios
-
-A held-out scenario is one the Correspondent was not tuned against; its pass
-rate is the honest generalization number. Protocol: `docs/HELD_OUT_SCENARIOS.md`.
-
-- Naming: the **`H` series**, `^[A-HST][0-9]+_[a-z0-9_]+$` (e.g.
-  `H1_heldout_status_confirm`); `schemas/scenario.v2.json` reserves `H` for this.
-- Tag every held-out scenario `heldout` and freeze it (`status: frozen` + a seed).
-- Run only the frozen batch and report the held-out rate + LOFO:
-
-```bash
-uv run --extra sandbox mailroom sandbox conformance --content <pack> --heldout
-uv run --extra sandbox mailroom sandbox conformance \
-  --content <pack> --heldout --json /tmp/heldout.json --slim
-```
-
-Without `--heldout`, the harness falls back to the positional split
-(`index % 3 == 2`), which is **not** a clean measure once those scenarios have
-been read. Template:
-`tests/sandbox/examples/scenario_H1_template.yaml`. A HELD-OUT RATE IS NOT
-AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
-(commit SHA, author, unchanged since).
-
 ## 8. Conventions
 
 - **Python.** `requires-python = ">=3.11,<3.13"`. Keep `ruff check .` clean.
@@ -423,7 +312,7 @@ AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
 - **Commit messages (observed, not enforced).** The repo mixes **Conventional
   Commits scopes** with plain imperative subjects:
   - `feat(<scope>): …`, `fix(<scope>): …`, `test(<scope>): …`, `docs: …`,
-    `docs(<scope>): …` — scopes seen: `tui`, `sandbox`, `replay`, `obs`, `jev`,
+    `docs(<scope>): …` — scopes seen: `tui`, `replay`, `obs`, `jev`,
     `anchor`, `metrics`, `ledger`, `deploy`, `board`, `plans`, `review`, `llm`.
   - Plain subjects like `Add /ui replay links and #replay= deep link in /tui`,
     `Replay viewer: …`, `Generate docstrings for PR #28`.
@@ -435,10 +324,6 @@ AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
 - **Changelog.** `CHANGELOG.md` follows Keep a Changelog; behavior-changing
   work adds its `[Unreleased]` entry **in the same change**, naming files and
   the numbers that motivated it. Docs-only changes declare themselves as such.
-- **Content pinning.** `sandbox/content.lock` is the single pin; consumers never
-  track a branch. Schema MAJOR must match `content.json.schema_version`; a
-  consumer refuses a mismatched major. Change the pin only via
-  `mailroom sandbox content bump` (never by hand).
 - **Targeted staging.** Stage only the files in the card's scope; never
   reformat or reflow unrelated files.
 - **No GitHub Actions assumptions.** Do not assume a CI runner exists for your
@@ -447,7 +332,7 @@ AVERAGED WITH TUNING-FAMILY RATES; report the counts and the freeze provenance
 - **Timestamps.** UTC ISO-8601 (`%Y-%m-%dT%H:%M:%SZ`) in evidence and Owner
   cells; bare dates are UTC by convention.
 - **Derived artifacts.** Never hand-edit generated/derived files — regenerate
-  them (e.g. smoke fixtures via `mailroom sandbox content build`).
+  them.
 
 ### 8.1 Git, branches, PRs and review
 
@@ -509,17 +394,13 @@ parse an issue by heading. Field ids are stable; do not rename them.
 - **PR template.** `.github/pull_request_template.md` ends with a fenced
   `agent-report` YAML block (`schema: 1`) with `change_type`, `scopes`,
   `linked_issues`, `plan_items`, `stack_parent`, `gates`
-  (`ruff`, `pytest`, `pytest_sandbox`, `node_test`, `browser_check`: each
+  (`ruff`, `pytest`, `node_test`, `browser_check`: each
   `pass|fail|skipped`), `coderabbit`, `not_verified`, `follow_ups`. Keep the exact
   shape, fill every key (`null` or `[]` when empty), and never mark a gate
-  `pass` you did not run. The content repo uses the same block shape with its own
-  gate keys. A PR that changes root `schemas/` must state the content-repo mirror
-  follow-up (K-05) and the merge order (**this repo first, then the content
-  mirror**), so `tools/check_schema_drift.py` in the content repo clears.
+  `pass` you did not run.
 - **Gates for this repo:** `ruff check src tests`;
-  `PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox`;
-  `pytest tests/sandbox -q` for sandbox changes;
-  `node --test tests/tui/js/*.test.mjs` (and `tests/sandbox/js/*.test.mjs`);
+  `PYTHONPATH=src pytest -p no:cacheprovider tests -q`;
+  `node --test tests/tui/js/*.test.mjs`;
   `scripts/tui_replay_check.mjs` for TUI changes; `scripts/docker_smoke.sh`
   (optional, only when `deploy/**` or a Dockerfile input changes; prune the build
   cache afterwards on a small disk). There are no GitHub Actions workflows (the
@@ -561,7 +442,7 @@ impersonate one; verify upstream docs before writing config.
 | Task type | Specialist subagent | Trigger surface | Deliverable | Evidence contract | Boundaries |
 | --- | --- | --- | --- | --- | --- |
 | Planning + dispatch of a multi-step mission | `orchestrator-governor` | "plan this", multi-file/multi-specialist work, a new card | Decomposed card(s): scope, owner, sync units, definition of done | The plan + which specialists were dispatched and why | Plans and delegates; does not implement specialist code itself |
-| Sandbox server, API, TUI, board site (software/UI) | `software-ui` | `sandbox/server/`, `api/`, `api/ui/`, `api/tui/`, board-site assets | Code + tests; UI/JS kept textContent-only | The touched tier(s) green (`tests/sandbox`, `tests/api`, `node --test tests/tui/js/*`) | No prompt/model or credential changes |
+| API, TUI, board site (software/UI) | `software-ui` | `api/`, `api/ui/`, `api/tui/`, board-site assets | Code + tests; UI/JS kept textContent-only | The touched tier(s) green (`tests/api`, `node --test tests/tui/js/*`) | No prompt/model or credential changes |
 | Repo hygiene, packaging, mirrors, sync units | `systems-repo-hygiene` | drift reports, package sync, wheel/packaging, path/ref rot | Clean `git status` for scope; sync evidence; regenerated artifacts | `git status --short`, sync `status`, `uv build`/import check | Never hand-edit a mirror; propagate only via the sync tooling |
 | Docs + board | `docs-board` (atom) | README/AGENTS/`docs/*`, `CHANGELOG.md`, `DISCUSSION_BOARD.md`, wiki | Doc/changelog/board edit matching reality | Before/after drift sites + the gate command; board lane/Owner/Evidence | Docs/board only; never edits code to make docs true |
 | Code analysis / architecture tracing | `code-analysis` | "how does X route?", a change with unclear blast radius | A cited map of the code path (file:line) and risks | The traced path + any counterexample | Read-only; does not ship code |
@@ -594,15 +475,13 @@ Dispatch laws:
 - Prefer the mock/offline/mock-LLM path before live spend or deploy.
 - Add the `[Unreleased]` changelog entry and the test with the behavior change.
 - Keep docs, `AGENTS.md` and the board reconciled in the same change.
-- Pin content via `content.lock`; propagate package work via the sync tooling.
+- Propagate package work via the sync tooling.
 - Run the touched tier(s) and cite the command + result.
 
 **Don't**
 
 - **Never commit secrets** (keys, tokens, `.env` values) or print them; use
   env vars and redaction.
-- **Don't hand-edit the pulled content bundle** or rewrite `content.lock` by
-  hand — use `mailroom sandbox content bump`.
 - **Don't fork long-lived copies** of agent configs or mirrors without syncing
   them back to their home.
 - **Don't weaken** the token gate, the off-loopback bind refusal, the network
@@ -610,8 +489,6 @@ Dispatch laws:
 - **Don't run git write commands** unless the task asks; never force-push, skip
   hooks, or create empty commits.
 - **Don't edit vendored `scoring/` bytes** or files lint-excluded on purpose.
-- **Don't average a held-out rate with tuning-family rates**, and don't call the
-  positional split "held-out" once `--heldout` exists.
 - **Don't report a green suite without the command that produced it.**
 
 ## 12. Pointers
@@ -624,9 +501,6 @@ Dispatch laws:
 - [docs/JEV.md](docs/JEV.md) — the opt-in Jev decision model.
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — watcher, review, audit/ledger, observability, failure modes.
 - [docs/RUNBOOK.md](docs/RUNBOOK.md) — clone-to-demo paths A/B/C.
-- [docs/SANDBOX_CONTENT.md](docs/SANDBOX_CONTENT.md) — content/schema contracts, IDs, pinning.
-- [docs/SANDBOX_SERVER.md](docs/SANDBOX_SERVER.md) — offline ingress simulation, real vs stand-in, API.
-- [docs/HELD_OUT_SCENARIOS.md](docs/HELD_OUT_SCENARIOS.md) — held-out authoring protocol and measurement.
 - [docs/TESTING.md](docs/TESTING.md) — tiers, `live` marker, dependency fence, parity.
 - [docs/superpowers/plans/2026-10-09-mailroom-core-plan.md](docs/superpowers/plans/2026-10-09-mailroom-core-plan.md) — master plan: status, item ids, decisions.
 - [docs/TUI.md](docs/TUI.md) — `/tui` commands, replay viewer, themes, auth.

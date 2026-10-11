@@ -14,8 +14,6 @@ scripts/dev.sh logs
 scripts/dev.sh down        # or: make dev-down
 ```
 
-The offline sandbox ingress simulation (Correspondent stand-in + pipeline on a mock LLM, mail captured only) is a separate, much smaller stack: `scripts/sandbox.sh up|run`, see [SANDBOX_SERVER.md](SANDBOX_SERVER.md).
-
 No Docker? `scripts/tui_dev.sh up` runs a host-only mock stack for the `/tui` browser terminal; see [TUI.md](TUI.md).
 
 Prefer to work inside a container? The VS Code dev container builds `deploy/Dockerfile.dev` and runs the mock + API on attach (or the full Compose stack); see [deploy/README.md](../deploy/README.md#vs-code-dev-container).

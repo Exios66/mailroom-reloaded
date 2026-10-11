@@ -11,3 +11,6 @@ data/
 # sandbox server state / pulled content (local)
 .sandbox-state/
 .sandbox-content/
+
+# agent worktrees (never track; created by harnesses under .claude/worktrees/)
+.claude/worktrees/

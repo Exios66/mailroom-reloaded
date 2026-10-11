@@ -62,7 +62,6 @@ def test_compose_services_profiles_and_volumes():
     svc = cfg["services"]
     expected = {
         "app": None,
-        "sandbox": None,
         "otel-collector": None,
         "phoenix": None,
         "prometheus": None,
@@ -85,16 +84,7 @@ def test_compose_services_profiles_and_volumes():
         "prometheus_data",
         "grafana_data",
         "otel_targets",
-        "sandbox_state",
     }
-    # The sandbox (the /tui `inbox ↗` link target) is loopback-published, token-free
-    # and healthchecked.
-    sandbox = svc["sandbox"]
-    assert sandbox["image"] == "mailroom-sandbox:latest"
-    assert sandbox["ports"] == ["${SANDBOX_BIND:-127.0.0.1}:${SANDBOX_PORT:-8100}:8100"]
-    assert sandbox["environment"]["MAILROOM_API_TOKEN"] == ""
-    assert sandbox["environment"]["MAILROOM_ALLOW_UNAUTHENTICATED_BIND"] == "1"
-    assert sandbox["healthcheck"] is not None
     # Verify mock service has healthcheck and no published ports
     assert svc["mock"]["healthcheck"] is not None
     assert "ports" not in svc["mock"] or not svc["mock"]["ports"]

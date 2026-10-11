@@ -26,11 +26,10 @@
   "remoteUser": "app",
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
-  "forwardPorts": [8000, 8001, 8100],
+  "forwardPorts": [8000, 8001],
   "portsAttributes": {
     "8000": { "label": "mailroom API /ui" },
-    "8001": { "label": "mock provider" },
-    "8100": { "label": "sandbox" }
+    "8001": { "label": "mock provider" }
   },
   "containerEnv": {
     "PYTHONPATH": "/app/src",

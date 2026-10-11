@@ -76,22 +76,21 @@ Open the repo in a container with the Dev Containers extension (`ms-vscode-remot
 
 - **Image mode (default):** Command Palette → **Dev Containers: Reopen in Container**. `.devcontainer/devcontainer.json` builds `deploy/Dockerfile.dev`, mounts the repo at `/app` (the image's `/opt/venv` survives the mount), and `postStartCommand` runs `.devcontainer/start-dev.sh`, which starts the bundled mock (`127.0.0.1:8001`) and the API (`0.0.0.0:8000`). No network or model download is needed.
 - **Full stack (Compose):** Command Palette → **Dev Containers: Open Folder in Container…** and pick `.devcontainer/compose/devcontainer.json`. It runs all of `deploy/docker-compose.dev.yml` plus `deploy/docker-compose.devcontainer.yml` (which adds the `..:/app` workspace mount Compose configs do not get automatically) and attaches to the `app` service. Ports 8000 (API), 6006 (Phoenix), 9090 (Prometheus) and 3000 (Grafana) are forwarded.
-- **Images:** `make image` (lean prod, `ML_BUILD_NONE=1`, no weights), `make image-dev`, `make image-sandbox` build and tag `mailroom-reloaded:latest`, `mailroom-reloaded-dev:latest` and `mailroom-sandbox:latest`. They then appear under **Images** in the Docker extension. To attach to a running stack without a devcontainer, right-click the `mailroom-dev-app-1` container in the Docker extension → **Attach Visual Studio Code** (use the dev image; the prod image runs as uid 10001 with no `git`/`curl`).
+- **Images:** `make image` (lean prod, `ML_BUILD_NONE=1`, no weights), `make image-dev` build and tag `mailroom-reloaded:latest` and `mailroom-reloaded-dev:latest`. They then appear under **Images** in the Docker extension. To attach to a running stack without a devcontainer, right-click the `mailroom-dev-app-1` container in the Docker extension → **Attach Visual Studio Code** (use the dev image; the prod image runs as uid 10001 with no `git`/`curl`).
 
 `docker-compose.devcontainer.yml` is only consumed by the Compose devcontainer; `scripts/dev.sh` and the other compose files are unchanged. `.devcontainer/` and `.vscode/` are excluded from the Docker build context (`.dockerignore`).
 
 ## Docker smoke test
 
-`scripts/docker_smoke.sh` builds the lean app image and the sandbox image, runs them, and checks the compose files statically; it prints `DOCKER SMOKE OK`.
+`scripts/docker_smoke.sh` builds the lean app image, runs it, and checks the compose files statically; it prints `DOCKER SMOKE OK`.
 
 ```bash
-scripts/docker_smoke.sh                  # all three parts (about 4 min with a cold cache)
+scripts/docker_smoke.sh                  # app + compose (about 4 min with a cold cache)
 scripts/docker_smoke.sh --only compose   # static compose checks only, no build
 uv run pytest -m docker tests/deploy/test_docker_smoke.py   # same, as a pytest test
 ```
 
 - **app**: `deploy/Dockerfile` lean (`ML_BUILD_NONE=1 UV_EXTRAS=`); the package resolves under `/opt/venv`, uid 10001, `/data` writable on a fresh volume, the image's own `HEALTHCHECK` reaches `healthy`, and both `mailroom serve` and `uvicorn --host 0.0.0.0` refuse to start without `MAILROOM_API_TOKEN`.
-- **sandbox**: `deploy/Dockerfile.sandbox` with the compose hardening (`--cap-drop ALL`, `no-new-privileges`, tmpfs `/tmp`); `/health`, `/ui`, `/ui/route.js` return 200, the CSP equals the documented value and there is no CORS header.
 - **compose**: `config -q` for every file and profile; a set `MOCK_BASE_URL`/`MAILROOM_ANCHOR` is forwarded to `app` and an unset one is absent.
 - Exit codes: `0` ok, `1` a check failed (the failing step and the last 50 container log lines are printed), `2` a prerequisite is missing (no docker CLI, daemon or registry), so a restricted host reports "skipped", not a pass.
 - Everything is named `mrl-smoke*` and removed on exit, images included (`--keep` keeps them; `--no-build` reuses existing `mrl-smoke:*` images and leaves them). The build cache is not pruned; run `docker builder prune` yourself on a small disk.
