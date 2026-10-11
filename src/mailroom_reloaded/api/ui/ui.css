@@ -168,6 +168,9 @@ pre {
   body { font-size: 13px; }
   main { padding: 10px var(--term-pad-x); grid-template-columns: 1fr; }
   .span-2 { grid-column: auto; }
+  /* stop wrapping the filename so the column does not collapse to one character;
+     the panel scrolls horizontally instead (as tui.css does on small screens) */
+  #documents th:nth-child(2), #documents td:nth-child(2) { white-space: nowrap; }
   .status-item:not(.essential) { display: none; }
   .status-bar input { min-width: 0; flex: 1 1 100%; }
 }

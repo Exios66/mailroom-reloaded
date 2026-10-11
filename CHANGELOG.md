@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `/ui` at phone widths (<=640px): the documents table's filename column collapsed to a one-character-wide letter stack (the wrap rule met a table squeezed narrower than its nowrap columns). On small screens the filename no longer wraps, so the panel scrolls horizontally instead — the same rule `tui.css` applies to `table.mr`. Verified at 420/768/1280px: no page-level horizontal overflow at any width.
+
 ## [0.4.1] - 2026-10-11
 
 ### Fixed
