@@ -186,11 +186,22 @@ def _probe_grafana(_request: Request) -> tuple[str, str | None]:
     return _http_probe(target)
 
 
+#: Role whose endpoint the provider probe resolves; the sorter is the first model call.
+_LLM_PROBE_ROLE = "sorter"
+
+
 def _probe_llm_provider(_request: Request) -> tuple[str, str | None]:
+    """Reachability of the configured provider's base URL; no resolvable endpoint is ``unconfigured``."""
+    from mailroom_reloaded.llm.client import resolve
     from mailroom_reloaded.settings import get_settings
 
-    # The provider name is not a secret; the reachability probe lands with #70.
-    return "unconfigured", f"provider {get_settings().provider}; probe not wired yet (#70)"
+    provider = get_settings().provider
+    try:
+        base_url = resolve(_LLM_PROBE_ROLE).base_url
+    except Exception as exc:  # noqa: BLE001 - a config error is a status, never a 500
+        # Only the exception type: the resolver's message can name a path or key variable.
+        return "unconfigured", f"provider {provider} has no endpoint ({type(exc).__name__})"
+    return _http_probe(base_url)  # no credential is sent: reachability only
 
 
 #: Component order is the response order (sub-plan section 5).

@@ -299,9 +299,13 @@ reports `ok | degraded | down | unconfigured` with `latency_ms`:
 ```
 
 - Components, in order: `db`, `ledger`, `span_store`, `collector`, `phoenix`,
-  `prometheus`, `grafana`, `llm_provider`, `watcher`. `collector` (#67),
-  `phoenix`/`prometheus`/`grafana` (#66) and `llm_provider` (#70) report
-  `unconfigured` until their owning issue wires a probe; `watcher` is
+  `prometheus`, `grafana`, `llm_provider`, `watcher`. `collector` probes
+  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (falling back to
+  `OTEL_EXPORTER_OTLP_ENDPOINT`), `phoenix`/`grafana` their server-side
+  `MAILROOM_PHOENIX_PROBE_URL` / `MAILROOM_GRAFANA_PROBE_URL`, and `llm_provider`
+  the base URL the LLM client resolves for the sorter role (`llm.client.resolve`),
+  so an unreachable backend is `down` and an unset or unresolvable one is
+  `unconfigured`. `prometheus` (#66) still reports `unconfigured`; `watcher` is
   `unconfigured` without the embedded watcher.
 - A probe that times out is `degraded`; one that raises is `down` with only the
   exception type in `detail`. Neither is a 500.

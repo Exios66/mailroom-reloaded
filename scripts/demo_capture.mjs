@@ -4,14 +4,14 @@
 //   scripts/tui_dev.sh up
 //   MAILROOM_BASE_DIR=data/tui-dev/base uv run python scripts/demo_seed_eval_runs.py   # so /ui lists a run
 //   node scripts/demo_capture.mjs                    # writes docs/demo/*.png and docs/demo/manifest.json
-//   MAILROOM_SANDBOX_URL=http://127.0.0.1:8100 scripts/tui_dev.sh up   # so GET /links names the sandbox
-//   SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs   # + sandbox dock shots and the inbox deep link
+//   SANDBOX_URL=http://127.0.0.1:8100 node scripts/demo_capture.mjs   # + the sandbox dock shots (sandbox branch only)
 //
 // Environment:
 //   TUI_URL            dev API base, default http://127.0.0.1:8000 (must be the unauthenticated dev stack)
-//   SANDBOX_URL        optional sandbox server (`mailroom sandbox serve --content smoke`, port 8100); when set,
-//                      A1 + E1 are injected if its Boss mailbox is empty, then the dock and the `inbox` deep link are captured
-//                      (the API must have been started with MAILROOM_SANDBOX_URL=$SANDBOX_URL)
+//   SANDBOX_URL        optional sandbox server (sandbox branch only: `mailroom sandbox serve --content smoke`, port 8100);
+//                      when set, A1 + E1 are injected if its Boss mailbox is empty, then the dock shots are captured
+//   SANDBOX_TUI_INBOX  sandbox branch only: also capture the /tui `inbox` deep link, which needs the GET /links
+//                      `sandbox_url` field and the /tui `inbox` command, both removed from main (1223d79)
 //   PLAYWRIGHT_MODULE  path or specifier of Playwright (default `playwright`)
 //   CHROMIUM_PATH      Chromium executable (default: Playwright's own download)
 //   ONLY               comma list of image numbers (e.g. 19,20) to re-shoot and merge into the manifest
@@ -235,18 +235,20 @@ try {
     await shoot(page, '18-sandbox-pending-review.png', 'Pending boss review tab: payment_fraud hostile_forward from E1 awaiting a Boss decision (nothing is decided by the capture).', 'same page, tab "Pending boss review"');
     await page.close();
 
-    // `inbox` deep link: the /tui command prints the sandbox URL (needs the API started with
-    // MAILROOM_SANDBOX_URL=$SANDBOX_URL) and the sandbox UI opens straight onto it.
-    const links = await (await fetch(`${base}/links`)).json();
-    if ((links.sandbox_url || '').replace(/\/+$/, '') !== sandbox) {
-      throw new Error(`GET /links sandbox_url is ${links.sandbox_url}; start the dev stack with MAILROOM_SANDBOX_URL=${sandbox}`);
+    // `inbox` deep link: sandbox branch only. It needs the /tui `inbox` command and the GET /links
+    // `sandbox_url` field, both removed from main (1223d79), so it no-ops unless explicitly opted in.
+    if (process.env.SANDBOX_TUI_INBOX === '1') {
+      const links = await (await fetch(`${base}/links`)).json();
+      if ((links.sandbox_url || '').replace(/\/+$/, '') !== sandbox) {
+        throw new Error(`GET /links sandbox_url is ${links.sandbox_url}; start the dev stack with MAILROOM_SANDBOX_URL=${sandbox}`);
+      }
+      const tui = await openTui();
+      await cmd(tui, 'inbox --print');
+      await shoot(tui, '19-tui-inbox-command.png',
+        'The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link.',
+        '/tui: `inbox --print` (the API serves sandbox_url from GET /links)');
+      await tui.close();
     }
-    const tui = await openTui();
-    await cmd(tui, 'inbox --print');
-    await shoot(tui, '19-tui-inbox-command.png',
-      'The `inbox --print` command in /tui: the sandbox deep link it would open (Ingress queue, Boss mailbox dock open, Correspondent filter) and the hint that the token is never put in the link.',
-      '/tui: `inbox --print` (the API serves sandbox_url from GET /links)');
-    await tui.close();
 
     const deep = await context.newPage();
     watch(deep, 'sandbox deep link');

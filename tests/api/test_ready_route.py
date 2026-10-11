@@ -27,6 +27,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     monkeypatch.delenv("MAILROOM_API_TOKEN", raising=False)
     monkeypatch.delenv("MAILROOM_EMBED_WATCHER", raising=False)
+    # The provider probe reads MOCK_BASE_URL from the environment (llm/client.py), so an
+    # exported one would change the default-stack result.
+    monkeypatch.delenv("MOCK_BASE_URL", raising=False)
     from mailroom_reloaded.storage import db
 
     monkeypatch.setattr(db, "_default_engine", None)
@@ -68,10 +71,12 @@ def test_default_stack_is_ok_with_every_component(client):
     assert by_name["db"]["status"] == "ok"
     assert by_name["ledger"]["status"] == "ok"
     assert by_name["ledger"]["detail"] == "empty"
-    for name in ("collector", "phoenix", "grafana", "prometheus", "llm_provider"):
+    for name in ("collector", "phoenix", "grafana", "prometheus"):
         assert by_name[name]["status"] == "unconfigured"
-    for name in ("prometheus", "llm_provider"):
-        assert "not wired yet" in by_name[name]["detail"]
+    assert "not wired yet" in by_name["prometheus"]["detail"]
+    # provider ``mock`` with no MOCK_BASE_URL: no endpoint to probe, but not wired either
+    assert by_name["llm_provider"]["status"] == "unconfigured"
+    assert by_name["llm_provider"]["detail"] == "provider mock has no endpoint (ValueError)"
     assert "OTEL_EXPORTER_OTLP_ENDPOINT" in by_name["collector"]["detail"]
     assert "MAILROOM_PHOENIX_PROBE_URL" in by_name["phoenix"]["detail"]
     assert by_name["watcher"]["status"] == "unconfigured"
@@ -312,3 +317,59 @@ def test_phoenix_and_grafana_probes_use_the_server_side_url_and_never_500(monkey
     assert ready._probe_grafana(None)[0] == "unconfigured"
     _setenv(monkeypatch, "MAILROOM_PHOENIX_PROBE_URL", "http://127.0.0.1:1")
     assert ready._probe_phoenix(None)[0] == "down"  # refused, still a status
+
+
+def test_llm_provider_probe_is_ok_when_the_endpoint_answers(monkeypatch):
+    from fakes.openai_server import FakeOpenAI
+
+    server = FakeOpenAI()
+    server.start()
+    try:
+        _setenv(monkeypatch, "DEFAULT_PROVIDER", "mock")
+        _setenv(monkeypatch, "MOCK_BASE_URL", server.base_url)
+        # GET /v1 has no route on the stub: a 4xx means reachable, all the probe claims
+        assert ready._probe_llm_provider(None) == ("ok", "http 404")
+    finally:
+        server.stop()
+
+
+def test_llm_provider_probe_is_down_not_500_on_a_closed_port(monkeypatch):
+    import socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()  # nothing is listening now
+    _setenv(monkeypatch, "DEFAULT_PROVIDER", "mock")
+    _setenv(monkeypatch, "MOCK_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    status, detail = ready._probe_llm_provider(None)
+    assert status == "down"
+    assert detail.startswith("unreachable (")
+
+
+def test_llm_provider_probe_is_unconfigured_without_a_resolvable_endpoint(monkeypatch):
+    monkeypatch.setenv("DEFAULT_PROVIDER", "mock")
+    monkeypatch.delenv("MOCK_BASE_URL", raising=False)
+    from mailroom_reloaded.settings import get_settings
+
+    get_settings.cache_clear()
+    status, detail = ready._probe_llm_provider(None)
+    assert status == "unconfigured"
+    assert "mock" in detail and "ValueError" in detail  # type only, never the message
+
+
+def test_unreachable_provider_makes_ready_degraded_not_ok(client, monkeypatch):
+    import socket
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    _setenv(monkeypatch, "DEFAULT_PROVIDER", "mock")
+    _setenv(monkeypatch, "MOCK_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    resp = client.get("/ready")
+    body = resp.json()
+    row = {c["name"]: c for c in body["components"]}["llm_provider"]
+    assert row["status"] == "down"
+    assert body["status"] == "degraded"  # not critical: still 200, never 503
+    assert resp.status_code == 200

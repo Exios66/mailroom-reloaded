@@ -218,6 +218,26 @@ def test_write_doc_creates_nested_parent_dirs(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "filename",
+    ["fixture:calibration-contract-wrong_high", "letter.htm", "owner/folder/1234."],
+)
+def test_write_doc_retypes_unsupported_suffixes_to_text(tmp_path, monkeypatch, filename):
+    """Extensionless/.htm fixture names must reach ingest as text, not fail at ingest."""
+    from types import SimpleNamespace
+
+    from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS, ingest
+
+    monkeypatch.setattr(runner, "get_settings", lambda: SimpleNamespace(base_dir=tmp_path))
+    path = runner._write_doc(BlindDoc(filename, "contract body", sha256_text("contract body")))
+
+    assert path.suffix.lower() in SUPPORTED_EXTENSIONS
+    result = ingest(path)
+    assert "unsupported file type" not in (result.error or "")
+    assert result.error is None
+    assert result.text
+
+
+@pytest.mark.parametrize(
     "bad", ["../escape.txt", "/etc/escape.txt", "a/../../escape.txt", "..\\escape.txt"]
 )
 def test_write_doc_rejects_traversal(tmp_path, monkeypatch, bad):

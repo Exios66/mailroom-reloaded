@@ -113,13 +113,22 @@ def test_report_includes_caveats():
 
 
 def test_report_no_llm(monkeypatch):
-    """Verify compiling a report does not call the structured LLM client."""
+    """Verify compiling a report never reaches the LLM client.
+
+    ``client.resolve`` is the shared choke point both public entry points
+    (``call_structured`` and ``make_llm``) hit before any request, so patching it
+    trips on a real call no matter how the report path imports the client. The
+    probe call proves the seam is live rather than vacuous.
+    """
     def _boom(*args, **kwargs):
-        raise AssertionError("compile_report must not call the LLM")
+        raise AssertionError("compile_report must not reach the LLM client")
 
     from mailroom_reloaded.llm import client
 
-    monkeypatch.setattr(client, "call_structured", _boom)
+    monkeypatch.setattr(client, "resolve", _boom)
+    with pytest.raises(AssertionError):
+        client.call_structured("sorter", [{"role": "user", "content": "probe"}])
+
     report = compile_report(_state())
     assert report["doc_id"] == "d1"
 

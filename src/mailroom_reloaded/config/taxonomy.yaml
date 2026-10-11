@@ -462,6 +462,7 @@ agents:
   # than the sorter's input budget); over-budget documents are processed in
   # sliding windows — NEVER truncated. One fused call per window; cheapest
   # paid model (the free tier stays the Gmail triage lane's privilege).
+  # No code consumer in this checkout (nothing resolves the "intake" role).
   intake:
     provider: openrouter
     model: qwen/qwen3.7-flash
@@ -561,6 +562,7 @@ agents:
     reasoning_effort: none
 
   # Vision-based text extraction from image-only documents (jpg/png/...).
+  # Legacy: no code consumer (the vision path resolves "pdf_transcriber").
   image_extractor:
     provider: openrouter
     model: qwen/qwen3.7-flash

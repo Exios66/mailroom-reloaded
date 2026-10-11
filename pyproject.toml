@@ -45,7 +45,7 @@ gmail = [
 ]
 embeddings = ["scipy", "sentence-transformers"]
 deploy = ["modal==1.5.5"]
-dev = ["pytest", "pytest-asyncio", "respx", "scikit-learn", "ruff"]
+dev = ["pytest", "pytest-asyncio", "scikit-learn", "ruff"]
 anchor = ["psycopg[binary]"]
 parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.21.0"]
 

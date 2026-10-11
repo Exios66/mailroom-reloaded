@@ -38,6 +38,7 @@ from mailroom_reloaded.eval.dataset import (
     load_split,
     sample,
 )
+from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS
 from mailroom_reloaded.llm.usage import Usage
 from mailroom_reloaded.obs.run_context import run_scope
 from mailroom_reloaded.pipeline import flow as flow_mod
@@ -358,10 +359,17 @@ def _write_doc(doc: BlindDoc) -> Path:
     hidden name and renamed into place so a concurrently draining watcher never
     reads a half-written document. An absolute name or a ``..`` component is
     rejected: the name comes from the dataset and must not escape the inbox.
+
+    Fixture configs name rows by identifier (``fixture:...``, extensionless) or
+    ``.htm``; ingest dispatches on suffix, so a suffix outside
+    ``SUPPORTED_EXTENSIONS`` is retyped to ``.txt`` — the row already carries
+    extracted text, so text is the correct ingest method.
     """
     name = doc.filename.replace("\\", "/")
     if name in ("", ".") or name.startswith("/") or "\x00" in name or ".." in name.split("/"):
         raise ValueError(f"unsafe dataset filename: {doc.filename!r}")
+    if Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+        name += ".txt"
     path = Bins(get_settings().base_dir).inbox / name
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".eval-", dir=path.parent)

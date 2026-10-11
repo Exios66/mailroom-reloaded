@@ -4,7 +4,7 @@
 # Differs from deploy/Dockerfile on purpose:
 #   * no ModernBERT model stage and no `bert` extra (dev defaults to the `mock`
 #     provider, so no weights are needed and the build stays CPU-only)
-#   * installs the `dev` extra (pytest, ruff, respx) so the dev suite can run
+#   * installs the `dev` extra (pytest, ruff) so the dev suite can run
 #     inside the container if wanted
 #   * expects the repository `src/` to be bind-mounted at /app/src with
 #     PYTHONPATH=/app/src, so `uvicorn --reload` picks up live edits

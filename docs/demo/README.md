@@ -29,6 +29,8 @@ viewport; its `source_commit` is the commit of the code that was running (`git r
 | [`20-sandbox-inbox-deeplink.png`](20-sandbox-inbox-deeplink.png) | Sandbox UI opened through the `inbox` deep link: Ingress queue tab active, Boss mailbox dock open with the `filter: role=correspondent` line and the seeded A1 + E1 mail. | 207 KB |
 | [`21-tui-status-links.png`](21-tui-status-links.png) | The /tui status bar (top of the terminal window) with both outbound links: `ui ↗` (/ui, same tab) and `inbox ↗` (the sandbox ingress simulator, new tab). | 227 KB |
 
+> **Sandbox-branch captures.** `19-tui-inbox-command.png` and `21-tui-status-links.png` were captured on the `feature/ingress-sandbox` branch; on `main`, `scripts/demo_capture.mjs` emits 19 only under `SANDBOX_TUI_INBOX=1` and no longer emits 21.
+
 Not shown: the sandbox `deciding` resume hint ("decision ... was recorded but not finished: press the same
 button to resume"). It needs a decision that failed half way and no supported way to cause that offline was
 found; it is covered by `tests/sandbox/test_server_boss_review.py` only.

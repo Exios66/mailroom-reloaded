@@ -145,9 +145,9 @@ export function createTerminal({ root, registry, history, api, cwd = '~' }) {
     statusEls.set(spec.key, b);
     return item;
   }
-  // A status-bar "sister link" occupies the same slot as `ui ↗`. Built at boot, or
-  // added later via `addSisterLink` once the public GET /links supplies a URL (the
-  // ingress simulator's `sandbox_url`). No-op (returns null) without a status bar.
+  // The status-bar "sister link" slot holds the `ui ↗` link (the served UI at
+  // GET /links `public_url`), added at boot via `addSisterLink`. No-op (returns null)
+  // without a status bar.
   let statusLeft = null;
   function addSisterLink(label, href, { external = false } = {}) {
     if (!statusLeft) return null;

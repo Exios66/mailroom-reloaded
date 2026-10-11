@@ -7,6 +7,7 @@ this is a ledger, not a governance board.
 **Branch:** `feat/mailroom-reloaded-completion` (from `main` @ `ce1c1ff`)
 **Plan:** `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`
 **Spec:** `docs/superpowers/specs/2026-10-07-mailroom-reloaded-design.md`
+**Note:** archived/historical — the `feat/mailroom-reloaded-completion` branch and the `2026-10-09-mailroom-core-plan.md` plan no longer exist on `main` (old plan archived in `0e3dc26`).
 
 ---
 
@@ -50,7 +51,7 @@ this is a ledger, not a governance board.
 ---
 
 ### [P6-A / #63] TUI plugin boundary, tui/lib helpers, api/routes, GET /ready — Claude Code
-- **Status:** done (PR open)
+- **Status:** done (PR #95 merged)
 - **Files:** `src/mailroom_reloaded/api/tui/{plugins.js,main.js,lib/http.js,lib/table.js,lib/poll.js,lib/fmt.js}`,
   `src/mailroom_reloaded/api/routes/{__init__,ready}.py`, `src/mailroom_reloaded/api/app.py` (one import, one include),
   `tests/tui/js/{plugins,lib-http,lib-table,lib-poll,lib-fmt}.test.mjs`, `tests/api/test_ready_route.py`,
@@ -59,7 +60,7 @@ this is a ledger, not a governance board.
   `PYTHONPATH=src uv run pytest -p no:cacheprovider tests -q --ignore=tests/sandbox` → 1597 passed, 3 skipped
   (baseline 1582); `uv run ruff check src tests` → All checks passed; `scripts/tui_replay_check.mjs` against
   `scripts/tui_dev.sh up` → all checks passed (playwright-core + system Chrome).
-- **Commit:** see the PR for #63.
+- **Commit:** PR #95 (merged); #63 is the tracking issue, not a PR.
 - **Notes:** collector/Phoenix/Prometheus/Grafana/provider probes are `unconfigured` placeholders for #67/#66/#70;
   no 5 s probe cache yet; a timed-out probe's worker thread finishes in the background.
 
@@ -67,14 +68,15 @@ this is a ledger, not a governance board.
 
 ### [Sandbox review hardening] Payment, prompt and Boss safeguards — CodeRabbit Agent
 - **Status:** done
-- **Files:** `sandbox/server/{correspondent,llm_correspondent,service}.py`, their sandbox
+- **Files:** `src/mailroom_reloaded/sandbox/server/{correspondent,llm_correspondent,service}.py`, their sandbox
   regression tests, `tests/sandbox/conformance_baseline.json`, `docs/SANDBOX_SERVER.md`,
   `CHANGELOG.md`.
 - **Evidence:** `.venv/bin/pytest tests/sandbox tests/test_dependency_fence.py tests/test_prompts.py -q`
   → 729 passed (one dependency deprecation warning); `.venv/bin/ruff check .` → all checks passed.
   Regenerated isolated smoke baseline: 6 pass, 4 tuned + 2 positional smoke-fixture diagnostics,
   0 official held-out scenarios; LOFO folds unchanged at 1.00.
-- **Commit:** uncommitted changes on `d28ccf1366ae4125b72aeb6bc9275568c6a5c1e1`.
+- **Commit:** `b8c5d9b` fix(sandbox): enforce payment and Boss review safeguards, escape LLM inputs, and relabel smoke diagnostics.
+- **Note:** the sandbox now lives off `main` on `feature/ingress-sandbox` (moved by PR #99), so these paths are not on `main`.
 - **Notes:** all five supplied findings verified against current code. Software/UI specialist
   implemented shared payment safeguards and the attack-draft gate; prompt specialist implemented
   tagged, escaped input fields. Background ledger writes can log missing-table errors during
@@ -93,7 +95,7 @@ this is a ledger, not a governance board.
 - **Evidence:** `uv run pytest -q` → 610 passed, 1 skipped, 2 deselected;
   `uv run ruff check .` clean; Jev tests proven no-network (fake transport).
 - **Commits:** `6691524` Jev scorer + gate; `007a0de` docs; `6d20939` consume
-  `verify_threshold`; `22a2689` adversarial fixes; `32060e8` doc corrections; `3025e2e` `.env`
+  `verify_threshold`; `22a2689` adversarial fixes; `32060e8` doc corrections; `102cc71` `.env`
   support + `scripts/jev_harvest.py`.
 - **Calibration (live, 2026-10-08):** `scripts/jev_harvest.py` sampled the train split
   (50/class, 250 docs) and asked Jev the doc-type `choice` question — accuracy **0.952**
@@ -181,8 +183,9 @@ this is a ledger, not a governance board.
   - **HF-DS-3 (RESOLVED by `db75692`):** `eval/dataset.py:198-259` reads the blind-row
     `metadata` blob and the `gt_fields` JSON; `content_sha256` is read/verified from
     `ground_truth`.
-  - **§5 gap (still open):** the BERT-manifest `content_sha256` overlap check remains a
-    helper (`eval/dataset.py:302-311`), not called by the runner.
+  - **§5 gap (RESOLVED by PR #87):** the BERT-manifest `content_sha256` overlap check is now
+    run by the runner — `_check_overlap` in `src/mailroom_reloaded/eval/runner.py` calls
+    `bert_manifest_overlap` (result stored in `eval_runs.overlap_check`).
 
 ---
 
