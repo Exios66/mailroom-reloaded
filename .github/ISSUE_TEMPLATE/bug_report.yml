@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in Mailroom Reloaded behaves wrongly (pipeline, API, TUI, replay, sandbox, eval).
+description: Something in Mailroom Reloaded behaves wrongly (pipeline, API, TUI, replay, eval).
 title: "[bug]: "
 labels: ["bug"]
 body:
@@ -20,7 +20,6 @@ body:
         - observability / tracing
         - storage / ledger
         - eval / Jev
-        - sandbox server
         - deploy / ops
         - docs
     validations:

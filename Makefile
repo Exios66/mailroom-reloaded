@@ -2,7 +2,7 @@
 # `make` with no target prints the list.
 .DEFAULT_GOAL := help
 
-.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test sandbox sandbox-down sandbox-status image image-dev image-sandbox image-release image-push version lint test smoke eval gmail
+.PHONY: help dev dev-down dev-logs dev-ps dev-status dev-reset dev-test image image-dev image-release image-push version lint test smoke eval gmail
 
 help:
 	@echo "mailroom-reloaded targets:"
@@ -13,11 +13,8 @@ help:
 	@echo "  make dev-status  health-check the dev stack endpoints"
 	@echo "  make dev-reset   stop the dev stack and delete ./data + volumes"
 	@echo "  make dev-test    run the dev test suite (scripts/dev_test.sh)"
-	@echo "  make sandbox     run the offline ingress sandbox on the host (scripts/sandbox.sh run)"
-	@echo "  make sandbox-down / sandbox-status   container helpers (scripts/sandbox.sh)"
 	@echo "  make image       build the lean prod image (mailroom-reloaded:<version> + :latest)"
 	@echo "  make image-dev   build the dev image (mailroom-reloaded-dev:latest, local-only)"
-	@echo "  make image-sandbox   build the sandbox image (mailroom-sandbox:<version> + :latest)"
 	@echo "  make image-release   build + semver-tag the release images (scripts/docker_release.sh)"
 	@echo "  make image-push      push the release images to Docker Hub (needs DOCKERHUB_OWNER=...)"
 	@echo "  make version     print the version (from pyproject.toml)"
@@ -48,15 +45,6 @@ dev-reset:
 dev-test:
 	scripts/dev_test.sh
 
-sandbox:
-	scripts/sandbox.sh run
-
-sandbox-down:
-	scripts/sandbox.sh down
-
-sandbox-status:
-	scripts/sandbox.sh status
-
 # The version is the single source of truth for image tags (pyproject.toml).
 VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml)
 
@@ -69,10 +57,6 @@ image:
 
 image-dev:
 	docker build -f deploy/Dockerfile.dev -t mailroom-reloaded-dev:latest .
-
-image-sandbox:
-	docker build -f deploy/Dockerfile.sandbox \
-	  -t mailroom-sandbox:$(VERSION) -t mailroom-sandbox:latest .
 
 image-release:
 	scripts/docker_release.sh

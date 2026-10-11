@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Build, semantic-version-tag and (optionally) push the mailroom-reloaded images.
 #
-#   scripts/docker_release.sh              # build + tag locally (mailroom-reloaded:<v>, mailroom-sandbox:<v>)
+#   scripts/docker_release.sh              # build + tag locally (mailroom-reloaded:<v>)
 #   scripts/docker_release.sh --no-build   # skip the build; only (re)tag the existing :latest images
 #   scripts/docker_release.sh --push       # also push to Docker Hub; needs DOCKERHUB_OWNER=<user-or-org>
 #
 # Which images are release artifacts (the ones to push):
 #   mailroom-reloaded  (app)      -> :<version> and :latest
-#   mailroom-sandbox              -> :<version> and :latest
 # Local-only (never tagged with a version, never pushed):
 #   mailroom-reloaded-dev         -> :latest only
 #
@@ -35,11 +34,10 @@ for arg in "$@"; do
 done
 
 # Release image name -> build command (context is the repo root).
-RELEASE_IMAGES=(mailroom-reloaded mailroom-sandbox)
+RELEASE_IMAGES=(mailroom-reloaded)
 build_cmd() {
   case "$1" in
     mailroom-reloaded) echo "docker build -f deploy/Dockerfile --build-arg ML_BUILD_NONE=1 --build-arg UV_EXTRAS=" ;;
-    mailroom-sandbox) echo "docker build -f deploy/Dockerfile.sandbox" ;;
     *) echo "docker_release: no build command for $1" >&2; exit 1 ;;
   esac
 }

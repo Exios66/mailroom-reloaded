@@ -57,7 +57,6 @@ def test_dev_compose_services_and_profiles():
         "mock",
         "data-init",
         "watcher",
-        "sandbox",
         "otel-collector",
         "otel-targets",
         "phoenix",
@@ -70,13 +69,6 @@ def test_dev_compose_services_and_profiles():
     assert svc["llamafile"].get("profiles") == ["local-llm"]
     # No GPU services in the dev topology.
     assert "vllm" not in svc and "dcgm-exporter" not in svc
-    # The sandbox (the /tui `inbox ↗` link target) is loopback-published and token-free.
-    sandbox = svc["sandbox"]
-    assert sandbox["image"] == "mailroom-sandbox:latest"
-    assert sandbox["ports"] == ["127.0.0.1:${SANDBOX_PORT:-8100}:8100"]
-    assert sandbox["environment"]["MAILROOM_API_TOKEN"] == ""
-    assert sandbox["environment"]["MAILROOM_ALLOW_UNAUTHENTICATED_BIND"] == "1"
-    assert sandbox["healthcheck"] is not None
 
 
 def test_dev_app_reload_and_build():

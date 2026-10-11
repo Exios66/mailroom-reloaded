@@ -26,10 +26,9 @@ ARG UV_EXTRAS
 # Dependencies first (cache-friendly), then the project itself.
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project ${UV_EXTRAS}
-# schemas/ is force-included into the wheel (pyproject.toml); --no-editable installs the
-# project into /opt/venv itself, so the runtime stage needs nothing from /build.
+# --no-editable installs the project into /opt/venv itself, so the runtime stage needs
+# nothing from /build.
 COPY src ./src
-COPY schemas ./schemas
 RUN uv sync --frozen --no-dev --no-editable ${UV_EXTRAS}
 
 

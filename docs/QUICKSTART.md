@@ -74,7 +74,6 @@ Useful TUI commands:
 | `replay` | open the replay viewer for a run |
 | `ledger` | show the archive-ledger chain |
 | `audit` | verify the audit chain |
-| `inbox` | open the sandbox Correspondent inbox |
 | `auth <token>` | set the bearer token (only needed when `MAILROOM_API_TOKEN` is set) |
 
 ## 2. Upload a real document from `mailroom-dataset`

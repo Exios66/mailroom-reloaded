@@ -168,8 +168,7 @@ A missing input yields `None`, never a fabricated `$0`. `token_split` fits
 ## Cards (SAND-37)
 
 `eval/cards.py` emits a `mailroom.card/v1` dict (`CARD_SCHEMA`,
-`eval/cards.py:29`) with the same ten blocks as the sandbox card
-(`eval/cards.py:32-43`):
+`eval/cards.py:29`) with ten blocks (`eval/cards.py:32-43`):
 
 `conditions`, `cost`, `documents`, `engine_telemetry`, `latency`, `quality`,
 `throughput`, `time`, `tokens`, `concurrency`.

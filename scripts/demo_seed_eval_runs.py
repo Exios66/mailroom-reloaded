@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import sys
 from pathlib import Path
 
 from mailroom_reloaded.eval.runner import _ensure_table

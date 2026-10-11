@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Untracked two accidental gitlinks at `.claude/worktrees/*` (mode `160000`, no `.gitmodules`) that committed ~1.9 GB of nested agent worktrees into the tree and made `ruff check .` report three `F401`s; added `.claude/worktrees/` to `.gitignore` and removed the now-unused `import sys` in `scripts/demo_seed_eval_runs.py`. Issue #98.
 - Refreshed `docs/superpowers/plans/2026-10-09-mailroom-core-plan.md`: content PRs #23-#28 merged (K-01, K-02, content issues #12/#13, C-01/C-02, and K-05 — the schema mirror), with the verified content `main` state (116 scenarios, 228 unit tests, `schema drift: none`); K-05 and X-03 ticked (content #28 @ `aedbc79`, reloaded #94 @ `09d318d`); the open-PR and ledger tables and D3 updated.
 - **Conventions now require verifying merge state per branch and stating the content mirror for schema PRs.** `AGENTS.md` §8.1: after `git fetch --all --prune`, check `git merge-base --is-ancestor origin/<branch> origin/main` (exit 0 = merged) or `git branch -r --merged origin/main`, never from a note or PR list. §8.2: a PR that changes root `schemas/` must state the content-repo mirror follow-up (K-05) and the merge order (this repo first, then the content mirror).
 
 ### Removed
 
+- The offline ingress simulator (`mailroom sandbox …`, `make sandbox`, `Dockerfile.sandbox`, root `schemas/`, `sandbox/content.lock`) moved off `main`. It is preserved, runnable, on the `feature/ingress-sandbox` branch (tag `pre-trim`). Issue #98.
 - `.github/workflows/docker-smoke.yml`, the repository's only GitHub Actions workflow: the owner's account cannot run Actions right now, so every PR showed a failing `docker-smoke` check that never started ("account is locked due to a billing issue"). `scripts/docker_smoke.sh` and `tests/deploy/test_docker_smoke.py` are unchanged and still run locally. References updated in `AGENTS.md` §8.2, `deploy/README.md` and the master plan. Docs/config only; no code change.
 
 ### Added

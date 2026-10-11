@@ -49,8 +49,7 @@ body:
       label: Gates to run
       options:
         - label: "ruff check src tests"
-        - label: "PYTHONPATH=src pytest -p no:cacheprovider tests -q --ignore=tests/sandbox"
-        - label: "pytest tests/sandbox -q (sandbox changes)"
+        - label: "PYTHONPATH=src pytest -p no:cacheprovider tests -q"
         - label: "node --test tests/tui/js/*.test.mjs"
         - label: "scripts/tui_replay_check.mjs (browser check, TUI changes)"
   - type: textarea

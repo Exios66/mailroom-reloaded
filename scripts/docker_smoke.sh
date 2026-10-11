@@ -1,30 +1,26 @@
 #!/usr/bin/env bash
-# Docker smoke test (issue #84): build the lean app image and the sandbox image,
+# Docker smoke test (issue #84): build the lean app image,
 # run them, and check the compose files statically. Prints "DOCKER SMOKE OK".
 #
-#   scripts/docker_smoke.sh [--no-build] [--keep] [--only app|sandbox|compose]
+#   scripts/docker_smoke.sh [--no-build] [--keep] [--only app|compose]
 #
 # Exit codes: 0 ok, 1 a check failed, 2 a prerequisite is missing (no docker CLI,
 # daemon unreachable, registry unreachable) so a restricted host reports "skipped".
 #
 # Everything it creates is named mrl-smoke* and removed on exit (images too, unless
 # --no-build or --keep). Env: DOCKER_SMOKE_APP_PORT (18001),
-# DOCKER_SMOKE_SANDBOX_PORT (18100), DOCKER_SMOKE_LOG_DIR (container logs on
+# DOCKER_SMOKE_LOG_DIR (container logs on
 # failure; kept), DOCKER_SMOKE_APP_DOCKERFILE (default deploy/Dockerfile; used to
 # prove the script fails on a broken Dockerfile).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_IMAGE=mrl-smoke:app
-SANDBOX_IMAGE=mrl-smoke:sandbox
 APP_CTR=mrl-smoke-app
-SANDBOX_CTR=mrl-smoke-sandbox
 APP_VOL=mrl-smoke-data
 APP_PORT="${DOCKER_SMOKE_APP_PORT:-18001}"
-SANDBOX_PORT="${DOCKER_SMOKE_SANDBOX_PORT:-18100}"
 APP_DOCKERFILE="${DOCKER_SMOKE_APP_DOCKERFILE:-$ROOT/deploy/Dockerfile}"
 LOG_DIR="${DOCKER_SMOKE_LOG_DIR:-}"
-CSP_EXPECTED="default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 TOKEN=smoke-token
 
 NO_BUILD=0
@@ -36,8 +32,8 @@ while [[ $# -gt 0 ]]; do
     --keep) KEEP=1; shift ;;
     --only)
       case "${2:-}" in
-        app|sandbox|compose) ONLY="$2"; shift 2 ;;
-        *) echo "docker_smoke: --only takes app|sandbox|compose" >&2; exit 2 ;;
+        app|compose) ONLY="$2"; shift 2 ;;
+        *) echo "docker_smoke: --only takes app|compose" >&2; exit 2 ;;
       esac ;;
     *) echo "docker_smoke: unknown option $1" >&2; exit 2 ;;
   esac
@@ -48,10 +44,10 @@ want() { [[ -z "$ONLY" || "$ONLY" == "$1" ]]; }
 cleanup() {
   local rc=$?
   if [[ $KEEP -eq 0 ]]; then
-    docker rm -f "$APP_CTR" "$SANDBOX_CTR" >/dev/null 2>&1 || true
+    docker rm -f "$APP_CTR" >/dev/null 2>&1 || true
     docker volume rm "$APP_VOL" >/dev/null 2>&1 || true
     if [[ $NO_BUILD -eq 0 ]]; then
-      docker image rm "$APP_IMAGE" "$SANDBOX_IMAGE" >/dev/null 2>&1 || true
+      docker image rm "$APP_IMAGE" >/dev/null 2>&1 || true
     fi
   fi
   exit "$rc"
@@ -88,7 +84,7 @@ wait_healthy() {
 echo "== prerequisites"
 command -v docker >/dev/null 2>&1 || { echo "docker_smoke: docker CLI not found" >&2; exit 2; }
 docker info >/dev/null 2>&1 || { echo "docker_smoke: Docker daemon unreachable" >&2; exit 2; }
-if [[ $NO_BUILD -eq 0 ]] && { want app || want sandbox; }; then
+if [[ $NO_BUILD -eq 0 ]] && want app; then
   for ref in ghcr.io/astral-sh/uv:0.8.22 python:3.11-slim-bookworm; do
     docker pull -q "$ref" >/dev/null 2>&1 || { echo "docker_smoke: registry unreachable ($ref)" >&2; exit 2; }
   done
@@ -122,31 +118,6 @@ if want app; then
   echo "app image ok"
 fi
 
-if want sandbox; then
-  echo "== sandbox image"
-  if [[ $NO_BUILD -eq 0 ]]; then
-    docker build -q -f "$ROOT/deploy/Dockerfile.sandbox" -t "$SANDBOX_IMAGE" "$ROOT" >/dev/null \
-      || fail "sandbox image build"
-  fi
-  # Same hardening and loopback-only publish as deploy/docker-compose.sandbox.yml.
-  docker run -d --name "$SANDBOX_CTR" -p "127.0.0.1:$SANDBOX_PORT:8100" \
-    -e MAILROOM_ALLOW_UNAUTHENTICATED_BIND=1 -e OTEL_SDK_DISABLED=true \
-    --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp \
-    --health-cmd "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)\"" \
-    --health-interval 3s --health-start-period 10s --health-retries 10 \
-    "$SANDBOX_IMAGE" >/dev/null
-  wait_healthy "$SANDBOX_CTR" 90
-  base="http://127.0.0.1:$SANDBOX_PORT"
-  for p in /health /ui /ui/route.js; do
-    curl -fsS -o /dev/null "$base$p" || fail "GET $p" "$SANDBOX_CTR"
-  done
-  headers="$(curl -fsS -D - -o /dev/null "$base/ui" | tr -d '\r')"
-  csp="$(sed -n 's/^[Cc]ontent-[Ss]ecurity-[Pp]olicy: //p' <<<"$headers")"
-  [[ "$csp" == "$CSP_EXPECTED" ]] || fail "CSP is '$csp'"
-  if grep -qi '^access-control-allow-origin:' <<<"$headers"; then fail "CORS header present"; fi
-  echo "sandbox image ok"
-fi
-
 if want compose; then
   echo "== compose (static)"
   dc() { docker compose -p mrl-smoke "$@"; }
@@ -158,7 +129,6 @@ if want compose; then
       || fail "docker-compose.yml --profile $profile config"
   done
   dc -f "$ROOT/deploy/docker-compose.dev.yml" config -q || fail "docker-compose.dev.yml config"
-  dc -f "$ROOT/deploy/docker-compose.sandbox.yml" config -q || fail "docker-compose.sandbox.yml config"
   set_env="$(MAILROOM_API_TOKEN=t GRAFANA_ADMIN_PASSWORD=g MOCK_BASE_URL=http://mock:8000/v1 \
     MAILROOM_ANCHOR=file dc -f "$ROOT/deploy/docker-compose.yml" config --format json \
     | python3 -c 'import json,sys; e=json.load(sys.stdin)["services"]["app"]["environment"]; print(e.get("MOCK_BASE_URL"), e.get("MAILROOM_ANCHOR"))')"
