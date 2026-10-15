@@ -123,6 +123,7 @@ def open_run(
     prompt_set: str = "",
     environment: str = "",
     source: str = "",
+    total: int | None = None,
 ) -> bool:
     """Write ``run_opened`` once per run id. Returns whether the run is open for new documents.
 
@@ -157,6 +158,7 @@ def open_run(
                     "environment": environment,
                     "source": source,
                     "pid": os.getpid(),
+                    **({"total": total} if total is not None else {}),
                 },
             )
             if opened:

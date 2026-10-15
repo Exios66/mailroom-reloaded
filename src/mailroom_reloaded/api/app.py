@@ -987,6 +987,23 @@ def _embed_watcher_enabled() -> bool:
     }
 
 
+def _start_pager() -> None:
+    """Start the opt-in operator SMS pager in the background (``MAILROOM_PAGER_EMBED=0`` skips it).
+
+    Only ``mailroom pager run`` as its own process can text ``watcher_down`` when the API dies.
+    """
+    if (os.environ.get("MAILROOM_PAGER_EMBED") or "").strip() == "0":
+        return
+    try:
+        from mailroom_reloaded.obs.pager import Pager, load_pager_config
+
+        cfg = load_pager_config()
+        if cfg.active:
+            Pager(cfg).start_background()
+    except Exception:
+        logger.warning("pager_start_failed", exc_info=True)
+
+
 _RETENTION_INTERVAL_S = 86400
 
 
@@ -1026,6 +1043,7 @@ async def lifespan(application: FastAPI):
     _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)
     retention_task = await _start_retention()
+    _start_pager()
     watcher = None
     watcher_thread = None
     if _embed_watcher_enabled():

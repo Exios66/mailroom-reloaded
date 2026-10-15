@@ -333,7 +333,7 @@ def test_empty_eval_opens_and_seals_a_zero_document_run(engine, monkeypatch, mod
     opened.assert_called_once_with(
         ledger, run_id, "eval", mode=mode, posture_label=cfg.posture_label,
         model=runner.get_settings().provider, prompt_set="sand37",
-        environment="eval", source="eval",
+        environment="eval", source="eval", total=0,
     )
     closed.assert_called_once_with(ledger, run_id, "completed", expected=0)
     assert rows(engine) == []

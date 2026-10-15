@@ -628,7 +628,7 @@ Branch `claude/mailroom-operator-sms-pings-o63gx2`. Test runner: `uv run pytest 
 | `src/mailroom_reloaded/cli.py` | `pager` sub-app (all CLI verbs) + `--pager/--no-pager` and start prompt on `serve`/`watch` |
 | `src/mailroom_reloaded/api/app.py` | `lifespan`: opt-in background pager |
 | `src/mailroom_reloaded/eval/runner.py` | `total` in `run_opened` payload; `--page` |
-| `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `.env.example`, `CHANGELOG.md` | one section each, linking to llm-mailroom's `deploy/README.md` for Twilio/Google Voice setup |
+| `CONFIGURATION.md` and `OPERATIONS.md` (reloaded docs dir), `.env.example`, `CHANGELOG.md` | one section each, linking to llm-mailroom's `deploy/README.md` for Twilio/Google Voice setup |
 | Tests: `tests/obs/test_pager_core.py` (copied), `tests/obs/test_sms.py`, `tests/llm/test_health.py`, `tests/obs/test_pager.py` | |
 
 ### Task 6: Port core, transport, health

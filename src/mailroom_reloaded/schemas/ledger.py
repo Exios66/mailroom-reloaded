@@ -204,6 +204,7 @@ _SPECS: dict[str, dict[str, Callable[[Any], Any]]] = {
         "environment": _label,
         "source": _label,
         "pid": _int,
+        "total": _int,  # documents the run expects (eval); the pager's progress denominator
     },
     "doc_closed": {
         "invocation": _int,

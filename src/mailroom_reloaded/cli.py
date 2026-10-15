@@ -12,6 +12,7 @@ Commands:
   or the aggregated master card (Task 21).
 * ``mailroom conformance ...`` — behavioural conformance suite (Task 24).
 * ``mailroom replay import|export|sessions`` — offline OTLP import and replay/v1 export.
+* ``mailroom pager ...`` — operator SMS pings: on/off, numbers, test, preview, log, mute, run.
 """
 
 # ruff: noqa: B008 - Typer/FastAPI options are function calls in defaults by design.
@@ -58,9 +59,16 @@ def serve(
     watch: bool = typer.Option(
         True, "--watch/--no-watch", help="Run the embedded inbox watcher with the API."
     ),
+    pager: bool = typer.Option(
+        None, "--pager/--no-pager", help="Text alerts on/off for this run (skips the start prompt)."
+    ),
 ) -> None:
     """Serve the API and the ``/ui`` page."""
     import uvicorn
+
+    from mailroom_reloaded.obs import pager as pager_mod
+
+    pager_mod.prompt_on_start(pager_mod.load_pager_config(), flag=pager)  # the lifespan starts it
 
     from mailroom_reloaded.api.app import app as fastapi_app
     from mailroom_reloaded.api.app import assert_bind_allowed
@@ -79,11 +87,19 @@ def serve(
 def watch(
     worker_id: str = typer.Option("cli-watcher", "--worker-id"),
     concurrency: int = typer.Option(1, "--concurrency", min=1, max=32),
+    pager: bool = typer.Option(
+        None, "--pager/--no-pager", help="Text alerts on/off for this run (skips the start prompt)."
+    ),
 ) -> None:
     """Drain ``inbox/`` forever as a standalone watcher."""
+    from mailroom_reloaded.obs import pager as pager_mod
     from mailroom_reloaded.settings import get_settings
     from mailroom_reloaded.storage.bins import Bins
     from mailroom_reloaded.watcher import Watcher
+
+    cfg = pager_mod.prompt_on_start(pager_mod.load_pager_config(), flag=pager)
+    if cfg.active:
+        pager_mod.Pager(cfg).start_background()
 
     Watcher(Bins(get_settings().base_dir), worker_id, concurrency).run_forever()
 
@@ -138,9 +154,19 @@ def eval(
         exists=True,
         help="BERT-training documents manifest (JSONL file or dir) for the leakage check.",
     ),
+    page: bool = typer.Option(
+        False, "--page", help="Text run progress to the operator (pager must be ON)."
+    ),
 ) -> None:
     """Run an evaluation posture and print its ``run_id``."""
     from mailroom_reloaded.eval.runner import EvalConfig, run_eval
+
+    if page:
+        from mailroom_reloaded.obs import pager as pager_mod
+
+        pager_mod.Pager(
+            pager_mod.load_pager_config({**os.environ, "MAILROOM_PAGER_MODE": "research"})
+        ).start_background()
 
     cfg = EvalConfig(
         revision=revision,
@@ -164,6 +190,18 @@ def eval(
     )
     run_id = run_eval(cfg)
     typer.echo(run_id)
+
+
+@app.command(
+    "pager",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    add_help_option=False,
+)
+def pager_command(ctx: typer.Context) -> None:
+    """Operator SMS pings: status | on | off | number | test | preview | log | mute | run."""
+    from mailroom_reloaded.obs.pager import main
+
+    raise typer.Exit(main(list(ctx.args)))
 
 
 @app.command("train-gate")

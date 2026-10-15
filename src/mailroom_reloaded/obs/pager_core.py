@@ -327,9 +327,10 @@ def evaluate_rules(snap: RunSnapshot, cfg: PagerConfig, baseline: dict) -> list[
         out.append(Alert(key, sev, title, detail, nxt, baseline.get(key, now)))
 
     if R["watcher_down"]["enabled"] and snap.watcher_alive is False:
-        age = _dur(snap.heartbeat_age_s) if snap.heartbeat_age_s is not None else "unknown time"
+        why = (f"no heartbeat for {_dur(snap.heartbeat_age_s)}" if snap.heartbeat_age_s is not None
+               else "no watcher process is running")
         cmd = "mailroom watch" if snap.repo == "mailroom-reloaded" else "python -m pipeline.watcher"
-        add("watcher_down", "critical", f"the watcher has stopped (no heartbeat for {age})", f"restart with `{cmd}`")
+        add("watcher_down", "critical", f"the watcher has stopped ({why})", f"restart with `{cmd}`")
     for p in snap.providers:
         detail = f"{p.errors} of {p.calls} calls failed ({p.detail})" if p.calls and p.detail else p.detail
         if p.state == "down" and R["provider_down"]["enabled"]:

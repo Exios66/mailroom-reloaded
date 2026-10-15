@@ -233,6 +233,20 @@ semconv `gen_ai.client.token.usage` / `gen_ai.client.operation.duration`.
 Observability and engine ports bind to `127.0.0.1` only in the prod compose
 (`docker-compose.yml:68-69`, `docker-compose.yml:107`, etc.).
 
+## Operator SMS pings
+
+Off by default. `mailroom pager on --to +16085551234` enables texts (a 10-digit US number is
+normalized), `mailroom pager test` sends a test text, `mailroom pager preview [--alert] [--json]` prints
+what the phone would get without sending, and `mailroom pager off | number set|add|remove|list | log | mute 2h | status`
+manage the rest. On a live TTY start, `mailroom serve` and `mailroom watch` ask whether to enable texts
+(`--pager/--no-pager` skip the question). A sender scans every 60 s, texts only on failures, and sends a
+digest every 10 minutes: run progress, the window's outcomes and spend from the archive ledger, queues,
+and Modal/OpenRouter status from passive LLM outcomes (Modal is never probed). `mailroom eval --page`
+texts eval progress. One sender per data dir (`pager.lock`): the API lifespan, `watch`, or
+`mailroom pager run`. Only `mailroom pager run` as its own process can text "watcher stopped" when the API
+itself dies. Each text ends with `Ref P-…`; the same facts as `mailroom.pager/v1` JSON go to
+`<base_dir>/pager_log.jsonl` (`mailroom pager log --json`). Variables: [CONFIGURATION.md](CONFIGURATION.md#operator-sms-pager).
+
 ## Cost
 
 - Per-document estimated cost is attached to each report (`cost.usd`,
