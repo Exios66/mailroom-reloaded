@@ -1,48 +1,151 @@
 # Operator SMS Pings Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task (the model/effort per task is fixed in **Execution** below). Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** While a mailroom is running — live production or a research/experiment run — text the operator's phone a compact 10-minute digest of run metrics, events and Modal/OpenRouter provider state, plus an immediate alert (and a later "recovered" text) whenever the 60-second watcher scan finds something that needs a human. Healthy scans stay silent.
+**Goal:** While a mailroom runs (live production or a research/experiment run), text the operator's own mobile or Google Voice number. Send a digest of run metrics, events and Modal/OpenRouter status on a configurable cadence (default 10 min). A configurable watcher scan (default 60 s) stays silent while healthy and texts only on failures that need a human, followed by one "recovered" text.
 
-**Architecture:** A new `pipeline/pager/` package in `llm-mailroom` (Part A) does four things: it collects a `RunSnapshot` (catalog, bins, heartbeat, outbox, pause flag, provider health, research progress); it runs pure alert rules with latch/cooldown/resolve state; it renders SMS text in one fixed house style; and it sends through a pluggable transport (Twilio REST, email-to-SMS gateway, or console). The pager runs **outside** the app process, inside the existing `pipeline.watchdog` loop (or standalone with `python -m pipeline.pager`), so it can still text when the watcher dies. Provider status is collected **passively**: every LLM call already goes through `llm/retry.py`, which records outcomes to a shared file. That way the pager never wakes a scaled-to-zero Modal GPU. Part B ports the pure modules unchanged to `mailroom-reloaded` and swaps the snapshot collector for one that reads its run ledger.
+**Architecture:** Each repo gets three small modules and no new package directory.
+- **Pure core** (`pager_core.py`): config resolution, alert rules with the frequency state machine, and the SMS renderers. It is copied verbatim between the two repos.
+- **Transport** (`sms_notify.py` / `sms.py`): sends through Twilio REST, the email gateway, or the console.
+- **Host** (`pager.py`): collects the repo-specific snapshot, runs the scheduler, and provides the CLI.
 
-**Tech Stack:** Python 3.11, `httpx` (already a dependency, used for Twilio + OpenRouter REST), stdlib `fcntl`/`json`/`zoneinfo`, structlog, pytest. No new runtime dependency.
+Every tunable lives in a `pager:` block of the repo's existing `taxonomy.yaml`. Selected env vars override it, following the repos' documented order: env → taxonomy → default. Provider status is passive: LLM call outcomes are recorded at the existing retry choke point, so the pager never wakes a scaled-to-zero Modal GPU.
 
-**Spec:** the operator request of 2026-10-15 (session transcript) — summarized in "Requirements" below; this plan is the spec of record until a design doc supersedes it.
+**Tech Stack:** Python 3.11, `httpx` (already a dependency in both repos), stdlib `fcntl`/`zoneinfo`/`json`, structlog, pytest. **No new dependencies.**
 
-## Requirements (from the request)
+**Spec:** the operator requests of 2026-10-15 in this session. R1–R12 below are the spec of record.
+
+## Requirements
 
 | # | Requirement |
 |---|---|
-| R1 | Operator phone number is configurable; pings are SMS. |
-| R2 | Works for **production/live** mailroom and **research/experimental** runs. |
-| R3 | Periodic digest **every 10 minutes** while the mailroom is live. |
-| R4 | Digest includes the **Modal job / OpenRouter** status. |
-| R5 | Digest carries **full run metrics & events**, concise and easy to read; "pretty" formatting. |
-| R6 | Local/dev server running the mailroom integrates and delivers the SMS. |
-| R7 | Integrated watcher **scans every 60 s**; it adds ping content **only** on failures needing attention. |
-| R8 | Healthy scans are **silent** (no operator overload). |
-| R9 | Look-and-feel follows the Gmail intake echo/status emails (status emoji header, labeled rows, "why / next steps"). |
+| R1 | Recipient is the operator's **own mobile number or Google Voice number** (either, or both). |
+| R2 | Works for **production/live** and **research/experimental** runs. |
+| R3 | Periodic digest, default **every 10 minutes**, while the mailroom is live. |
+| R4 | Digest includes **Modal job / OpenRouter** status. |
+| R5 | Digest carries full run metrics & events, concise, with emoji house-style formatting (like the Gmail echo/status emails). |
+| R6 | The local/dev server running the mailroom delivers the SMS. |
+| R7 | Watcher scans default **every 60 s**; adds content **only** on failures needing attention. |
+| R8 | Healthy scans are **silent**. |
+| R9 | **Full frequency configuration**: digest cadence, scan cadence, re-alert cooldowns, recovery debounce, idle behavior, quiet hours, hourly cap, mute, and per-rule enable/threshold. |
+| R10 | Implemented by subagents: **Sonnet @ high** or **Haiku @ max**. |
+| R11 | Concise, minimal footprint, placed in each repo's existing layout. No bloat. |
+| R12 | Same behavior, copy and config keys in **both** repos. |
 
 ## Global Constraints
 
-- Kill-switch default **off**: `MAILROOM_PAGER=1` *and* a valid `MAILROOM_PAGER_TO` are both required to send anything.
-- Fail-soft: no pager code path may raise into its host (watchdog, watcher, run scripts); failures log `pager_*` structlog events and return.
-- Hermetic tests: no network. Every send goes through `set_transport_override()`, and every HTTP call takes an injectable `httpx.Client`.
-- Secrets (`TWILIO_AUTH_TOKEN`, `OPENROUTER_API_KEY`) are never logged; phone numbers are logged only through `mask_number()` → `+1•••••1234`.
-- **Never actively probe a Modal tier by default.** A GET on a scaled-to-zero `*.modal.run` endpoint triggers a GPU cold start (spend). Only passive health is used, plus the read-only `modal container list --json` when the CLI is on PATH. Active probing is opt-in with `MAILROOM_PAGER_PROBE_MODAL=1`.
-- Respect the 2026-09-04 email anti-spam directive (`status_notify.py`): **no periodic emails.** The email-gateway transport is an SMS route the operator explicitly configures, and it never goes to `MAILROOM_STATUS_EMAIL`.
-- Exactly one pager sends per data dir: `data/pager.lock` (`flock`, non-blocking). A second host logs `pager_lock_held` and stays passive.
-- Pager state survives restarts: `data/pager_state.json` (atomic write via temp + `os.replace`). A restart must not resend an alert that is already latched or reset the digest clock.
-- SMS body ≤ `MAILROOM_PAGER_MAX_CHARS` (default **640**). Overflow is trimmed from the lowest-priority section, never mid-line, and ends with `…+N more`.
-- Default display timezone is the host's local tz; override with `MAILROOM_PAGER_TZ` (IANA name).
-- Every behavior change ships with its test, a `CHANGELOG.md` entry and a docs update in the same commit (repo AGENTS.md law).
+- **No new dependencies, no new package directories, no new API routes, no new docs pages, no fixture directories.** Docs go into existing files only.
+- Size budget (source lines, excluding tests). Exceeding a budget by more than 20% needs a reason in the commit body.
+
+  | Module | Max lines |
+  |---|---|
+  | `pager_core.py` | 380 |
+  | `sms_notify.py` / `sms.py` | 150 |
+  | `pager.py` (llm-mailroom) | 320 |
+  | `pager.py` (mailroom-reloaded) | 260 |
+  | `provider_health.py` / `health.py` | 90 |
+
+- `pager_core.py` is **byte-identical** in both repos, apart from its one-line module docstring header naming the repo. It imports only the stdlib: no repo imports, no I/O, no clock reads. `now` is always a parameter.
+- Kill-switch default **off**. Sending requires `enabled` (taxonomy `pager.enabled` or `MAILROOM_PAGER=1`) **and** at least one valid recipient.
+- Fail-soft: pager code never raises into its host (watchdog, watcher, API lifespan, run scripts). Failures log one `pager_*` structlog event.
+- Hermetic tests: no network. Sends go through `set_transport_override()`, and HTTP takes an injectable `httpx.Client` (`httpx.MockTransport` in tests).
+- Secrets are never logged. Numbers are logged only via `mask_number()` → `+1•••••1234`.
+- **Never actively probe a Modal tier by default.** A request to a scaled-to-zero `*.modal.run` URL cold-starts a GPU. Use passive health plus the read-only `modal container list --json`; the opt-in probe only touches tiers that are already warm.
+- Email anti-spam directive (2026-09-04, `pipeline/status_notify.py`): the pager never emails `MAILROOM_STATUS_EMAIL`.
+- One sender per data dir: `fcntl.flock` on `<base_dir>/pager.lock`. State persists at `<base_dir>/pager_state.json` (temp file + `os.replace`).
+- Each behavior change carries its test, a `CHANGELOG.md` line and a doc update in the same commit (both repos' AGENTS.md).
+
+## Recipients: personal number or Google Voice (R1)
+
+| Recipient | `transport: twilio` (recommended) | `transport: email_gateway` (free fallback) | `transport: console` |
+|---|---|---|---|
+| Personal mobile (`+1…`) | ✅ | ✅ Use the carrier gateway address (e.g. `6085551234@vtext.com`, T-Mobile `@tmomail.net`). Best-effort; some carriers (AT&T, 2025) have retired their gateways. | dev only |
+| Google Voice (`+1…`) | ✅ GV receives SMS from Twilio **long-code / toll-free** senders. GV does **not** receive short codes, so never configure a short code. | ❌ GV has no carrier gateway | dev only |
+
+Recipient rules that the implementation enforces and the operator docs state:
+- `recipients` is a list. `MAILROOM_PAGER_TO="+16085551234,+14145550000"` sends each text to every entry.
+- For `twilio`/`console`, entries must be E.164 (`^\+[1-9]\d{7,14}$`). For `email_gateway`, entries must be email addresses. A mismatched entry is dropped with a `pager_recipient_invalid` warning. Zero valid entries disables the pager.
+- A Google Voice number is **receive-only** here. GV has no sending API, so it can never be the *sender*.
+- Twilio **trial** accounts only deliver to numbers verified in the Twilio console, so verify the mobile/GV number there. Trial messages carry a "Sent from your Twilio trial account" prefix.
+- US delivery from a Twilio number requires **A2P 10DLC** (sole-proprietor brand) or **toll-free verification**. A verified toll-free sender is the simplest choice for one operator texting themselves.
+- In Google Voice, save the Twilio sender as a contact so GV's spam filter doesn't hide the texts.
+
+## Configuration (R9): `pager:` block in `taxonomy.yaml`
+
+Added to `llm-mailroom/src/config/taxonomy.yaml` and `mailroom-reloaded/src/mailroom_reloaded/config/taxonomy.yaml` with **exactly** these keys and defaults. `pager_core.PagerConfig.resolve` validates them. An unknown key logs a `pager_config_unknown_key` warning, and a bad value falls back to the default with `pager_config_invalid`.
+
+```yaml
+pager:
+  enabled: false                 # env MAILROOM_PAGER
+  recipients: []                 # env MAILROOM_PAGER_TO (comma list) — mobile and/or Google Voice, E.164
+  transport: twilio              # twilio | email_gateway | console        env MAILROOM_PAGER_TRANSPORT
+  mode: auto                     # auto | production | research           env MAILROOM_PAGER_MODE
+  style: emoji                   # emoji | ascii (ascii = GSM-7, ~2.3x cheaper)   env MAILROOM_PAGER_STYLE
+  max_chars: 640                 # per text, floor 160
+  timezone: ""                   # IANA name; blank = host local          env MAILROOM_PAGER_TZ
+  digest:
+    production_minutes: 10       # 0 disables digests                    env MAILROOM_PAGER_DIGEST_MINUTES (sets both)
+    research_minutes: 10
+    align_to_clock: true         # fire at :00/:10/:20… instead of start-relative
+    when_idle: true              # false: skip windows with 0 docs and no open alerts…
+    idle_heartbeat_minutes: 60   # …but still send one "· IDLE" digest this often (0 = never)
+  scan:
+    seconds: 60                  # floor 15                               env MAILROOM_PAGER_SCAN_SECONDS
+    degraded_after_scans: 2      # warnings must persist N scans before texting
+    recover_after_scans: 2       # an alert must stay clear N scans before "recovered"
+  alerts:
+    critical_cooldown_minutes: 15  # re-text a still-open critical
+    warning_cooldown_minutes: 60   # re-text a still-open warning
+    send_recovered: true
+    max_texts_per_hour: 12         # all texts; see "Frequency state machine"
+  quiet_hours:
+    window: ""                   # "22:00-07:00" (may cross midnight); blank = off   env MAILROOM_PAGER_QUIET_HOURS
+    allow: critical              # none | critical | all — what may text during quiet hours
+    catch_up_digest: true        # one digest when quiet hours end
+  rules:                         # each: enabled + its thresholds; severity fixed per rule
+    watcher_down:        {enabled: true}
+    provider_down:       {enabled: true}
+    provider_degraded:   {enabled: true, error_rate: 0.25, min_calls: 4}
+    openrouter_credit:   {enabled: true, below_usd: 1.0}
+    docs_failed:         {enabled: true, critical_at: 5}
+    review_backlog:      {enabled: true, threshold: 20}
+    stuck_docs:          {enabled: true, minutes: 15}
+    ingestion_paused:    {enabled: true}
+    outbox_dead:         {enabled: true}      # llm-mailroom only; ignored in mailroom-reloaded
+    run_stalled:         {enabled: true, minutes: 15}
+  providers:
+    openrouter_cache_minutes: 5
+    probe_modal: false           # opt-in; only probes tiers that already have a warm container
+```
+
+Secrets are env-only: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` **or** `TWILIO_MESSAGING_SERVICE_SID`. Email-gateway sending reuses each repo's existing SMTP settings. `mode: auto` resolves to `research` when the environment name is `pilot`/`misc`/`mock`/`eval`, and to `production` otherwise. The environment name comes from `OBSERVABILITY_ENVIRONMENT` in llm-mailroom and `obs.run_context.environment_name()` in mailroom-reloaded.
+
+Runtime controls (CLI, written to the state file, no restart):
+- `pager mute <duration|off>` — e.g. `2h`, `30m`. Suppresses everything except criticals (criticals obey `quiet_hours.allow`).
+- `pager config` — prints the effective resolved config, each value's source (`env`/`taxonomy`/`default`), and the masked recipients.
+
+### Frequency state machine (pinned by tests)
+
+Each scan and each digest tick passes through these gates, in this order:
+1. **Mute / quiet hours.**
+   - While muted, only criticals pass.
+   - Inside the quiet window, `allow` decides: `none` blocks everything, `critical` passes only criticals, `all` passes everything.
+   - A blocked alert stays *pending* and goes out when the window ends, if it is still open.
+   - When quiet hours end, `catch_up_digest` sends **one** digest. Missed digests are never back-filled.
+2. **Debounce.** A warning texts only after `degraded_after_scans` consecutive failing scans. A critical texts on the first failing scan.
+3. **Cooldown.** An open alert re-texts only after `critical_cooldown_minutes` or `warning_cooldown_minutes`.
+4. **Recovery.** An alert closes after `recover_after_scans` consecutive clear scans. If `send_recovered` is on, the closures are batched into one recovered text.
+5. **Hourly cap.** `max_texts_per_hour` uses a rolling 60-min window over sent texts (per send event, not per recipient).
+   - At the cap, criticals are **still sent**.
+   - Digests and warnings are dropped. Dropped warnings are listed in the next digest's WATCH line as `+N held`.
+6. **Healthy.** No open keys and nothing recovered → nothing is sent (R8).
+7. **Send failure.** A failed send never marks an alert sent, so the next scan retries it. The digest clock still advances, so a failed send never causes a burst of late digests.
 
 ## Message house style (fixed copy — tests pin it)
 
-Emoji style (default). `ascii` style swaps each emoji for a bracket tag (`🟢`→`[OK]`, `🟠`→`[WARN]`, `🔴`→`[CRIT]`, `💤`→`[idle]`, `✅`→`[OK]`, `🚨`→`[ALERT]`, `🧪`→`[RUN]`, `📬`→`[MAIL]`, `🟡`→`[REV]`, `▓`→`#`, `░`→`-`). That keeps a message in GSM-7: 153 chars per segment instead of 67.
+`ascii` style maps `🟢→[OK] 🟠→[WARN] 🔴→[CRIT] 🟡→[REV] 💤→[idle] ✅→[OK] 🚨→[ALERT] 🧪→[RUN] 📬→[MAIL] ⏸→[PAUSED] 🔕→[MUTED] ▓→# ░→-`.
 
-**Production digest** (every 10 min):
+Production digest:
 ```
 📬 MAILROOM · LIVE · 14:20 CDT
 🟢 HEALTHY · up 3h12m · git a1b2c3d
@@ -60,9 +163,9 @@ OpenRouter 🟢 $4.12 left
 
 WATCH 10m: 0 alerts
 ```
-The header status word is one of `🟢 HEALTHY`, `🟠 DEGRADED` (any open warning), `🔴 ATTENTION` (any open critical), or `⏸ PAUSED` (ingestion paused).
+The header state is `🟢 HEALTHY`, `🟠 DEGRADED` (open warning), `🔴 ATTENTION` (open critical) or `⏸ PAUSED` (ingestion paused); `🔕 MUTED until 16:20` is appended while muted. The `LAST 10 MIN` label follows the configured cadence. The WATCH line reads e.g. `WATCH 10m: 2 alerts (1 resolved) · +3 held`.
 
-**Research digest** (`mode=research`; one block per active run, at most 2, then `+N more runs`):
+Research digest (at most 2 run blocks, then `+N more runs`):
 ```
 🧪 MAILROOM · RESEARCH · 14:20 CDT
 run pilot-real-1019 · run_pilot --real
@@ -76,9 +179,9 @@ OpenRouter 🟢 $4.12 left
 
 WATCH 10m: 1 alert (resolved)
 ```
-`acc` is printed only when the run reports ground-truth accuracy. Without it the line starts at `review`.
+`acc` appears only when the run reports ground-truth accuracy. ETA appears only once `done ≥ 3`.
 
-**Alert** (watcher scan; sent immediately, critical first):
+Alert / recovered / run events:
 ```
 🚨 MAILROOM ALERT · 14:23 CDT
 🔴 Modal extract tier DOWN
@@ -87,504 +190,322 @@ WATCH 10m: 1 alert (resolved)
 last: claim_0042.pdf — extraction timeout
 → next: check data/watcher.out · GET /health
 ```
-**Recovered** (once, when every latched alert key in the message has cleared):
 ```
 ✅ MAILROOM RECOVERED · 14:41 CDT
 Modal extract tier — OK after 18m
 ```
-**Run start / finish** (research mode only; one text each):
 ```
 🧪 RUN STARTED · pilot-real-1019 · 100 docs
 🧪 RUN FINISHED · pilot-real-1019 · 1h04m
 acc 0.88 · review 5% · failed 1 · $3.30
 ```
+Formats: durations `3h12m` / `18m` / `45s`; money `$0.21` (2 dp) and per-doc `$0.033` (3 dp); integer percentages; 10-cell progress bar rounded down. Overflow past `max_chars` drops whole lines from the lowest-priority section first, then appends `…+N more`. Priority, highest first: header → alerts/WATCH → window metrics → providers → queues.
 
 ## Review Focus
 
-1. **Overnight idle production** — 144 digests/day at ~5 UCS-2 segments each costs real money. With `MAILROOM_PAGER_DIGEST_WHEN_IDLE=0`, a window with zero documents and no open alert sends nothing, except one digest per hour titled `· IDLE`. (Default stays `1` per R3.) Test: `test_idle_window_suppressed_except_hourly` in Task 9.
-2. **Flapping provider** — a Modal tier that alternates 503/200 across scans must not produce alert/recover/alert texts every minute. A key must stay clear for 2 consecutive scans before it counts as resolved, and the re-alert cooldown is 30 min. Test: `test_flapping_key_does_not_spam` in Task 8.
-3. **Twilio failure mid-incident** — a 5xx/timeout on the alert send must not mark the alert as delivered. The latch reverts so the next scan retries, the same as watchdog.py's `down_alerted` revert. Test: `test_failed_send_keeps_alert_pending` in Task 9.
-4. **Watcher dead** — the app process is gone, so the catalog may still be readable but the heartbeat is stale. The pager (in the watchdog process) must still send one `🔴 Watcher DOWN` SMS and must not crash on a locked/missing catalog DB. Test: `test_snapshot_survives_missing_catalog` in Task 5 and `test_watchdog_down_also_pages` in Task 9.
-5. **Non-E.164 / unset phone number** — `608-555-1234` or an empty value must disable the pager with one `pager_misconfigured` warning at start and must never attempt a send. Test: `test_invalid_number_disables` in Task 1.
+1. **Quiet hours crossing midnight.** Window `22:00-07:00`, digest due 06:50 → suppressed. At 07:00 exactly one catch-up digest goes out, and a critical at 23:30 still texts when `allow: critical`. Test `test_quiet_hours_cross_midnight_and_catch_up` (Task 2).
+2. **Flapping provider.** A tier alternating 503/200 across scans must yield exactly one alert and no alert/recover churn. Test `test_flapping_key_does_not_spam` (Task 2).
+3. **Hourly cap during an incident.** At `max_texts_per_hour`, criticals still send, while digests and warnings are held and counted. Test `test_cap_lets_criticals_through_and_holds_rest` (Task 2).
+4. **Twilio failure mid-incident.** The alert stays pending and is retried on the next scan, with no duplicate once it succeeds. Test `test_failed_send_keeps_alert_pending` (Task 5).
+5. **Watcher process dead.** The pager runs in the watchdog. The catalog may be missing or locked and the heartbeat stale; one `🔴 Watcher DOWN` text is still sent and no source failure blanks the digest. Tests `test_snapshot_survives_missing_catalog` (Task 4) and `test_watchdog_down_also_pages` (Task 5).
 
 ---
 
-# Part A — `llm-mailroom` (branch `claude/mailroom-operator-sms-pings-o63gx2`)
+## Execution (R10)
 
-All paths are relative to the repo root. Run tests with `PYTHONPATH=src python -m pytest src/tests/<file> -q`.
+Dispatch with **superpowers:subagent-driven-development**. The controller (this session) only dispatches, relays interfaces, and runs the final verification; it writes no feature code. Pass `model` and `effort` on every `Agent` call:
 
-## File map
+| Task | Implementer | Reviewer (one combined spec + quality review) |
+|---|---|---|
+| 1 Transport + config wiring (A) | `haiku` · `max` | `sonnet` · `high` |
+| 2 `pager_core.py` rules + renderers (A) | `sonnet` · `high` | `sonnet` · `high` |
+| 3 Provider health (A) | `haiku` · `max` | `sonnet` · `high` |
+| 4 Snapshot (A) | `sonnet` · `high` | `sonnet` · `high` |
+| 5 Pager host + watchdog + research hooks + docs (A) | `sonnet` · `high` | `sonnet` · `high` |
+| 6 Port core + transport + health (B) | `haiku` · `max` | `haiku` · `max` (parity is mechanical: `diff` + tests) |
+| 7 Ledger snapshot + host + CLI + docs (B) | `sonnet` · `high` | `sonnet` · `high` |
+| Final whole-branch review, per repo | — | `sonnet` · `high` |
 
-| File | Responsibility |
+Rules for usage efficiency:
+- Each implementer prompt contains **only**: its task section, the Global Constraints, the Configuration block, the house style (Tasks 2/6 only), and the Interfaces it consumes. Never the whole plan.
+- One combined review per task, not two passes. A failed review re-dispatches the **same** implementer via `SendMessage` with the findings; it is not a fresh agent.
+- Each implementer runs only its own test file plus the named neighbor suites. The full suite runs once per repo, in the final review.
+- Order: `1 → 2 → 3 → 4 → 5` (llm-mailroom), then `6 → 7` (mailroom-reloaded). Task 6 may start as soon as Tasks 1–3 are approved.
+
+---
+
+# Part A — `llm-mailroom`
+
+Branch `claude/mailroom-operator-sms-pings-o63gx2`. Test runner: `PYTHONPATH=src python -m pytest <file> -q`. Fixture for an isolated data dir: `temp_base_dir` (`src/tests/conftest.py`).
+
+| File | Change |
 |---|---|
-| `src/pipeline/pager/__init__.py` | re-exports `Pager`, `PagerConfig`, `report_run_progress` |
-| `src/pipeline/pager/config.py` | env → `PagerConfig`, number validation/masking |
-| `src/pipeline/pager/transport.py` | `Transport` protocol, Twilio / email-gateway / console, segment counting, test seam |
-| `src/pipeline/provider_health.py` | passive per-provider LLM outcome log shared across processes |
-| `src/pipeline/pager/providers.py` | `ProviderStatus` derivation: Modal (passive + CLI), OpenRouter `/key`, quota breaker |
-| `src/pipeline/pager/progress.py` | research-run progress files (`data/pager_runs/<run_id>.json`) |
-| `src/pipeline/pager/snapshot.py` | `RunSnapshot` collection (catalog, bins, heartbeat, outbox, pause, providers, runs) |
-| `src/pipeline/pager/rules.py` | pure alert rules + latch/cooldown/resolve state machine |
-| `src/pipeline/pager/format.py` | pure renderers for digest / research digest / alert / recovered / run start-finish |
-| `src/pipeline/pager/service.py` | `Pager.tick(now)` scheduler, state file, lock |
-| `src/pipeline/pager/__main__.py` | CLI: `run`, `preview`, `test` |
-| Modify `src/llm/retry.py` | record each attempt's outcome via `provider_health.record_llm_outcome` |
-| Modify `src/storage/catalog.py` | add `window_stats(since, run_id=None)` and `recent_failures(since, limit)` |
-| Modify `src/pipeline/watchdog.py` | host `Pager.tick` in its loop; page on DOWN |
-| Modify `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py` | progress reporting + `--page` flag |
-| Modify `deploy/docker-compose.full.yml`, `.env.example`, `AGENTS.md` Commands, `docs/operator-pings.md` (new), `CHANGELOG.md` | ops surface |
-| Tests: `src/tests/test_pager_*.py`, `src/tests/test_provider_health.py` | one file per module |
+| `src/config/taxonomy.yaml` | add the `pager:` block (above) after `free_quota:` |
+| `src/pipeline/sms_notify.py` | **new** — transports + recipient validation (sibling of `status_notify.py`) |
+| `src/pipeline/pager_core.py` | **new** — pure config resolution, rules/state machine, renderers |
+| `src/llm/provider_health.py` | **new** — passive LLM outcome log (sibling of `llm/quota.py`) |
+| `src/llm/retry.py` | record each attempt in `retry_chat_completion` |
+| `src/storage/catalog.py` | add `window_stats()` + `recent_failures()` |
+| `src/pipeline/pager.py` | **new** — snapshot, scheduler, lock/state, CLI (`python -m pipeline.pager`) |
+| `src/pipeline/watchdog.py` | host `Pager.tick()`; page on DOWN |
+| `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py` | progress reporting + `--page` |
+| `deploy/docker-compose.full.yml` (watchdog env), `.env.example`, `AGENTS.md` (Commands), `deploy/README.md` (one "Operator SMS pings" section), `CHANGELOG.md` | ops surface |
+| Tests: `src/tests/test_sms_notify.py`, `test_pager_core.py`, `test_provider_health.py`, `test_pager.py` | one per module |
 
----
+### Task 1: SMS transport + taxonomy block
 
-### Task 1: Pager configuration
+**Files:** Modify `src/config/taxonomy.yaml`; Create `src/pipeline/sms_notify.py`; Test `src/tests/test_sms_notify.py`.
 
-**Files:**
-- Create: `src/pipeline/pager/__init__.py`, `src/pipeline/pager/config.py`
-- Test: `src/tests/test_pager_config.py`
+**Interfaces — Produces:**
+- `@dataclass(frozen=True) class SendResult: ok: bool; transport: str; segments: int; detail: str = ""`
+- `class Transport(Protocol): name: str; def send(self, to: str, body: str) -> SendResult`
+- `TwilioTransport(sid: str, token: str, *, from_number: str | None, service_sid: str | None, client: httpx.Client | None = None)`
+  - Sends `POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json` with basic auth and form fields `To`, `Body`, plus `MessagingServiceSid` if set, otherwise `From`. Timeout 10 s.
+  - `ok` iff HTTP 201. `detail` is the message `sid` on success, otherwise `"HTTP <code>: <message>"`.
+- `EmailGatewayTransport(smtp_cfg: dict, smtp_factory=None)` — `smtp_cfg` comes from `status_notify._smtp_config()`. Sends plain text with an empty subject.
+- `ConsoleTransport(stream=sys.stdout)` — prints the body framed by `─` rules plus an `encoding · N segments` footer; always ok.
+- `build_transport(name: str, env: Mapping[str, str] | None = None) -> Transport | None` — `None` (plus a `pager_transport_unconfigured` warning listing the missing env var names) when credentials are absent.
+- `set_transport_override(t: Transport | None) -> None` — test seam that `build_transport` honours.
+- `valid_recipients(raw: Iterable[str], transport: str) -> list[str]` — E.164 for `twilio`/`console`, email for `email_gateway`. Drops and warns as described in "Recipients".
+- `mask_number(s: str) -> str` (`+16085551234` → `+1•••••1234`; for an email, mask the local part: `60•••34@vtext.com`).
+- `count_segments(body: str) -> tuple[Literal["GSM-7","UCS-2"], int]` — GSM-7 160 / 153 per part; UCS-2 70 / 67, counting UTF-16 units.
 
-**Interfaces:**
-- Produces:
-  - `@dataclass(frozen=True) class PagerConfig` with fields and env sources:
-    `enabled: bool` (`MAILROOM_PAGER`, default False) · `to: str` (`MAILROOM_PAGER_TO`, E.164) ·
-    `transport: Literal["twilio","email_gateway","console"]` (`MAILROOM_PAGER_TRANSPORT`, default `"twilio"`) ·
-    `mode: Literal["production","research"]` (`MAILROOM_PAGER_MODE`; default `"research"` when `OBSERVABILITY_ENVIRONMENT` ∈ {`pilot`,`misc`,`mock`}, else `"production"`) ·
-    `digest_minutes: float = 10.0` (`MAILROOM_PAGER_DIGEST_MINUTES`, floor 1) · `scan_seconds: float = 60.0` (`MAILROOM_PAGER_SCAN_SECONDS`, floor 15) ·
-    `alert_cooldown_minutes: float = 30.0` · `max_chars: int = 640` (floor 160) · `style: Literal["emoji","ascii"] = "emoji"` ·
-    `digest_when_idle: bool = True` · `tz: str` (`MAILROOM_PAGER_TZ`, default host local) · `probe_modal: bool = False` ·
-    `openrouter_min_credit: float = 1.0` (`MAILROOM_PAGER_OPENROUTER_MIN_CREDIT`) ·
-    `twilio_sid`, `twilio_token`, `twilio_from`, `twilio_messaging_service_sid` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`, `TWILIO_MESSAGING_SERVICE_SID`) ·
-    `gateway_address: str | None` (`MAILROOM_PAGER_GATEWAY_ADDRESS`, e.g. `6085551234@vtext.com`).
-  - `PagerConfig.from_env(env: Mapping[str, str] | None = None) -> PagerConfig`
-  - `PagerConfig.problems() -> list[str]` — empty means sendable.
-  - `PagerConfig.active -> bool` — `enabled and not problems()`.
-  - `mask_number(number: str) -> str`
-
-- [ ] **Step 1: Write the failing tests**
-
+- [ ] **Step 1: Write failing tests**
 ```python
-def test_defaults_off():
-    cfg = PagerConfig.from_env({})
-    assert cfg.enabled is False and cfg.active is False
-    assert (cfg.digest_minutes, cfg.scan_seconds, cfg.max_chars) == (10.0, 60.0, 640)
-
-def test_invalid_number_disables():
-    cfg = PagerConfig.from_env({"MAILROOM_PAGER": "1", "MAILROOM_PAGER_TO": "608-555-1234",
-                                "MAILROOM_PAGER_TRANSPORT": "console"})
-    assert cfg.active is False
-    assert any("E.164" in p for p in cfg.problems())
-
-def test_twilio_requires_credentials_and_sender():
-    cfg = PagerConfig.from_env({"MAILROOM_PAGER": "1", "MAILROOM_PAGER_TO": "+16085551234"})
-    assert {"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER|TWILIO_MESSAGING_SERVICE_SID"} <= {
-        p.split(" ")[0] for p in cfg.problems()}
-
-def test_mode_follows_observability_environment():
-    assert PagerConfig.from_env({"OBSERVABILITY_ENVIRONMENT": "pilot"}).mode == "research"
-    assert PagerConfig.from_env({"OBSERVABILITY_ENVIRONMENT": "live"}).mode == "production"
-
-def test_floors_and_mask():
-    cfg = PagerConfig.from_env({"MAILROOM_PAGER_SCAN_SECONDS": "2", "MAILROOM_PAGER_MAX_CHARS": "50"})
-    assert cfg.scan_seconds == 15 and cfg.max_chars == 160
-    assert mask_number("+16085551234") == "+1•••••1234"
-```
-
-- [ ] **Step 2: Run** `PYTHONPATH=src python -m pytest src/tests/test_pager_config.py -q` — expected FAIL (`ModuleNotFoundError: pipeline.pager`).
-- [ ] **Step 3: Implement** `config.py`. E.164 is `^\+[1-9]\d{7,14}$`. Each `problems()` string starts with the missing env var name (the test splits on the first space). Unparseable numbers fall back to the default, as `_env_float` does in `watchdog.py`.
-- [ ] **Step 4: Run** the tests — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): operator SMS pager configuration`.
-
----
-
-### Task 2: SMS transports
-
-**Files:**
-- Create: `src/pipeline/pager/transport.py`
-- Test: `src/tests/test_pager_transport.py`
-
-**Interfaces:**
-- Consumes: `PagerConfig` (Task 1).
-- Produces:
-  - `@dataclass(frozen=True) class SendResult: ok: bool; transport: str; segments: int; detail: str = ""`
-  - `class Transport(Protocol): name: str; def send(self, to: str, body: str) -> SendResult`
-  - `TwilioTransport(cfg, client: httpx.Client | None = None)` — `POST https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json`, basic auth `(sid, token)`, form `To`, `Body`, and `MessagingServiceSid` if set, else `From`; timeout 10 s; `ok` iff HTTP 201. `detail` = Twilio `sid` on success, else `"HTTP <code>: <message>"`.
-  - `EmailGatewayTransport(cfg, smtp_factory=None)` — reuses the Gmail-channel SMTP settings through `status_notify._smtp_config()`; plain text, no subject line (gateways prepend it to the SMS), body only.
-  - `ConsoleTransport(stream=sys.stdout)` — prints a boxed message; always `ok=True`.
-  - `build_transport(cfg: PagerConfig) -> Transport`
-  - `set_transport_override(t: Transport | None) -> None` — test/smoke seam honoured by `build_transport`.
-  - `count_segments(body: str) -> tuple[Literal["GSM-7","UCS-2"], int]` — GSM-7: 160 single / 153 per part; UCS-2: 70 / 67, counting UTF-16 code units (emoji = 2).
-
-- [ ] **Step 1: Write the failing tests** — use `httpx.MockTransport` for Twilio:
-
-```python
-def test_twilio_posts_form_and_reports_sid(): ...
-    # assert request.url.path == "/2010-04-01/Accounts/ACx/Messages.json"
-    # assert parse_qs(request.content)["To"] == ["+16085551234"]; From used when no service sid
-    # handler returns 201 {"sid": "SM1"} → SendResult(ok=True, transport="twilio", segments=1, detail="SM1")
-
-def test_twilio_error_is_soft():   # 400 {"message": "Invalid To"} → ok False, detail startswith "HTTP 400"
-def test_twilio_timeout_is_soft(): # handler raises httpx.ReadTimeout → ok False, no raise
-def test_secret_never_in_detail(): # token "tok-SECRET" absent from detail and captured logs
-
+def test_twilio_posts_form_and_reports_sid(): ...        # MockTransport: path, To, From; 201 {"sid":"SM1"} → ok, detail "SM1"
+def test_twilio_uses_messaging_service_when_set(): ...   # MessagingServiceSid present, From absent
+def test_twilio_error_and_timeout_are_soft(): ...         # 400 → ok False "HTTP 400…"; ReadTimeout → ok False, no raise
+def test_secret_never_logged_or_returned(caplog): ...     # "tok-SECRET" absent everywhere
+def test_valid_recipients_mobile_and_google_voice():
+    assert valid_recipients(["+16085551234", "+14145550000"], "twilio") == ["+16085551234", "+14145550000"]
+    assert valid_recipients(["608-555-1234", ""], "twilio") == []
+    assert valid_recipients(["6085551234@vtext.com", "+16085551234"], "email_gateway") == ["6085551234@vtext.com"]
 def test_count_segments():
-    assert count_segments("a" * 160) == ("GSM-7", 1)
-    assert count_segments("a" * 161) == ("GSM-7", 2)
-    assert count_segments("🟢" + "a" * 68) == ("UCS-2", 1)
-    assert count_segments("🟢" + "a" * 69) == ("UCS-2", 2)
-
-def test_override_wins(): set_transport_override(fake); assert build_transport(cfg) is fake
+    assert count_segments("a" * 160) == ("GSM-7", 1) and count_segments("a" * 161) == ("GSM-7", 2)
+    assert count_segments("🟢" + "a" * 68) == ("UCS-2", 1) and count_segments("🟢" + "a" * 69) == ("UCS-2", 2)
+def test_build_transport_missing_creds_returns_none(): ...
+def test_override_wins(): ...
+def test_taxonomy_has_pager_block():  # load_config()["pager"] has keys digest, scan, alerts, quiet_hours, rules, providers
 ```
+- [ ] **Step 2: Run** `PYTHONPATH=src python -m pytest src/tests/test_sms_notify.py -q` → FAIL (module missing).
+- [ ] **Step 3: Implement** `sms_notify.py` and add the taxonomy block verbatim from "Configuration".
+- [ ] **Step 4: Run** the same command and `src/tests/test_docs_truth.py` → PASS.
+- [ ] **Step 5: Commit** `feat(pager): SMS transports (Twilio, email gateway, console) + pager taxonomy block`.
 
-- [ ] **Step 2: Run** `... test_pager_transport.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `transport.py`. Every exception becomes `SendResult(ok=False, …)` and is logged with `to=mask_number(to)`.
-- [ ] **Step 4: Run** — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): Twilio, email-gateway and console SMS transports`.
+### Task 2: `pager_core.py` — config, frequency state machine, renderers
 
----
+**Files:** Create `src/pipeline/pager_core.py`; Test `src/tests/test_pager_core.py`.
+
+**Interfaces — Produces** (stdlib only, pure):
+- Config:
+  - `@dataclass(frozen=True) class PagerConfig` — one field per leaf of the `pager:` block, using nested frozen dataclasses `Digest`, `Scan`, `Alerts`, `QuietHours`, `Providers`, with `rules: dict[str, dict]`. Also `quiet: tuple[time, time] | None`, parsed from `quiet_hours.window`, and `sources: dict[str, str]` (dotted key → `env|taxonomy|default`).
+  - `PagerConfig.resolve(block: Mapping | None, env: Mapping[str, str], *, environment: str) -> PagerConfig` — applies the env overrides listed in "Configuration", plus the floors (`scan.seconds ≥ 15`, `max_chars ≥ 160`, minutes ≥ 0).
+  - `PagerConfig.digest_minutes(mode: str) -> float`.
+- Data model:
+  - `@dataclass(frozen=True) class ProviderStatus: name: str; state: Literal["up","warm","idle","degraded","down","unknown"]; detail: str = ""`
+  - `@dataclass(frozen=True) class RunProgress: run_id: str; label: str; total: int; done: int; started_at: float; updated_at: float; finished: bool; metrics: dict`
+  - `@dataclass(frozen=True) class RunSnapshot: taken_at: float; mode: str; watcher_alive: bool | None; heartbeat_age_s: float | None; uptime_s: float | None; sha: str | None; queues: dict[str, int]; window: dict; stuck: int; paused: dict | None; outbox_dead: int | None; providers: list[ProviderStatus]; runs: list[RunProgress]; failures: list[dict]; openrouter: dict | None`
+  - `@dataclass(frozen=True) class Alert: key: str; severity: Literal["critical","warning"]; title: str; detail: str = ""; next_step: str = ""`
+- Rules and state:
+  - `evaluate_rules(snap: RunSnapshot, cfg: PagerConfig, baseline: dict) -> list[Alert]` — one helper per rule in `cfg.rules`, skipping disabled rules. Keys: `watcher_down`, `provider_down:<name>`, `provider_degraded:<name>`, `openrouter_credit`, `docs_failed` (critical at `critical_at`), `review_backlog`, `stuck_docs`, `ingestion_paused`, `outbox_dead` (skipped when `snap.outbox_dead is None`), `run_stalled:<run_id>`.
+  - `@dataclass class PagerState` (`open`, `pending`, `sent_log: list[float]`, `next_digest`, `last_idle_digest`, `muted_until`, `in_quiet`, `held`, `runs_seen`, `baseline`) with `to_json() -> dict` / `from_json(d) -> PagerState`.
+  - `@dataclass(frozen=True) class Outbox: texts: list[tuple[str, str, list[str]]]`, where each entry is `(kind, body, alert_keys)` and `kind ∈ {"alert","recovered","digest","run"}`.
+  - `plan_scan(snap, cfg, state, now) -> tuple[Outbox, PagerState]` — applies the **Frequency state machine** gates 1–6.
+  - `plan_digest(snap, cfg, state, now) -> tuple[Outbox, PagerState]` — handles digest due (with `align_to_clock`), idle suppression and heartbeat, quiet/mute/cap, and catch-up.
+  - `mark_sent(state, kind, alert_keys, now, ok: bool) -> PagerState` — gate 7: on failure, keys stay pending.
+  - `next_digest_at(cfg, mode, now) -> float`.
+- Renderers (pure, honour `style`/`max_chars`/`timezone`):
+  - `render_digest(snap, cfg, state, now) -> str`
+  - `render_alert(alerts, snap, cfg, now) -> str`
+  - `render_recovered(items: list[tuple[Alert, float]], cfg, now) -> str`
+  - `render_run_event(run, event, cfg, now) -> str`
+  - `fit(sections: list[tuple[int, list[str]]], max_chars: int) -> str`
+
+- [ ] **Step 1: Write failing tests** (house-style goldens as inline triple-quoted strings, `timezone="America/Chicago"`, fixed `now`):
+```python
+def test_resolve_precedence_env_over_taxonomy_over_default(): ...   # + sources map
+def test_resolve_floors_and_bad_values(): ...                       # scan.seconds 2 → 15; "abc" → default + warning
+def test_quiet_window_parse_cross_midnight(): ...                   # "22:00-07:00"
+def test_mode_auto(): ...                                           # pilot/eval → research; live → production
+def test_healthy_scan_is_silent(): ...                              # Outbox([]) and no state change but baseline
+def test_critical_texts_first_scan_warning_after_debounce(): ...
+def test_cooldowns_per_severity(): ...                              # critical 15m, warning 60m
+def test_flapping_key_does_not_spam(): ...                          # down/up/down/up → 1 alert, 0 recovered
+def test_recovered_batched_after_n_clear_scans(): ...
+def test_quiet_hours_cross_midnight_and_catch_up(): ...             # Review Focus 1
+def test_mute_blocks_all_but_critical(): ...
+def test_cap_lets_criticals_through_and_holds_rest(): ...           # Review Focus 3; digest shows "+N held"
+def test_digest_aligned_to_clock_and_custom_cadence(): ...          # 10 → :10,:20; 15 → :15,:30
+def test_digest_disabled_when_minutes_zero(): ...
+def test_idle_suppressed_except_heartbeat(): ...                    # when_idle false, heartbeat 60
+def test_each_rule_toggle_and_threshold(): ...                      # parametrized over cfg.rules
+def test_golden_production_digest(): ...  test_golden_research_digest(): ...
+def test_golden_alert(): ...  test_golden_recovered(): ...  test_golden_run_events(): ...
+def test_ascii_style_is_gsm7(): ...
+def test_fit_drops_lowest_priority_whole_lines(): ...
+def test_state_json_roundtrip(): ...
+```
+- [ ] **Step 2: Run** `PYTHONPATH=src python -m pytest src/tests/test_pager_core.py -q` → FAIL.
+- [ ] **Step 3: Implement** `pager_core.py`. Its first docstring line is `"""Operator SMS pager core (shared verbatim with mailroom-reloaded/obs/pager_core.py)."""`, and it must not import from `pipeline`, `llm`, `storage`, or any third-party package.
+- [ ] **Step 4: Run** the tests → PASS. Run `wc -l src/pipeline/pager_core.py` and confirm ≤ 380.
+- [ ] **Step 5: Commit** `feat(pager): pure pager core — config resolution, frequency state machine, SMS renderers`.
 
 ### Task 3: Passive provider health
 
-**Files:**
-- Create: `src/pipeline/provider_health.py`
-- Modify: `src/llm/retry.py` (`retry_chat_completion` — after each attempt)
-- Test: `src/tests/test_provider_health.py`
+**Files:** Create `src/llm/provider_health.py`; Modify `src/llm/retry.py` (`retry_chat_completion`, per attempt); Test `src/tests/test_provider_health.py`.
 
-**Interfaces:**
-- Produces:
-  - `provider_key(base_url: str | None, model: str | None) -> str` — `*.modal.run` URL with `-mailroom-vllm-<tier>` → `"modal:<tier>"`; gateway URL (`retry._is_gateway_url`) with model alias `mailroom-<tier>` → `"modal:<tier>"`; `openrouter.ai` → `"openrouter"`; anything else → `"other:<host>"`.
-  - `record_llm_outcome(base_url: str | None, model: str | None, *, ok: bool, status: int | None, latency_s: float | None, error: str | None = None, now: float | None = None) -> None` — never raises.
-  - `@dataclass(frozen=True) class ProviderHealth: key: str; calls_10m: int; errors_10m: int; consecutive_errors: int; last_ok_at: float | None; last_error_at: float | None; last_error: str | None; last_status: int | None; p50_latency_s: float | None`
-  - `read_provider_health(now: float | None = None, window_s: float = 600) -> dict[str, ProviderHealth]`
-- Storage: `data/provider_health.json` = `{key: [[ts, ok, status, latency, error], …]}`, capped at 200 events per key. The in-process buffer is flushed with an atomic replace at most every 5 s, and immediately on an ok→error transition. Flushes are guarded by `fcntl.flock` on `data/provider_health.lock` so the app and research scripts can write concurrently; each writer merges its buffer into the on-disk file.
-- Kill-switch: `MAILROOM_PROVIDER_HEALTH=0` makes `record_llm_outcome` a no-op (set in `conftest.py` for hermetic tests, except in this test file).
+**Interfaces — Produces:**
+- `provider_key(base_url: str | None, model: str | None) -> str`:
+  - `*--mailroom-vllm-<tier>.modal.run` → `modal:<tier>`
+  - gateway URL (`retry._is_gateway_url`) with model `mailroom-<tier>` → `modal:<tier>`
+  - `openrouter.ai` → `openrouter`
+  - anything else → `other:<host>`
+- `record_llm_outcome(base_url, model, *, ok: bool, status: int | None, latency_s: float | None, now: float | None = None) -> None` — never raises; no-op when `MAILROOM_PROVIDER_HEALTH=0`, which the `conftest.py` `_set_test_env` fixture sets.
+- `read_provider_health(now: float | None = None, window_s: float = 600) -> dict[str, dict]` — per key: `calls`, `errors`, `consecutive_errors`, `last_status`, `last_ok_at`, `count_503`, `p50_latency_s`.
+- Storage: `<base_dir>/provider_health.json`, `{key: [[ts, ok, status, latency], …]}`, capped at 200 events per key.
+  - Flushed by merge-under-`flock(<base_dir>/provider_health.lock)` + `os.replace`.
+  - Flushes at most every 5 s, and immediately on an ok→error transition.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write failing tests:** `test_provider_key_mapping`, `test_window_counts_and_consecutive`, `test_old_events_age_out`, `test_corrupt_file_ignored_then_rewritten`, `test_two_writers_merge` (two buffers flushed → union), `test_retry_records_each_attempt` (fake client 503 then OK → 2 events, `count_503 == 1`). Re-enable recording inside this file with `monkeypatch.setenv("MAILROOM_PROVIDER_HEALTH", "1")`.
+- [ ] **Step 2: Run** → FAIL.
+- [ ] **Step 3: Implement.** In `retry_chat_completion`, take `base_url = str(getattr(client, "base_url", "") or "")`, time each create with `time.monotonic()`, and record in both the success path and the `except` path (`_status_code(exc)`).
+- [ ] **Step 4: Run** `PYTHONPATH=src python -m pytest src/tests/test_provider_health.py src/tests/test_llm_retry.py src/tests/test_llm_quota.py -q` → PASS.
+- [ ] **Step 5: Commit** `feat(pager): passive per-provider LLM health at the retry choke point`.
 
+### Task 4: Snapshot collection (Modal, OpenRouter, catalog, bins, research progress)
+
+**Files:** Modify `src/storage/catalog.py`; Create `src/pipeline/pager.py` (snapshot section only); Test `src/tests/test_pager.py`.
+
+**Interfaces — Consumes:** `pager_core.RunSnapshot`, `ProviderStatus`, `RunProgress`, `PagerConfig` (Task 2); `read_provider_health` (Task 3); `pipeline.bins` (`count_inbox_pending`, `review_dir`, `failed_dir`, `processing_dir`, `get_pause_info`, `watcher_heartbeat_age`); `pipeline.watchdog.read_heartbeat`, `_pid_alive`; `llm.quota.get_breaker()`.
+
+**Interfaces — Produces:**
+- `catalog.window_stats(since: datetime, run_id: str | None = None) -> dict` → `received` (`created_at ≥ since`), `archived`/`review`/`failed` (current stage, `updated_at ≥ since`), `cost_usd`, `p50_latency_s`, `first_pass_rate`.
+- `catalog.recent_failures(since: datetime, limit: int = 3) -> list[dict]` → `{"filename", "stage", "reason"}`, newest first. `reason` is `gmail_intake.friendly_reason(...)[0]` when available, else the first 60 chars.
+- `mail_outbox.count_dead() -> int` (one `SELECT COUNT(*)`, added there).
+- `pager.report_run_progress(run_id: str, *, label: str, total: int, done: int, metrics: dict | None = None, finished: bool = False) -> None` — atomic write to `<base_dir>/pager_runs/<safe id>.json`, keeping the first `started_at`; never raises.
+- `pager.openrouter_info(cfg, client: httpx.Client | None = None) -> dict | None` — `GET {openrouter_base_url()}/key`, timeout 5 s, cached `providers.openrouter_cache_minutes`. Returns `{"limit_remaining", "usage", "is_free_tier"}`, `{"error": "HTTP 401"}`, or `None` without a key. Check the field names against current OpenRouter docs using the `openrouter-models` skill.
+- `pager.modal_warm(app: str = "mailroom-vllm", run=subprocess.run) -> dict[str, int] | None` — only when `shutil.which("modal")`. Runs `modal container list --json` (timeout 10 s) and counts per tier by function name `serve_<tier>` (`deploy/modal_vllm.py`).
+- `pager.provider_statuses(cfg, health, or_info, warm) -> list[ProviderStatus]` — pure, using this table:
+
+  | Provider | down | degraded | warm | idle | up |
+  |---|---|---|---|---|---|
+  | `modal:<tier>` | `consecutive_errors ≥ 3` | error rate ≥ `rules.provider_degraded.error_rate` with `calls ≥ min_calls`, or any 503 (`detail="cold-start 503s N"`) | 0 calls and `warm[tier] > 0` | 0 calls and no warm container | otherwise |
+  | `openrouter` | `/key` 401/403, or `consecutive_errors ≥ 3` | quota breaker open (`"free pool rate-limited"`) | — | — | `detail="$X.XX left"` or `"no limit"` |
+
+  Low credit is a rule (`openrouter_credit`), not a state.
+- `pager.collect_snapshot(cfg, *, window_minutes: float, now: float | None = None) -> RunSnapshot` — **each source in its own try/except** → `None`/`0` plus `pager_snapshot_source_failed`. Catalog coroutines run via `asyncio.run` in a worker thread.
+
+- [ ] **Step 1: Write failing tests:** `test_window_stats_counts_terminal_in_window`, `test_window_stats_filters_run_id`, `test_progress_roundtrip_and_stale` (unfinished, updated > `run_stalled.minutes` ago, still listed so the rule can fire), `test_provider_status_table` (parametrized, one case per cell), `test_openrouter_info_cached`, `test_modal_cli_absent_returns_none`, `test_snapshot_survives_missing_catalog` (Review Focus 5), `test_snapshot_watcher_dead`.
+- [ ] **Step 2: Run** `PYTHONPATH=src python -m pytest src/tests/test_pager.py -q` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** the test plus `src/tests/test_mail_outbox.py` → PASS.
+- [ ] **Step 5: Commit** `feat(pager): snapshot collection — catalog window stats, Modal/OpenRouter status, run progress`.
+
+### Task 5: Pager host — scheduler, watchdog, CLI, research hooks, docs
+
+**Files:** Modify `src/pipeline/pager.py` (append `Pager` + CLI), `src/pipeline/watchdog.py`, `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py`, `deploy/docker-compose.full.yml`, `.env.example`, `AGENTS.md`, `deploy/README.md`, `CHANGELOG.md`; Test `src/tests/test_pager.py` (append).
+
+**Interfaces — Consumes:** Tasks 1–4.
+
+**Interfaces — Produces:**
+- `class Pager(cfg: PagerConfig | None = None, *, transport: Transport | None = None)` — `cfg` defaults to `load_pager_config()`.
+  - `tick(now: float | None = None) -> list[SendResult]`:
+    1. Scan if due: `collect_snapshot` → `plan_scan`.
+    2. Digest if due: `plan_digest`.
+    3. Run started/finished events: `runs_seen` transitions → `render_run_event`.
+    4. Send every `Outbox` text to every recipient.
+    5. `mark_sent`.
+    6. Persist state.
+
+    Never raises.
+  - `start_background() -> threading.Thread | None` — daemon thread that calls `tick` every `min(scan.seconds, 15)` s. Returns `None` when inactive or when the lock is held.
+  - `page_now(alert: Alert) -> list[SendResult]` — goes through `plan_scan` gates using a synthetic snapshot override.
+- `load_pager_config(env: Mapping | None = None) -> PagerConfig` — `PagerConfig.resolve(load_config().get("pager"), env or os.environ, environment=os.environ.get("OBSERVABILITY_ENVIRONMENT", ""))`.
+- CLI `python -m pipeline.pager {run|preview|test|config|mute}`:
+  - `preview [--mode production|research] [--alert]` — prints via `ConsoleTransport`; never sends.
+  - `test` — sends `✅ MAILROOM PAGER TEST · <host> · <time>`; exits 1 on failure.
+  - `config` — effective config + sources, masked recipients.
+  - `mute 2h|30m|off`.
+- Watchdog: `main()` builds one `Pager()` and calls `tick()` every loop. The `down`/`remind` branch also calls `page_now(Alert("watcher_down","critical","Watcher DOWN — heartbeat lost", detail=<last-heartbeat row>, next_step="relaunch: python -m pipeline.watcher"))`. The email path is unchanged.
+- Research: both scripts call `report_run_progress` after each sample and once with `finished=True`, with metrics `acc` (only with ground truth), `review_rate`, `failed`, `cost_usd`, `p50_latency_s`. `--page` runs `Pager(load_pager_config({**os.environ, "MAILROOM_PAGER_MODE": "research"})).start_background()`. If another host holds the lock, it logs that and continues; the external pager still reads the progress files.
+- Docs, kept concise and placed only in existing files:
+  - `deploy/README.md` gets one "Operator SMS pings" section covering a 5-step quick start, the Recipients table (mobile vs Google Voice), Twilio trial verification, 10DLC/toll-free, and cost (`ascii` ≈ 2.3× fewer segments).
+  - `.env.example` gets a commented pager block.
+  - `AGENTS.md` Commands gets 3 lines: `pager run`, `preview`, `test`.
+  - `CHANGELOG.md` gets one entry.
+  - The compose watchdog service passes `MAILROOM_PAGER*`, `TWILIO_*`, `OPENROUTER_API_KEY`.
+
+- [ ] **Step 1: Write failing tests** (fake clock, recording transport, monkeypatched `collect_snapshot`):
 ```python
-def test_provider_key_mapping():
-    assert provider_key("https://ws--mailroom-vllm-extract.modal.run/v1", "x") == "modal:extract"
-    assert provider_key("http://litellm:4000/v1", "mailroom-fast") == "modal:fast"
-    assert provider_key("https://openrouter.ai/api/v1", "qwen/qwen3") == "openrouter"
-
-def test_window_counts_and_consecutive(tmp_base_dir):
-    for i, ok in enumerate([True, False, False, False]):
-        record_llm_outcome(URL, "m", ok=ok, status=None if ok else 502, latency_s=1.0, now=1000 + i)
-    h = read_provider_health(now=1010)["modal:extract"]
-    assert (h.calls_10m, h.errors_10m, h.consecutive_errors, h.last_status) == (4, 3, 3, 502)
-
-def test_old_events_age_out(tmp_base_dir): # event at t=0 absent from read at now=601
-def test_corrupt_file_is_ignored(tmp_base_dir): # write "{" → read returns {} and next record rewrites
-def test_retry_records_each_attempt(monkeypatch): # fake client 503 then OK → two outcomes recorded
-```
-
-- [ ] **Step 2: Run** `... test_provider_health.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `provider_health.py`, then call `record_llm_outcome` once per attempt in `retry_chat_completion`: on success with `ok=True`, in the `except` with the attempt's `_status_code(exc)` and `type(exc).__name__`. Take `base_url` from `str(getattr(client, "base_url", ""))`; take latency from `time.monotonic()` around the create call.
-- [ ] **Step 4: Run** this file and the retry suite: `... test_provider_health.py src/tests/test_llm_retry.py src/tests/test_llm_quota.py -q` — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): passive per-provider LLM health shared across processes`.
-
----
-
-### Task 4: Provider status (Modal + OpenRouter)
-
-**Files:**
-- Create: `src/pipeline/pager/providers.py`
-- Test: `src/tests/test_pager_providers.py`
-
-**Interfaces:**
-- Consumes: `ProviderHealth`, `read_provider_health` (Task 3); `PagerConfig` (Task 1); `llm.quota.get_breaker()`.
-- Produces:
-  - `@dataclass(frozen=True) class ProviderStatus: name: str; state: Literal["up","warm","idle","degraded","down","unknown"]; detail: str = ""`
-  - `openrouter_key_info(api_key: str | None, client: httpx.Client | None = None) -> dict | None` — `GET https://openrouter.ai/api/v1/key` (use `openrouter_utils.openrouter_base_url()`), timeout 5 s. Returns `{"limit_remaining": float | None, "usage": float, "is_free_tier": bool}`, or `{"error": "HTTP 401"}`, or `None` when no key is set. **Verify the field names against current OpenRouter docs at implementation time** (openrouter-* skill). The result is cached for 5 min in-process, so a 60 s scan costs one call per 5 min.
-  - `modal_warm_containers(app: str = "mailroom-vllm", run=subprocess.run) -> dict[str, int] | None` — runs `modal container list --json` (timeout 10 s) only when `shutil.which("modal")`. It counts containers per tier by function name `serve_<tier>` (match the names in `deploy/modal_vllm.py`) and returns `None` on any failure. Read-only: it does not wake GPUs.
-  - `provider_statuses(cfg: PagerConfig, health: dict[str, ProviderHealth], *, or_info: dict | None, warm: dict[str, int] | None) -> list[ProviderStatus]` — pure.
-- Derivation rules (pure function; the tests pin them):
-
-| Provider | `down` | `degraded` | `warm` | `idle` | `up` |
-|---|---|---|---|---|---|
-| `modal:<tier>` (only tiers named in taxonomy `tier:` or seen in health) | `consecutive_errors ≥ 3` | `errors_10m/calls_10m ≥ 0.25` with `calls_10m ≥ 4`, or any 503 in window (`detail="cold-start 503s N"`) | `calls_10m == 0` and `warm[tier] > 0` | `calls_10m == 0` and no warm container | otherwise |
-| `openrouter` | `/key` → 401/403, or `consecutive_errors ≥ 3` | `limit_remaining < cfg.openrouter_min_credit`, or the quota breaker is open (`detail="free pool rate-limited"`) | — | — | otherwise (`detail="$X.XX left"` when limited, `"no limit"` otherwise) |
-
-- [ ] **Step 1: Write the failing tests** — one per table cell (e.g. `test_modal_down_after_three_consecutive_errors`, `test_modal_idle_when_no_calls_and_no_containers`, `test_openrouter_low_credit_degraded`, `test_openrouter_401_down`, `test_modal_cli_absent_returns_none`), plus `test_openrouter_info_cached_5min` (a MockTransport counts calls: two calls within 300 s → 1 request).
-- [ ] **Step 2: Run** `... test_pager_providers.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `providers.py`. When `cfg.probe_modal` is set, add a `GET <tier_url>/models` per tier (timeout 5 s) **only for tiers with `warm > 0`**, so even the opt-in probe never cold-starts a GPU.
-- [ ] **Step 4: Run** — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): Modal tier and OpenRouter status derivation`.
-
----
-
-### Task 5: Run snapshot (+ catalog window queries)
-
-**Files:**
-- Modify: `src/storage/catalog.py` (append two functions)
-- Create: `src/pipeline/pager/progress.py`, `src/pipeline/pager/snapshot.py`
-- Test: `src/tests/test_pager_snapshot.py`
-
-**Interfaces:**
-- Consumes: Tasks 1–4; `pipeline.bins` (`count_inbox_pending`, `review_dir`, `failed_dir`, `processing_dir`, `get_pause_info`, `watcher_heartbeat_age`); `pipeline.watchdog.read_heartbeat`, `_pid_alive`; `mail_outbox` (add `count_dead() -> int` there if absent).
-- Produces:
-  - `catalog.window_stats(since: datetime, run_id: str | None = None) -> dict` → `{"received": int, "archived": int, "review": int, "failed": int, "cost_usd": float, "p50_latency_s": float | None, "first_pass_rate": float | None}`. A document counts toward its current terminal `stage` when `updated_at >= since`; `received` counts `created_at >= since`.
-  - `catalog.recent_failures(since: datetime, limit: int = 3) -> list[dict]` → `[{"filename", "stage", "reason"}]` for `stage in ("failed","review")`, newest first. `reason` comes from `gmail_intake.friendly_reason(escalation_reason)[0]` when available, otherwise the first 60 chars.
-  - `progress.report_run_progress(run_id: str, *, label: str, total: int, done: int, metrics: dict | None = None, finished: bool = False) -> None` — atomic write of `data/pager_runs/<safe run_id>.json` with `started_at` preserved from the first write; never raises.
-  - `progress.active_runs(now: float, stale_s: float = 1800) -> list[RunProgress]` — `@dataclass(frozen=True) RunProgress: run_id, label, total, done, started_at, updated_at, finished, metrics: dict`.
-  - `@dataclass(frozen=True) class RunSnapshot: taken_at: float; mode: str; watcher: WatcherInfo; queues: dict[str, int]; window: dict; window_minutes: float; stuck: int; paused: dict | None; outbox_dead: int; providers: list[ProviderStatus]; runs: list[RunProgress]; failures: list[dict]; boss: dict | None`
-  - `@dataclass(frozen=True) class WatcherInfo: alive: bool | None; heartbeat_age_s: float | None; pid: int | None; uptime_s: float | None; sha: str | None`
-  - `collect_snapshot(cfg: PagerConfig, *, window_minutes: float, now: float | None = None, or_client: httpx.Client | None = None) -> RunSnapshot` — sync wrapper. Catalog coroutines run via `asyncio.run` in a worker thread. **Each source sits in its own try/except** and degrades to `None`/0 plus a `pager_snapshot_source_failed` log, so one broken source never blanks the digest.
-
-- [ ] **Step 1: Write the failing tests**
-
-```python
-def test_window_stats_counts_terminal_in_window(seeded_catalog): ...  # 3 archived, 1 review, 1 failed in window; 2 outside
-def test_window_stats_filters_run_id(seeded_catalog): ...
-def test_progress_roundtrip_and_stale(tmp_base_dir): ...            # stale run (updated 31m ago) excluded
-def test_snapshot_survives_missing_catalog(tmp_base_dir, monkeypatch):
-    monkeypatch.setattr(catalog, "window_stats", boom)
-    snap = collect_snapshot(cfg, window_minutes=10, now=NOW)
-    assert snap.window == {} and snap.queues["inbox"] >= 0          # other sections still filled
-def test_snapshot_watcher_dead(tmp_base_dir): ...                  # heartbeat 300s old + pid gone → alive False
-```
-
-- [ ] **Step 2: Run** `... test_pager_snapshot.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** the two catalog functions, `progress.py`, `snapshot.py`. `boss` carries the most recent ops-monitor finding. Make `OpsMonitor._sweep` write its `findings` dict to `data/ops_monitor_last.json` (one-line atomic write), and have the snapshot read it when it is fresher than 2× the sweep interval.
-- [ ] **Step 4: Run** this file and `src/tests/test_observability.py` — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): run snapshot collector, catalog window stats, research progress files`.
-
----
-
-### Task 6: Research run integration
-
-**Files:**
-- Modify: `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py`
-- Test: `src/tests/test_pager_research_hooks.py`
-
-**Interfaces:**
-- Consumes: `report_run_progress` (Task 5); `Pager` (Task 9) only behind the `--page` flag (import lazily so this task can land first with the flag raising `SystemExit("pager not available")` until Task 9 merges — or simply order Task 6 after Task 9 when executing).
-- Produces: both scripts call `report_run_progress(run_id, label=<script + flags>, total=N, done=i, metrics=…)` after each sample, plus a final call with `finished=True`. `metrics` keys: `acc` (class accuracy so far, when ground truth exists), `review_rate`, `failed`, `cost_usd`, `p50_latency_s`. `--page` starts `Pager.start_background(cfg_overrides={"mode": "research"})` for the life of the run, unless another host holds `data/pager.lock`. In that case the external pager picks up the progress file anyway.
-
-- [ ] **Step 1: Write the failing test** — run `run_pilot.main(["--mock", "--max-docs", "3"])` (use the existing mock fixtures) with `tmp_base_dir`; assert one file under `pager_runs/` with `done == total == 3`, `finished is True`, and `"review_rate" in metrics`.
-- [ ] **Step 2: Run** — expected FAIL.
-- [ ] **Step 3: Implement** the hooks (a few lines per loop) and the flag.
-- [ ] **Step 4: Run** `... test_pager_research_hooks.py src/tests/test_experiment_gate_script.py -q` — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): research runs report progress; --page flag`.
-
----
-
-### Task 7: Message renderers
-
-**Files:**
-- Create: `src/pipeline/pager/format.py`
-- Test: `src/tests/test_pager_format.py` (+ golden files `src/tests/fixtures/pager/*.txt`)
-
-**Interfaces:**
-- Consumes: `RunSnapshot`, `RunProgress`, `ProviderStatus` (Tasks 4–5); `Alert` (Task 8 — define `Alert` in `rules.py` first as a bare dataclass if Task 7 executes before Task 8).
-- Produces (all pure, all `-> str`, all honour `style`, `max_chars`, `tz`):
-  - `render_digest(snap: RunSnapshot, *, open_alerts: list[Alert], alerts_in_window: int, resolved_in_window: int, cfg: PagerConfig) -> str` — production or research layout, chosen by `snap.mode`.
-  - `render_alert(alerts: list[Alert], snap: RunSnapshot, cfg: PagerConfig) -> str`
-  - `render_recovered(resolved: list[tuple[Alert, float]], cfg: PagerConfig) -> str` — `(alert, open_seconds)`.
-  - `render_run_event(run: RunProgress, event: Literal["started","finished"], cfg: PagerConfig) -> str`
-  - `fit(sections: list[tuple[int, list[str]]], max_chars: int) -> str` — `(priority, lines)`; drops whole lines from the lowest-priority section until the body fits, then appends `…+N more`.
-- Copy is fixed by "Message house style" above. Section priority (highest kept first): header → alerts/WATCH → window metrics → providers → queues.
-- Durations: `3h12m`, `18m`, `45s`. Money: `$0.21` (2 dp), `$0.033/doc` (3 dp). Percentages: integer.
-
-- [ ] **Step 1: Write the failing tests** — golden-file comparisons for the five house-style samples (build snapshots with fixed `now` and `tz="America/Chicago"`), plus:
-
-```python
-def test_ascii_style_is_gsm7(): assert count_segments(render_digest(..., cfg=ascii_cfg))[0] == "GSM-7"
-def test_fit_drops_lowest_priority_whole_lines(): ...
-def test_digest_header_states(): # open critical → "🔴 ATTENTION"; paused → "⏸ PAUSED"; warning → "🟠 DEGRADED"
-def test_research_without_acc_omits_acc(): ...
-def test_every_render_within_max_chars(hypothesis or 50 random snapshots): assert len(out) <= cfg.max_chars
-```
-
-- [ ] **Step 2: Run** `... test_pager_format.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `format.py`. The progress bar is 10 cells (`▓`/`░`), rounded down. ETA = `(total-done) × elapsed/done`, shown only once `done ≥ 3`.
-- [ ] **Step 4: Run** — expected PASS. Paste one rendered digest into the PR description so a reviewer sees the look.
-- [ ] **Step 5: Commit** `feat(pager): SMS renderers in the mailroom status house style`.
-
----
-
-### Task 8: Watcher alert rules
-
-**Files:**
-- Create: `src/pipeline/pager/rules.py`
-- Test: `src/tests/test_pager_rules.py`
-
-**Interfaces:**
-- Consumes: `RunSnapshot` (Task 5).
-- Produces:
-  - `@dataclass(frozen=True) class Alert: key: str; severity: Literal["critical","warning"]; title: str; detail: str = ""; next_step: str = ""`
-  - `RULES: tuple[Callable[[RunSnapshot, dict], list[Alert]], ...]` — each rule reads the snapshot plus the previous `baseline` dict (for deltas).
-  - `@dataclass class AlertState: open: dict[str, dict]  # key → {"since", "last_sent", "clear_streak", "alert"}; baseline: dict` with `to_json()/from_json()`.
-  - `evaluate(snap: RunSnapshot, state: AlertState, now: float, *, cooldown_s: float) -> tuple[list[Alert], list[tuple[Alert, float]], AlertState]` — returns `(to_send, recovered, new_state)`. Pure.
-- Rules (key → severity → condition → `next_step` copy):
-
-| key | sev | fires when |
-|---|---|---|
-| `watcher_down` | critical | `watcher.alive is False`, or heartbeat age > `MAILROOM_WATCHDOG_STALE_SECONDS` (30 s) on 2 consecutive scans |
-| `provider_down:<name>` | critical | any `ProviderStatus.state == "down"` |
-| `provider_degraded:<name>` | warning | `state == "degraded"` for 2 consecutive scans |
-| `docs_failed` | warning (critical if ≥ 5) | `queues["failed"]` grew since the baseline (`detail` = count + newest failure line) |
-| `review_backlog` | warning | `queues["review"] ≥ MAILROOM_PAGER_REVIEW_MAX` (default 20) |
-| `stuck_docs` | warning | `snap.stuck > 0` |
-| `ingestion_paused` | critical | `snap.paused` is set (actor + reason in `detail`) |
-| `outbox_dead` | warning | `outbox_dead` grew since the baseline |
-| `boss_critical` | critical | `snap.boss.severity == "critical"` |
-| `run_stalled:<run_id>` | warning | research run unfinished and `updated_at` older than 15 min |
-
-- State machine: a new key → send now. A key still open → resend only when `now - last_sent ≥ cooldown_s` (default 1800 s). A key absent for **2 consecutive scans** → closed and returned in `recovered`. Healthy (no keys, nothing recovered) → `([], [], state)`. **This is the silence guarantee (R8).**
-
-- [ ] **Step 1: Write the failing tests** — one per table row; plus:
-
-```python
-def test_healthy_scan_is_silent(): to_send, rec, _ = evaluate(healthy, AlertState.empty(), NOW, cooldown_s=1800); assert to_send == rec == []
-def test_open_alert_not_resent_within_cooldown(): ...
-def test_open_alert_resent_after_cooldown(): ...
-def test_flapping_key_does_not_spam():  # down, up, down, up over 4 scans → exactly 1 alert, 0 recovered
-def test_recovered_after_two_clear_scans(): ...
-def test_state_json_roundtrip(): ...
-```
-
-- [ ] **Step 2: Run** `... test_pager_rules.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `rules.py`.
-- [ ] **Step 4: Run** — expected PASS.
-- [ ] **Step 5: Commit** `feat(pager): watcher alert rules with latch, cooldown and recovery`.
-
----
-
-### Task 9: Pager service, watchdog hosting, CLI
-
-**Files:**
-- Create: `src/pipeline/pager/service.py`, `src/pipeline/pager/__main__.py`
-- Modify: `src/pipeline/watchdog.py` (`main()` loop + `send_status_email` call sites)
-- Test: `src/tests/test_pager_service.py`
-
-**Interfaces:**
-- Consumes: everything above.
-- Produces:
-  - `class Pager(cfg: PagerConfig, *, transport: Transport | None = None, clock=time.time)`
-    - `tick(now: float | None = None) -> list[SendResult]` — if `now ≥ next_scan`: collect a snapshot (window = digest window), `evaluate`, send the alert/recovered texts. If `now ≥ next_digest`: send the digest (window = `digest_minutes`). Run start/finish events come from `progress.active_runs` transitions recorded in state. Persists state. Never raises.
-    - `start_background(cfg_overrides: dict | None = None) -> threading.Thread | None` — daemon loop calling `tick` every `min(scan_seconds, 15)` s; `None` if the lock is held or config is inactive.
-    - `page_now(alert: Alert) -> SendResult` — out-of-band send used by the watchdog DOWN path (respects latch/cooldown via state).
-  - Persistent state `data/pager_state.json`: `{"next_scan", "next_digest", "last_idle_digest", "alerts": AlertState.to_json(), "runs_seen": {run_id: "started"|"finished"}, "window_counts": {...}}`.
-  - Lock: `data/pager.lock` via `fcntl.flock(LOCK_EX|LOCK_NB)` held for the process lifetime (the same pattern as `watcher.acquire_watcher_lock`).
-  - CLI (`python -m pipeline.pager`):
-    - `run` — foreground loop (for dev servers and research boxes without the watchdog).
-    - `preview [--mode production|research] [--alert]` — collect a real snapshot and print the SMS through `ConsoleTransport`, with segment count and encoding; never sends.
-    - `test` — send `✅ MAILROOM PAGER TEST · <host> · <time>` to the configured number and print the `SendResult`; exit 1 on failure.
-- Send semantics:
-  - An alert is marked `last_sent` **only when** `SendResult.ok` (Review Focus 3).
-  - The digest clock advances even on send failure (no burst of back-dated digests), but the failure is logged as `pager_digest_failed`.
-  - `digest_when_idle=False` and the window has `received == 0` and no open alerts → skip, except when `now - last_idle_digest ≥ 3600` (then send it with the `· IDLE` title suffix) (Review Focus 1).
-- Watchdog hosting: in `watchdog.main()`, build `Pager(PagerConfig.from_env())` once; call `pager.tick()` every loop iteration (the watchdog polls every 20 s; the pager's own clock gates scans/digests). On the `down`/`remind` actions, also call `pager.page_now(Alert("watcher_down", "critical", "Watcher DOWN — heartbeat lost", detail=<last heartbeat row>, next_step="relaunch: python -m pipeline.watcher"))`. The email path is unchanged.
-
-- [ ] **Step 1: Write the failing tests** with a fake clock + recording transport + monkeypatched `collect_snapshot`:
-
-```python
-def test_digest_every_10_minutes():          # ticks at t=0..3600 step 20 → 6 digests (t=600,…,3600); first digest at t=600
-def test_healthy_scans_send_nothing_between_digests(): # 60 scans, healthy → only digest sends
-def test_alert_sent_on_first_failing_scan_then_silent_until_cooldown(): ...
-def test_failed_send_keeps_alert_pending():  # transport.ok False on first try → re-sent next scan
-def test_idle_window_suppressed_except_hourly(): ...
-def test_state_survives_restart(tmp_base_dir): # new Pager after 5 min → no duplicate alert, digest at original t=600
-def test_second_pager_is_passive(tmp_base_dir): # lock held → start_background returns None
-def test_watchdog_down_also_pages(monkeypatch): # evaluate→"down" ⇒ page_now called once; email still sent
+def test_digest_every_10_minutes_aligned(): ...               # ticks every 20s for 1h → 6 digests at :10…:00
+def test_custom_cadence_from_taxonomy(): ...                  # digest.production_minutes 30 → 2 digests/h
+def test_healthy_scans_send_nothing_between_digests(): ...
+def test_sends_to_every_recipient(): ...                      # mobile + Google Voice → 2 sends per text
+def test_failed_send_keeps_alert_pending(): ...               # Review Focus 4
+def test_state_survives_restart(temp_base_dir): ...           # no duplicate alert; digest clock kept
+def test_mute_cli_writes_state(): ...
+def test_second_pager_is_passive(temp_base_dir): ...
+def test_watchdog_down_also_pages(monkeypatch): ...           # Review Focus 5; email still sent
 def test_run_started_and_finished_texts_once(): ...
+def test_run_pilot_reports_progress(temp_base_dir): ...       # run_pilot.main(["--mock","--max-docs","3"]) → done == total == 3, finished
+def test_cli_preview_and_config_never_send(capsys): ...
 ```
-
-- [ ] **Step 2: Run** `... test_pager_service.py -q` — expected FAIL.
-- [ ] **Step 3: Implement** `service.py`, `__main__.py` and the watchdog wiring.
-- [ ] **Step 4: Run** the whole pager suite and the watchdog/outbox suites: `PYTHONPATH=src python -m pytest src/tests -q -k "pager or provider_health or watchdog or mail_outbox or status"` — expected PASS. Then manual: `MAILROOM_PAGER=1 MAILROOM_PAGER_TO=+15555550100 MAILROOM_PAGER_TRANSPORT=console PYTHONPATH=src python -m pipeline.pager preview` prints a digest.
-- [ ] **Step 5: Commit** `feat(pager): pager service hosted by the watchdog; run/preview/test CLI`.
-
----
-
-### Task 10: Ops surface, deployment and docs
-
-**Files:**
-- Modify: `deploy/docker-compose.full.yml` (`watchdog` service env: pass `MAILROOM_PAGER*`, `TWILIO_*`, `OPENROUTER_API_KEY`), `deploy/README.md`, `AGENTS.md` (Commands block), `CHANGELOG.md`
-- Create: `docs/operator-pings.md`
-- Modify: `.env.example` (add a commented pager block)
-- Modify: `src/api/main.py` — add `GET /ops/pager/preview` (token-protected like the existing ops routes) returning `{"text": str, "encoding": str, "segments": int}` for a dry-run digest
-- Test: `src/tests/test_pager_api.py`, plus extend `src/tests/test_docs_truth.py` if it enumerates env vars/commands
-
-**Interfaces:**
-- Consumes: `Pager`, `collect_snapshot`, `render_digest`, `count_segments`.
-
-- [ ] **Step 1: Write the failing test** — `GET /ops/pager/preview` with an auth token → 200 with `text` starting `"📬 MAILROOM"`; without a token → 401; the response never contains the Twilio token.
-- [ ] **Step 2: Run** — expected FAIL.
-- [ ] **Step 3: Implement** the route, compose env, and docs. `docs/operator-pings.md` must cover:
-  - **Quick start (local/dev server):** set env → `python -m pipeline.pager test` → `python -m pipeline.watchdog` (or `python -m pipeline.pager run`) next to `python -m api.main`.
-  - **Twilio setup:** account SID/token, a sender number or Messaging Service, and the US carrier rules (A2P 10DLC registration for a local long code, or toll-free verification; unregistered US traffic is filtered).
-  - **Free fallback:** the carrier email-to-SMS gateway via `MAILROOM_PAGER_TRANSPORT=email_gateway` (reuses the Gmail channel SMTP; best-effort delivery, no delivery receipts).
-  - **Every env knob** with its default.
-  - **Cost note:** ~5 UCS-2 segments per emoji digest × 144/day. Use `MAILROOM_PAGER_STYLE=ascii` or `MAILROOM_PAGER_DIGEST_WHEN_IDLE=0` to cut it.
-  - **Sample messages:** the house-style samples.
-  - **Research runs:** `run_pilot.py --real --page`.
-  - **Troubleshooting:** `preview`, `pager_*` log events, `data/pager_state.json`.
-- [ ] **Step 4: Run** `PYTHONPATH=src python -m pytest src/tests/test_pager_api.py src/tests/test_docs_truth.py -q` and then the full suite `PYTHONPATH=src python -m pytest src/tests -q` — expected PASS.
-- [ ] **Step 5: Commit** `docs(pager): operator SMS pings guide, compose wiring, preview endpoint`.
+- [ ] **Step 2: Run** → FAIL.
+- [ ] **Step 3: Implement**, then the docs/compose edits.
+- [ ] **Step 4: Run** `PYTHONPATH=src python -m pytest src/tests/test_pager.py src/tests/test_pager_core.py src/tests/test_sms_notify.py src/tests/test_provider_health.py src/tests/test_docs_truth.py src/tests/test_experiment_gate_script.py -q` → PASS. Then manual: `MAILROOM_PAGER=1 MAILROOM_PAGER_TO=+15555550100 MAILROOM_PAGER_TRANSPORT=console PYTHONPATH=src python -m pipeline.pager preview` prints a digest.
+- [ ] **Step 5: Commit** `feat(pager): pager service hosted by the watchdog, CLI, research --page, docs`.
 
 ---
 
-# Part B — `mailroom-reloaded` (branch `claude/mailroom-operator-sms-pings-o63gx2`)
+# Part B — `mailroom-reloaded`
 
-Same behavior, same copy, same env names. The pure modules are ported; only the data sources differ. Run tests with `uv run pytest tests/<path> -q`. Per that repo's AGENTS.md §2, `mock` provider by default; no live spend in tests.
+Branch `claude/mailroom-operator-sms-pings-o63gx2`. Test runner: `uv run pytest <path> -q`. This repo's AGENTS.md §2 applies: `mock` provider by default, no live spend.
 
-## File map
-
-| File | Responsibility |
+| File | Change |
 |---|---|
-| `src/mailroom_reloaded/ops/__init__.py`, `ops/pager/{config,transport,format,rules}.py` | **verbatim ports** of Part A Tasks 1, 2, 7, 8 (imports adjusted to `mailroom_reloaded.*`; settings read via `get_settings().base_dir`) |
-| `src/mailroom_reloaded/ops/provider_health.py` | port of Task 3; hooked in `llm/retry.py::_record_retry_event` (errors) and `llm/client.py::record_usage` (successes) |
-| `src/mailroom_reloaded/ops/pager/snapshot.py` | collector over **`Ledger`** (`open_runs`, `metric_rows`, `entries`), `Bins`, the watcher lock/heartbeat, `jev_status` |
-| `src/mailroom_reloaded/ops/pager/service.py` | port of Task 9 (no watchdog in this repo — see Task 13) |
-| `tests/ops/test_pager_parity.py` | renders Part A's golden fixtures from equivalent snapshots → byte-identical text |
+| `src/mailroom_reloaded/config/taxonomy.yaml` | the same `pager:` block (`outbox_dead` present but ignored) |
+| `src/mailroom_reloaded/obs/pager_core.py` | **verbatim copy** of Part A `pager_core.py` (docstring header line may differ) |
+| `src/mailroom_reloaded/obs/sms.py` | port of `sms_notify.py`; `EmailGatewayTransport` takes SMTP settings from `MAILROOM_SMTP_*` env and is unavailable when unset (this repo has no SMTP channel) |
+| `src/mailroom_reloaded/llm/health.py` | port of `provider_health.py`; `settings.vllm_base_url` → `modal:vllm`; hooked in `llm/retry.py::_record_retry_event` (errors) and `llm/client.py::record_usage` (successes) |
+| `src/mailroom_reloaded/obs/pager.py` | ledger-backed snapshot + `Pager` host |
+| `src/mailroom_reloaded/cli.py` | `pager` command group on the existing CLI app |
+| `src/mailroom_reloaded/api/app.py` | `lifespan`: opt-in background pager |
+| `src/mailroom_reloaded/eval/runner.py` | `total` in `run_opened` payload; `--page` |
+| `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `.env.example`, `CHANGELOG.md` | one section each, linking to llm-mailroom's `deploy/README.md` for Twilio/Google Voice setup |
+| Tests: `tests/obs/test_pager_core.py` (copied), `tests/obs/test_sms.py`, `tests/llm/test_health.py`, `tests/obs/test_pager.py` | |
 
-### Task 11: Port pure modules + parity fixture
+### Task 6: Port core, transport, health
 
-**Files:** create the `ops/pager/{config,transport,format,rules}.py` ports and `ops/provider_health.py`; copy Part A's `src/tests/fixtures/pager/*.txt` to `tests/fixtures/pager/`; tests `tests/ops/test_pager_{config,transport,format,rules}.py` (port Part A's tests) and `tests/ops/test_pager_parity.py`.
+**Interfaces:** identical to Part A Tasks 1–3, plus `provider_key(settings.vllm_base_url, …) == "modal:vllm"`.
 
-**Interfaces:** identical to Part A Tasks 1, 2, 3, 7, 8. `provider_key` additionally maps `settings.vllm_base_url` (single-tier Modal app `mailroom-vllm`) → `"modal:vllm"`.
+- [ ] **Step 1:** Copy Part A's `test_pager_core.py`, `test_sms_notify.py` and `test_provider_health.py` into the paths above, adjusting imports. Add `test_core_is_verbatim_port` in `tests/obs/test_pager_core.py`: if `../llm-mailroom/src/pipeline/pager_core.py` exists next to this checkout, it must equal this file apart from line 1; otherwise skip. Run `uv run pytest tests/obs tests/llm/test_health.py -q` → FAIL.
+- [ ] **Step 2:** Copy and port the modules, add the taxonomy block, and wire the two LLM hooks.
+- [ ] **Step 3:** Run `uv run pytest tests/obs tests/llm tests/test_dependency_fence.py tests/test_settings.py -q` → PASS. The dependency fence must stay green with `httpx` imported in `obs/sms.py` and `obs/pager.py`. If the fence forbids `httpx` in `obs/`, use `urllib.request` there and note it in the module docstring.
+- [ ] **Step 4: Commit** `feat(obs): port operator SMS pager core, transport and provider health`.
 
-- [ ] **Step 1:** Port the tests first; run `uv run pytest tests/ops -q` — expected FAIL.
-- [ ] **Step 2:** Port the modules; run again — expected PASS, including parity.
-- [ ] **Step 3:** Hook `record_llm_outcome` into `_record_retry_event` (error attempts) and `record_usage` (success). Run `uv run pytest tests/llm tests/ops -q` — expected PASS. Run `uv run pytest tests/test_dependency_fence.py -q` — expected PASS: `httpx` must already be an allowed dependency, otherwise use `urllib.request` for Twilio/OpenRouter in this repo and note the deviation in the module docstring.
-- [ ] **Step 4: Commit** `feat(ops): port operator SMS pager core (config, transport, format, rules)`.
+### Task 7: Ledger snapshot, host, CLI, docs
 
-### Task 12: Ledger-backed snapshot
+**Interfaces — Produces:**
+- `obs.pager.collect_snapshot(cfg, *, window_minutes, now=None) -> RunSnapshot`:
+  - Queues come from `Bins` directories.
+  - Window stats come from `Ledger.metric_rows` and document entries ≥ the window start, scoped to `live_run_id()` in production mode.
+  - Research runs come from `Ledger.open_runs(kind="eval")`. `done` is the count of documents recorded for the run; `total` comes from the `run_opened` payload; `acc` comes from the eval rows.
+  - Watcher liveness: if a non-blocking `flock` on `<base_dir>/watcher.lock` *succeeds*, no watcher is running, so `watcher_alive=False`.
+  - `outbox_dead=None`.
+  - Providers come from Part A's `provider_statuses` logic, kept in `obs/pager.py` with `modal_warm(app="mailroom-vllm")` and `openrouter_info`.
+- `obs.pager.Pager` — same contract as Part A Task 5, minus the watchdog.
+- `load_pager_config()` reads `load_taxonomy().raw.get("pager")` and uses `environment_name()`.
+- CLI: `mailroom pager run|preview|test|config|mute`.
+- `api/app.py` `lifespan` starts `Pager().start_background()` when the config is active and `MAILROOM_PAGER_EMBED` is not `0`, mirroring `_embed_watcher_enabled`. Docs state that only `mailroom pager run`, as its own process, can text `watcher_down` when the API dies.
+- `eval/runner.py`: `run_eval` passes `total=len(docs)` into `open_run`'s payload; the CLI eval command gains `--page`.
 
-**Files:** create `src/mailroom_reloaded/ops/pager/snapshot.py`; test `tests/ops/test_pager_snapshot.py`.
-
-**Interfaces:**
-- Produces `collect_snapshot(cfg, *, window_minutes, now=None) -> RunSnapshot` (the same dataclass as Part A, defined in `ops/pager/rules.py` or a shared `ops/pager/model.py`).
-  - Queues come from the `Bins` directories.
-  - Window stats come from `Ledger.metric_rows` / document entries with timestamps ≥ window start, scoped to `live_run_id()` in production mode.
-  - Research runs are `Ledger.open_runs(kind="eval")`. Progress is `done` = documents recorded for the run and `total` from the `run_opened` payload. **Add `total` to `open_run`'s payload in `eval/runner.py::run_eval`.** Accuracy comes from the eval rows already inserted by `_insert`.
-  - Watcher liveness comes from `watcher.lock` being held (try a non-blocking `flock`: success means no watcher) plus the API `/ready` probe when `MAILROOM_PAGER_API_URL` is set.
-  - The Modal tier comes from passive health plus `modal container list --json` (`mailroom-vllm`).
-- Each source is fail-soft, as in Part A Task 5.
-
-- [ ] **Step 1:** Tests: window counts over a seeded ledger (`tests/fakes` / `helpers.py` ledger fixtures), an eval run appearing as `RunProgress` with `total`, and `test_snapshot_survives_missing_ledger`. Run — FAIL.
-- [ ] **Step 2:** Implement; run `uv run pytest tests/ops tests/pipeline/test_run_ledger_units.py tests/eval -q` — PASS.
-- [ ] **Step 3: Commit** `feat(ops): ledger-backed pager snapshot for live and eval runs`.
-
-### Task 13: Hosting, CLI, docs
-
-**Files:** create `ops/pager/service.py`; modify `cli.py` (add a `pager` command group on the existing CLI app: `run`, `preview`, `test`), `.env.example` (pager block), `api/app.py` `lifespan` (start `Pager.start_background()` when `MAILROOM_PAGER=1` and `MAILROOM_PAGER_EMBED` is not `0`, mirroring `_embed_watcher_enabled`), `eval/runner.py` (`--page` → `start_background(mode="research")`), `docs/OPERATIONS.md` + `docs/CONFIGURATION.md` + `docs/RUNBOOK.md` (pager section), `CHANGELOG.md`; tests `tests/ops/test_pager_service.py`, extend `tests/test_cli.py`.
-
-Hosting caveat to document: the embedded pager dies with the API process, so `mailroom pager run` as a separate process is the recommended production setup (it is the only way to get the `watcher_down` text). The embedded mode is for dev/research convenience.
-
-- [ ] **Step 1:** Port Part A's Task 9 service tests (minus the watchdog test); add `test_cli_pager_preview_prints_digest` (Typer `CliRunner`, console transport) and `test_lifespan_starts_pager_only_when_enabled`. Run — FAIL.
-- [ ] **Step 2:** Implement; run `uv run pytest tests -q` and `make lint` (or the repo's `scripts/dev_test.sh`) — PASS.
-- [ ] **Step 3: Commit** `feat(ops): pager service, CLI and API embedding; docs`.
+- [ ] **Step 1: Write failing tests:** `test_snapshot_from_seeded_ledger_window`, `test_eval_run_is_progress_with_total`, `test_snapshot_survives_missing_ledger`, `test_watcher_lock_free_means_down`, `test_cli_pager_preview_prints_digest` (CLI runner, console transport), `test_lifespan_starts_pager_only_when_enabled`, plus Part A's `test_digest_every_10_minutes_aligned`, `test_failed_send_keeps_alert_pending` and `test_state_survives_restart`, ported. Run → FAIL.
+- [ ] **Step 2: Implement**, then the docs.
+- [ ] **Step 3: Run** `uv run pytest tests -q` and `make lint` → PASS.
+- [ ] **Step 4: Commit** `feat(obs): ledger-backed pager host, CLI and API embedding; docs`.
 
 ---
 
-## Execution order & dependencies
+## Out of scope
 
-`1 → 2 → 3 → 4 → 5 → 8 → 7 → 9 → 6 → 10` for Part A. (Rules before format, so `Alert` exists; research hooks after the service, so `--page` works.) Then `11 → 12 → 13` for Part B. Part B can start once Part A's Tasks 1–3, 7 and 8 have merged, because it copies them.
-
-## Out of scope (follow-ups, not built here)
-
-- Two-way SMS commands (`PAUSE`, `ACK`, `STATUS` replies via a Twilio inbound webhook). This is a natural next step and needs a public webhook URL plus signature validation.
-- Quiet hours / per-severity routing to multiple numbers.
-- Push channels other than SMS (ntfy, Slack, Pushover). The `Transport` protocol already admits them.
+Two-way SMS replies (`ACK`/`PAUSE` via a Twilio inbound webhook), non-SMS channels (the `Transport` protocol admits them later), and per-rule routing to different numbers.
