@@ -17,7 +17,7 @@ import statistics
 import subprocess
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -147,18 +147,31 @@ def _ts(entry) -> float:
     return datetime.fromisoformat(str(entry.ts)).timestamp()
 
 
-def _closed_since(ledger, since: float, run_id: str | None) -> list:
-    """``doc_closed`` entries at or after ``since`` (newest first, paged)."""
-    out, offset = [], 0
-    while True:
-        page = ledger.entries(kind="doc_closed", run_id=run_id, limit=500, offset=offset, descending=True)
-        for e in page:
-            if _ts(e) < since:
-                return out
-            out.append(e)
-        if len(page) < 500:
-            return out
-        offset += 500
+def _live_run_ids(since: float, now: float) -> list[str]:
+    """Live run ids covering ``[since, now]``: one per UTC date (ids roll at UTC midnight)."""
+    from mailroom_reloaded.obs.run_context import live_run_id
+
+    day = datetime.fromtimestamp(since, UTC).date()
+    ids = []
+    while day <= datetime.fromtimestamp(now, UTC).date():
+        ids.append(live_run_id(datetime(day.year, day.month, day.day, tzinfo=UTC)))
+        day += timedelta(days=1)
+    return list(dict.fromkeys(ids))
+
+
+def _closed_since(ledger, since: float, run_ids: list[str] | None) -> list:
+    """``doc_closed`` entries at or after ``since`` (newest first, paged); ``None`` means every run."""
+    out = []
+    for run_id in run_ids or [None]:
+        offset = 0
+        while True:
+            page = ledger.entries(kind="doc_closed", run_id=run_id, limit=500, offset=offset, descending=True)
+            fresh = [e for e in page if _ts(e) >= since]
+            out += fresh
+            if len(fresh) < len(page) or len(page) < 500:
+                break
+            offset += 500
+    return sorted(out, key=_ts, reverse=True)
 
 
 def _doc_cost(e) -> float:
@@ -246,23 +259,24 @@ def _count(d: Path) -> int:
 def collect_snapshot(cfg: PagerConfig, *, window_minutes: float, now: float | None = None) -> RunSnapshot:
     """Gather everything the pager reports. Each source fails soft on its own."""
     from mailroom_reloaded.llm.health import read_provider_health
-    from mailroom_reloaded.obs.run_context import live_run_id
     from mailroom_reloaded.storage.bins import Bins
     from mailroom_reloaded.storage.ledger import get_ledger
 
     now = time.time() if now is None else now
     base, bins = get_base_dir(), Bins(get_base_dir())
     ledger = _source("ledger", get_ledger, None)
-    run_id = live_run_id(datetime.fromtimestamp(now, UTC)) if cfg.run_mode == "production" else None
+    def runs(since: float) -> list[str] | None:
+        return _live_run_ids(since, now) if cfg.run_mode == "production" else None
     queues = {"inbox": _source("inbox", lambda: _count(bins.inbox), 0),
               "processing": _source("processing", lambda: sum(
                   1 for p in (base / "processing").rglob("*") if p.is_file()) if (base / "processing").exists() else 0, 0),
               "review": _source("review", lambda: _count(bins.review), 0),
               "failed": _source("failed", lambda: _count(bins.failed), 0)}
-    recent = _source("ledger_window", lambda: _closed_since(ledger, now - window_minutes * 60, run_id), [])
+    since = now - window_minutes * 60
+    recent = _source("ledger_window", lambda: _closed_since(ledger, since, runs(since)), [])
     window = {"minutes": window_minutes, **window_stats(recent)} if ledger is not None else {}
-    today_entries = _source("ledger_today", lambda: _closed_since(
-        ledger, _local_midnight(now, cfg.timezone).timestamp(), run_id), None)
+    midnight = _local_midnight(now, cfg.timezone).timestamp()
+    today_entries = _source("ledger_today", lambda: _closed_since(ledger, midnight, runs(midnight)), None)
     t = window_stats(today_entries) if today_entries is not None else None
     today = {"processed": t["received"], "review": t["review"], "failed": t["failed"],
              "cost_usd": t["cost_usd"]} if t else None

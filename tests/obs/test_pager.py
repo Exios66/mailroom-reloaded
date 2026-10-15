@@ -135,6 +135,40 @@ def test_ledger_failure_snapshot_renders_alert(ledger):
     assert any("failed" in m.text for m in out.messages)
 
 
+def test_window_spans_utc_date_rollover_of_live_run_id(ledger):
+    """Live run ids roll at UTC midnight (7 PM CDT); a window that spans the
+    rollover still counts the documents closed under the previous day's run."""
+    from datetime import UTC, timedelta
+
+    from mailroom_reloaded.obs import pager
+    from mailroom_reloaded.obs.run_context import live_run_id
+
+    wall = time.time()
+    run = live_run_id(datetime.fromtimestamp(wall, UTC))
+    for i in range(3):
+        _close(ledger, run, f"f{i}", "failed", failure_reason="llm_error")
+    ledger.flush()
+    midnight = datetime.fromtimestamp(wall, UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    now = (midnight + timedelta(days=1, minutes=1)).timestamp()  # just past the rollover
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": [MOBILE], "timezone": "America/Chicago"}, {},
+                              environment="live")
+    snap = pager.collect_snapshot(cfg, window_minutes=(now - wall) / 60 + 5, now=now)
+    assert (snap.window["received"], snap.window["failed"]) == (3, 3)
+    assert len(snap.failures) == 3
+
+
+def test_live_run_ids_cover_every_utc_date_in_range(monkeypatch):
+    from mailroom_reloaded.obs import pager
+
+    monkeypatch.delenv("MAILROOM_RUN_ID", raising=False)
+    day = 86400
+    t = datetime(2026, 10, 15, 23, 55, tzinfo=ZoneInfo("UTC")).timestamp()
+    assert pager._live_run_ids(t, t + 600) == ["live-20261015", "live-20261016"]
+    assert pager._live_run_ids(t - 2 * day, t) == ["live-20261013", "live-20261014", "live-20261015"]
+    monkeypatch.setenv("MAILROOM_RUN_ID", "pinned")
+    assert pager._live_run_ids(t, t + 600) == ["pinned"]
+
+
 def test_eval_run_is_progress_with_total(ledger):
     from mailroom_reloaded.obs import pager
     from mailroom_reloaded.pipeline import run_ledger
