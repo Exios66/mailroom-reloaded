@@ -31,6 +31,9 @@ Every tunable lives in a `pager:` block of the repo's existing `taxonomy.yaml`. 
 | R10 | Implemented by subagents: **Sonnet @ high** or **Haiku @ max**. |
 | R11 | Concise, minimal footprint, placed in each repo's existing layout. No bloat. |
 | R12 | Same behavior, copy and config keys in **both** repos. |
+| R13 | Text alerts are **toggleable and default OFF**. |
+| R14 | When a **live production** mailroom starts, the operator is **asked** whether to enable text alerts, and for the number to use. |
+| R15 | **CLI commands in both repos** cover: turn on/off, set/add/remove the number, show status, and send a test text (to the saved number or an ad-hoc one). |
 
 ## Global Constraints
 
@@ -41,12 +44,13 @@ Every tunable lives in a `pager:` block of the repo's existing `taxonomy.yaml`. 
   |---|---|
   | `pager_core.py` | 380 |
   | `sms_notify.py` / `sms.py` | 150 |
-  | `pager.py` (llm-mailroom) | 320 |
-  | `pager.py` (mailroom-reloaded) | 260 |
+  | `pager.py` (llm-mailroom) | 430 (snapshot + host + settings + prompt + CLI) |
+  | `pager.py` (mailroom-reloaded) | 340 (CLI verbs live in `cli.py`) |
   | `provider_health.py` / `health.py` | 90 |
 
 - `pager_core.py` is **byte-identical** in both repos, apart from its one-line module docstring header naming the repo. It imports only the stdlib: no repo imports, no I/O, no clock reads. `now` is always a parameter.
-- Kill-switch default **off**. Sending requires `enabled` (taxonomy `pager.enabled` or `MAILROOM_PAGER=1`) **and** at least one valid recipient.
+- Default **off** (R13). Sending requires the resolved `enabled` **and** at least one valid recipient.
+- **Operator settings file** `<base_dir>/pager_settings.json` = `{"enabled": bool, "recipients": [str], "updated_at": iso, "updated_by": "cli"|"prompt"|"flag"}`. Only the CLI, the start prompt and `--pager/--no-pager` write it, via an atomic replace. For `enabled` and `recipients`, the precedence is **settings file → env → taxonomy → default**, so an interactive toggle always wins over a stale env var. Every other key keeps env → taxonomy → default. A running pager re-reads the file whenever its mtime changes, so toggles apply within one scan and no restart is needed.
 - Fail-soft: pager code never raises into its host (watchdog, watcher, API lifespan, run scripts). Failures log one `pager_*` structlog event.
 - Hermetic tests: no network. Sends go through `set_transport_override()`, and HTTP takes an injectable `httpx.Client` (`httpx.MockTransport` in tests).
 - Secrets are never logged. Numbers are logged only via `mask_number()` → `+1•••••1234`.
@@ -76,8 +80,8 @@ Added to `llm-mailroom/src/config/taxonomy.yaml` and `mailroom-reloaded/src/mail
 
 ```yaml
 pager:
-  enabled: false                 # env MAILROOM_PAGER
-  recipients: []                 # env MAILROOM_PAGER_TO (comma list) — mobile and/or Google Voice, E.164
+  enabled: false                 # default OFF; `pager on|off` (settings file) > env MAILROOM_PAGER > this
+  recipients: []                 # `pager number …` (settings file) > env MAILROOM_PAGER_TO (comma list) — mobile and/or Google Voice, E.164
   transport: twilio              # twilio | email_gateway | console        env MAILROOM_PAGER_TRANSPORT
   mode: auto                     # auto | production | research           env MAILROOM_PAGER_MODE
   style: emoji                   # emoji | ascii (ascii = GSM-7, ~2.3x cheaper)   env MAILROOM_PAGER_STYLE
@@ -120,9 +124,45 @@ pager:
 
 Secrets are env-only: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` **or** `TWILIO_MESSAGING_SERVICE_SID`. Email-gateway sending reuses each repo's existing SMTP settings. `mode: auto` resolves to `research` when the environment name is `pilot`/`misc`/`mock`/`eval`, and to `production` otherwise. The environment name comes from `OBSERVABILITY_ENVIRONMENT` in llm-mailroom and `obs.run_context.environment_name()` in mailroom-reloaded.
 
-Runtime controls (CLI, written to the state file, no restart):
-- `pager mute <duration|off>` — e.g. `2h`, `30m`. Suppresses everything except criticals (criticals obey `quiet_hours.allow`).
-- `pager config` — prints the effective resolved config, each value's source (`env`/`taxonomy`/`default`), and the masked recipients.
+### Toggle, number and test — CLI (R13, R15)
+
+The same verbs exist in both repos. In `llm-mailroom` they run as `PYTHONPATH=src python -m pipeline.pager <verb>` (argparse); in `mailroom-reloaded` as `mailroom pager <verb>` (a typer sub-app on the existing `cli.py` app). Changes take effect in a running mailroom within one scan.
+
+| Command | Effect |
+|---|---|
+| `pager status [--full]` | `ON`/`OFF`, masked recipients, transport, deliverable or not (with the missing env var names), mute/quiet state, last text sent. `--full` adds every resolved key and its source (`settings`/`env`/`taxonomy`/`default`). |
+| `pager on [--to NUMBER]` | Enable. `--to` replaces the saved recipients. With no saved number on a TTY, it prompts for one; with none on a non-TTY, it exits 2 with `no number saved — use: pager on --to +1…`. It warns, but still enables, when Twilio credentials are missing. |
+| `pager off` | Disable. The saved numbers are kept. |
+| `pager number set NUMBER` | Replace the recipients with one number. |
+| `pager number add NUMBER` / `pager number remove NUMBER` | Edit the list. For example, keep both a mobile and a Google Voice number. |
+| `pager number list` | Masked list; `--show` prints the numbers unmasked. |
+| `pager test [--to NUMBER]` | Send `✅ MAILROOM PAGER TEST · <host> · <time>` to the saved numbers, or to `--to` without saving it. Works while the pager is OFF. Prints each `SendResult`; exits 1 if any send failed. |
+| `pager preview [--mode production\|research] [--alert]` | Print a real digest or alert to the console; never sends. |
+| `pager mute 2h\|30m\|off` | Suppress everything except criticals (which still obey `quiet_hours.allow`). |
+| `pager run` | Run the pager in the foreground (standalone host). |
+
+Number input is validated with `valid_recipients()`. A bad number exits 2 with `not a valid number — use E.164, e.g. +16085551234`. A US 10-digit entry (`6085551234` or `608-555-1234`) is normalized to `+16085551234`, and the CLI echoes the normalized number before saving.
+
+### Live-production start prompt (R14)
+
+Hooked into the production entry points: `llm-mailroom` `python -m api.main` and `python -m pipeline.watcher` (`__main__` blocks), and `mailroom-reloaded` `mailroom serve` and `mailroom watch`. The prompt is shown only when **all** of these hold:
+- the resolved mode is `production`;
+- stdin and stdout are TTYs;
+- `MAILROOM_PAGER_PROMPT` is not `0`;
+- neither `--pager` nor `--no-pager` was passed.
+
+Fixed copy:
+```
+📱 Text alerts are OFF for this live run. Enable them? [y/N]:
+   Number to text (mobile or Google Voice, e.g. +16085551234):
+   Send a test text now? [Y/n]:
+```
+When alerts are already ON, the first line reads `📱 Text alerts are ON → +1•••••1234. Keep them on? [Y/n]:`. The number question is skipped when a number is already saved.
+- **Timeouts:** each question times out after **30 s** (`select` on stdin) and takes its default, so an unattended TTY start never hangs. The default is always "leave as is", which means OFF on a first run.
+- **Persistence:** the answer is written to the settings file (`updated_by: "prompt"`) and persists until the operator changes it.
+- **Non-interactive starts** (docker, systemd, CI): no prompt. They log one `pager_prompt_skipped` line with the current state and the hint `enable with: <pager on --to +1…>`.
+- **`--pager` / `--no-pager`:** both entry points accept these to set the toggle without a prompt (`updated_by: "flag"`). `--pager` still needs a saved number, or it exits 2 with the same hint.
+- **Starting the sender:** if alerts end up ON, the process calls `Pager().start_background()`. The lock decides which host sends, so a running watchdog-hosted pager in `llm-mailroom` keeps the role. Only an external host (the watchdog, or `pager run`) can text `watcher_down` when this process dies; the docs say so.
 
 ### Frequency state machine (pinned by tests)
 
@@ -299,7 +339,8 @@ def test_taxonomy_has_pager_block():  # load_config()["pager"] has keys digest, 
 **Interfaces — Produces** (stdlib only, pure):
 - Config:
   - `@dataclass(frozen=True) class PagerConfig` — one field per leaf of the `pager:` block, using nested frozen dataclasses `Digest`, `Scan`, `Alerts`, `QuietHours`, `Providers`, with `rules: dict[str, dict]`. Also `quiet: tuple[time, time] | None`, parsed from `quiet_hours.window`, and `sources: dict[str, str]` (dotted key → `env|taxonomy|default`).
-  - `PagerConfig.resolve(block: Mapping | None, env: Mapping[str, str], *, environment: str) -> PagerConfig` — applies the env overrides listed in "Configuration", plus the floors (`scan.seconds ≥ 15`, `max_chars ≥ 160`, minutes ≥ 0).
+  - `PagerConfig.resolve(block: Mapping | None, env: Mapping[str, str], *, environment: str, settings: Mapping | None = None) -> PagerConfig` — `settings` is the operator settings file's dict and wins for `enabled`/`recipients`. Applies the env overrides listed in "Configuration", plus the floors (`scan.seconds ≥ 15`, `max_chars ≥ 160`, minutes ≥ 0).
+  - `normalize_number(raw: str) -> str | None` — strips spaces, dashes, dots and parentheses. Bare US 10-digit numbers (and 11-digit numbers starting with 1) become `+1…`. Returns `None` unless the result is E.164.
   - `PagerConfig.digest_minutes(mode: str) -> float`.
 - Data model:
   - `@dataclass(frozen=True) class ProviderStatus: name: str; state: Literal["up","warm","idle","degraded","down","unknown"]; detail: str = ""`
@@ -324,6 +365,16 @@ def test_taxonomy_has_pager_block():  # load_config()["pager"] has keys digest, 
 - [ ] **Step 1: Write failing tests** (house-style goldens as inline triple-quoted strings, `timezone="America/Chicago"`, fixed `now`):
 ```python
 def test_resolve_precedence_env_over_taxonomy_over_default(): ...   # + sources map
+def test_settings_file_wins_for_enabled_and_recipients():
+    cfg = PagerConfig.resolve({"enabled": True}, {"MAILROOM_PAGER": "1"}, environment="live",
+                              settings={"enabled": False, "recipients": ["+16085551234"]})
+    assert cfg.enabled is False and cfg.recipients == ("+16085551234",)
+    assert cfg.sources["enabled"] == "settings"
+def test_default_is_off(): assert PagerConfig.resolve(None, {}, environment="live").enabled is False
+def test_normalize_number():
+    assert normalize_number("608-555-1234") == normalize_number("(608) 555 1234") == "+16085551234"
+    assert normalize_number("+44 20 7946 0958") == "+442079460958"
+    assert normalize_number("12345") is None
 def test_resolve_floors_and_bad_values(): ...                       # scan.seconds 2 → 15; "abc" → default + warning
 def test_quiet_window_parse_cross_midnight(): ...                   # "22:00-07:00"
 def test_mode_auto(): ...                                           # pilot/eval → research; live → production
@@ -403,7 +454,7 @@ def test_state_json_roundtrip(): ...
 
 ### Task 5: Pager host — scheduler, watchdog, CLI, research hooks, docs
 
-**Files:** Modify `src/pipeline/pager.py` (append `Pager` + CLI), `src/pipeline/watchdog.py`, `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py`, `deploy/docker-compose.full.yml`, `.env.example`, `AGENTS.md`, `deploy/README.md`, `CHANGELOG.md`; Test `src/tests/test_pager.py` (append).
+**Files:** Modify `src/pipeline/pager.py` (append `Pager`, settings file, start prompt, CLI), `src/pipeline/watchdog.py`, `src/api/main.py` (`__main__` only), `src/pipeline/watcher.py` (`__main__` only), `src/scripts/run_pilot.py`, `src/scripts/run_experiment.py`, `deploy/docker-compose.full.yml`, `.env.example`, `AGENTS.md`, `deploy/README.md`, `CHANGELOG.md`; Test `src/tests/test_pager.py` (append).
 
 **Interfaces — Consumes:** Tasks 1–4.
 
@@ -420,18 +471,22 @@ def test_state_json_roundtrip(): ...
     Never raises.
   - `start_background() -> threading.Thread | None` — daemon thread that calls `tick` every `min(scan.seconds, 15)` s. Returns `None` when inactive or when the lock is held.
   - `page_now(alert: Alert) -> list[SendResult]` — goes through `plan_scan` gates using a synthetic snapshot override.
-- `load_pager_config(env: Mapping | None = None) -> PagerConfig` — `PagerConfig.resolve(load_config().get("pager"), env or os.environ, environment=os.environ.get("OBSERVABILITY_ENVIRONMENT", ""))`.
-- CLI `python -m pipeline.pager {run|preview|test|config|mute}`:
-  - `preview [--mode production|research] [--alert]` — prints via `ConsoleTransport`; never sends.
-  - `test` — sends `✅ MAILROOM PAGER TEST · <host> · <time>`; exits 1 on failure.
-  - `config` — effective config + sources, masked recipients.
-  - `mute 2h|30m|off`.
+- `load_pager_config(env: Mapping | None = None) -> PagerConfig` — `PagerConfig.resolve(load_config().get("pager"), env or os.environ, environment=os.environ.get("OBSERVABILITY_ENVIRONMENT", ""), settings=read_settings())`. `Pager.tick` re-resolves when the settings file's mtime changes.
+- `read_settings() -> dict` and `write_settings(*, enabled: bool | None = None, recipients: list[str] | None = None, by: str) -> dict` — operate on `<base_dir>/pager_settings.json` (see Global Constraints). Writes are atomic, and an unreadable file reads as `{}`.
+- `prompt_on_start(cfg: PagerConfig, *, flag: bool | None, input_fn=input, isatty=None, timeout_s: float = 30.0) -> PagerConfig` — implements "Live-production start prompt" exactly, including the copy, defaults, timeout, the non-TTY log line, and the test-text offer. Returns the re-resolved config.
+- `main(argv: list[str] | None = None) -> int` — the CLI, implementing every verb of the "Toggle, number and test — CLI" table with argparse subcommands (`number` has its own `set|add|remove|list` subparsers).
+- Production start hooks:
+  - In `src/api/main.py` `__main__` and `src/pipeline/watcher.py` `__main__`, add `--pager/--no-pager` (argparse, `default=None`).
+  - Before serving/watching, call `cfg = prompt_on_start(load_pager_config(), flag=args.pager)`.
+  - If `cfg.active`, call `Pager(cfg).start_background()`.
+  - No other change to these files.
 - Watchdog: `main()` builds one `Pager()` and calls `tick()` every loop. The `down`/`remind` branch also calls `page_now(Alert("watcher_down","critical","Watcher DOWN — heartbeat lost", detail=<last-heartbeat row>, next_step="relaunch: python -m pipeline.watcher"))`. The email path is unchanged.
 - Research: both scripts call `report_run_progress` after each sample and once with `finished=True`, with metrics `acc` (only with ground truth), `review_rate`, `failed`, `cost_usd`, `p50_latency_s`. `--page` runs `Pager(load_pager_config({**os.environ, "MAILROOM_PAGER_MODE": "research"})).start_background()`. If another host holds the lock, it logs that and continues; the external pager still reads the progress files.
 - Docs, kept concise and placed only in existing files:
   - `deploy/README.md` gets one "Operator SMS pings" section covering a 5-step quick start, the Recipients table (mobile vs Google Voice), Twilio trial verification, 10DLC/toll-free, and cost (`ascii` ≈ 2.3× fewer segments).
   - `.env.example` gets a commented pager block.
-  - `AGENTS.md` Commands gets 3 lines: `pager run`, `preview`, `test`.
+  - `AGENTS.md` Commands gets 4 lines: `pager status`, `pager on --to +1…` / `pager off`, `pager test`, `pager run`.
+  - `deploy/README.md` section also documents the start prompt, `--pager/--no-pager`, and `MAILROOM_PAGER_PROMPT=0`.
   - `CHANGELOG.md` gets one entry.
   - The compose watchdog service passes `MAILROOM_PAGER*`, `TWILIO_*`, `OPENROUTER_API_KEY`.
 
@@ -448,7 +503,17 @@ def test_second_pager_is_passive(temp_base_dir): ...
 def test_watchdog_down_also_pages(monkeypatch): ...           # Review Focus 5; email still sent
 def test_run_started_and_finished_texts_once(): ...
 def test_run_pilot_reports_progress(temp_base_dir): ...       # run_pilot.main(["--mock","--max-docs","3"]) → done == total == 3, finished
-def test_cli_preview_and_config_never_send(capsys): ...
+def test_cli_preview_and_status_never_send(capsys): ...
+def test_cli_on_off_persists_and_running_pager_picks_up(temp_base_dir): ...  # off → tick sends nothing; on → next scan sends
+def test_cli_number_set_add_remove_list_masked(temp_base_dir, capsys): ...  # "608-555-1234" saved as "+16085551234"
+def test_cli_bad_number_exits_2(): ...
+def test_cli_on_without_number_non_tty_exits_2(): ...
+def test_cli_test_to_adhoc_number_does_not_save(temp_base_dir): ...
+def test_prompt_enable_with_number_and_test(temp_base_dir): ...             # inputs "y", "608 555 1234", "" → enabled, saved, 1 test send
+def test_prompt_default_keeps_off_on_timeout(temp_base_dir): ...            # input_fn raises TimeoutError → still OFF
+def test_prompt_skipped_non_tty_logs_hint(caplog): ...
+def test_prompt_skipped_in_research_mode_and_with_flags(): ...              # --no-pager writes enabled False, no prompt
+def test_prompt_already_on_asks_keep(temp_base_dir): ...
 ```
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement**, then the docs/compose edits.
@@ -468,7 +533,7 @@ Branch `claude/mailroom-operator-sms-pings-o63gx2`. Test runner: `uv run pytest 
 | `src/mailroom_reloaded/obs/sms.py` | port of `sms_notify.py`; `EmailGatewayTransport` takes SMTP settings from `MAILROOM_SMTP_*` env and is unavailable when unset (this repo has no SMTP channel) |
 | `src/mailroom_reloaded/llm/health.py` | port of `provider_health.py`; `settings.vllm_base_url` → `modal:vllm`; hooked in `llm/retry.py::_record_retry_event` (errors) and `llm/client.py::record_usage` (successes) |
 | `src/mailroom_reloaded/obs/pager.py` | ledger-backed snapshot + `Pager` host |
-| `src/mailroom_reloaded/cli.py` | `pager` command group on the existing CLI app |
+| `src/mailroom_reloaded/cli.py` | `pager` sub-app (all CLI verbs) + `--pager/--no-pager` and start prompt on `serve`/`watch` |
 | `src/mailroom_reloaded/api/app.py` | `lifespan`: opt-in background pager |
 | `src/mailroom_reloaded/eval/runner.py` | `total` in `run_opened` payload; `--page` |
 | `docs/CONFIGURATION.md`, `docs/OPERATIONS.md`, `.env.example`, `CHANGELOG.md` | one section each, linking to llm-mailroom's `deploy/README.md` for Twilio/Google Voice setup |
@@ -494,12 +559,13 @@ Branch `claude/mailroom-operator-sms-pings-o63gx2`. Test runner: `uv run pytest 
   - `outbox_dead=None`.
   - Providers come from Part A's `provider_statuses` logic, kept in `obs/pager.py` with `modal_warm(app="mailroom-vllm")` and `openrouter_info`.
 - `obs.pager.Pager` — same contract as Part A Task 5, minus the watchdog.
-- `load_pager_config()` reads `load_taxonomy().raw.get("pager")` and uses `environment_name()`.
-- CLI: `mailroom pager run|preview|test|config|mute`.
+- `load_pager_config()` reads `load_taxonomy().raw.get("pager")`, uses `environment_name()`, and passes `settings=read_settings()`. `read_settings`/`write_settings`/`prompt_on_start` are ported from Part A Task 5 with the same contract and copy.
+- CLI: a `pager` typer sub-app on the existing `cli.py` app, implementing **every** verb of the "Toggle, number and test — CLI" table with the same arguments, exit codes and output (`mailroom pager on --to …`, `mailroom pager number add …`, `mailroom pager test --to …`, …).
+- Production start hooks: `serve` and `watch` gain `--pager/--no-pager` (`typer.Option(None)`). Before starting, call `prompt_on_start(load_pager_config(), flag=…)`. If the result is active, `watch` starts `Pager().start_background()`; `serve` leaves it to the `lifespan` hook below, so it doesn't start twice.
 - `api/app.py` `lifespan` starts `Pager().start_background()` when the config is active and `MAILROOM_PAGER_EMBED` is not `0`, mirroring `_embed_watcher_enabled`. Docs state that only `mailroom pager run`, as its own process, can text `watcher_down` when the API dies.
 - `eval/runner.py`: `run_eval` passes `total=len(docs)` into `open_run`'s payload; the CLI eval command gains `--page`.
 
-- [ ] **Step 1: Write failing tests:** `test_snapshot_from_seeded_ledger_window`, `test_eval_run_is_progress_with_total`, `test_snapshot_survives_missing_ledger`, `test_watcher_lock_free_means_down`, `test_cli_pager_preview_prints_digest` (CLI runner, console transport), `test_lifespan_starts_pager_only_when_enabled`, plus Part A's `test_digest_every_10_minutes_aligned`, `test_failed_send_keeps_alert_pending` and `test_state_survives_restart`, ported. Run → FAIL.
+- [ ] **Step 1: Write failing tests:** `test_snapshot_from_seeded_ledger_window`, `test_eval_run_is_progress_with_total`, `test_snapshot_survives_missing_ledger`, `test_watcher_lock_free_means_down`, `test_cli_pager_preview_prints_digest` (CLI runner, console transport), `test_lifespan_starts_pager_only_when_enabled`, the CLI and prompt tests from Part A Task 5 ported to the typer `CliRunner` (`test_cli_on_off_persists_and_running_pager_picks_up`, `test_cli_number_set_add_remove_list_masked`, `test_cli_bad_number_exits_2`, `test_cli_on_without_number_non_tty_exits_2`, `test_cli_test_to_adhoc_number_does_not_save`, `test_prompt_enable_with_number_and_test`, `test_prompt_default_keeps_off_on_timeout`, `test_prompt_skipped_non_tty_logs_hint`), `test_watch_no_pager_flag_skips_prompt`, plus Part A's `test_digest_every_10_minutes_aligned`, `test_failed_send_keeps_alert_pending` and `test_state_survives_restart`, ported. Run → FAIL.
 - [ ] **Step 2: Implement**, then the docs.
 - [ ] **Step 3: Run** `uv run pytest tests -q` and `make lint` → PASS.
 - [ ] **Step 4: Commit** `feat(obs): ledger-backed pager host, CLI and API embedding; docs`.
