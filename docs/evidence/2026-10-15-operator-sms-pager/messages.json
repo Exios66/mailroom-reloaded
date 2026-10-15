@@ -1,0 +1,61 @@
+{
+ "texts_delivered": 14,
+ "messages": [
+  {
+   "at": "6:58:35 PM",
+   "body": "Mailroom ALERT · 6:58 PM CDT\n🟠 Watch: 3 documents failed since 6:54 PM.\nLatest: claim_1843 — llm_error.\nNext: inspect data/failed/ and the latest error above.\nRef P-1858-779b",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "6:59:35 PM",
+   "body": "Mailroom ALERT · 6:59 PM CDT\n🔴 Action needed: the watcher has stopped (no watcher process is running).\nLatest: claim_1843 — llm_error.\nNext: restart with `mailroom watch`.\nAlso: 3 documents failed since 6:54 PM.\nRef P-1859-4a58",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "7:00:35 PM",
+   "body": "Mailroom LIVE · 7:00 PM CDT\n🔴 Action needed: the watcher has stopped (no watcher process is running).\nNext: restart with `mailroom watch`.\nAlso: 3 documents failed since 6:54 PM.\nLast 10 min: 14 received, 9 archived, 2 to review, 3 failed.\n44s/doc (median) · $0.21.\nToday: 14 processed · 2 to review · 3 failed · $0.21.\nQueues: 0 waiting, 0 in progress, 0 awaiting review.\nRef P-1900-2bd6",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "7:06:35 PM",
+   "body": "Mailroom RESOLVED · 7:06 PM CDT\n✅ Document failures have stopped after 9 min. No action needed.\nRef P-1906-6374",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "7:07:35 PM",
+   "body": "Mailroom RESOLVED · 7:07 PM CDT\n✅ The watcher is running again after 8 min. No action needed.\nRef P-1907-e58f",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "7:10:35 PM",
+   "body": "Mailroom LIVE · 7:10 PM CDT\n🟢 All clear — no action needed.\nLast 10 min: 0 received, 0 archived, 0 to review, 0 failed.\nToday: 18 processed · 2 to review · 3 failed · $0.27.\nQueues: 0 waiting, 0 in progress, 0 awaiting review.\nRef P-1910-6947",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  },
+  {
+   "at": "7:20:35 PM",
+   "body": "Mailroom LIVE · 7:20 PM CDT\n🟢 All clear — no action needed.\nLast 10 min: 0 received, 0 archived, 0 to review, 0 failed.\nToday: 18 processed · 2 to review · 3 failed · $0.27.\nQueues: 0 waiting, 0 in progress, 0 awaiting review.\nRef P-1920-0831",
+   "recipients": [
+    "+1•••••9876",
+    "+1•••••1234"
+   ]
+  }
+ ]
+}
