@@ -276,7 +276,7 @@ def collect_snapshot(cfg: PagerConfig, *, window_minutes: float, now: float | No
         outbox_dead=None, providers=_source("providers", lambda: provider_statuses(cfg, health, or_info, warm), []),
         runs=_source("runs", lambda: eval_runs(ledger, now), []),
         failures=[{"name": e.doc_id or "?", "error": str(e.payload.get("failure_reason") or e.payload.get("outcome")),
-                   "at": e.ts} for e in reversed(fails)],
+                   "at": _ts(e)} for e in reversed(fails)],
         openrouter=or_info if or_info and "error" not in or_info else None,
         today=today, host=socket.gethostname(), repo="mailroom-reloaded")
 

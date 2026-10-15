@@ -114,8 +114,25 @@ def test_snapshot_from_seeded_ledger_window(ledger, monkeypatch):
     w = snap.window
     assert (w["received"], w["archived"], w["review"], w["failed"]) == (4, 2, 1, 1)
     assert w["cost_usd"] == 0.04 and w["p50_latency_s"] == 25.0
-    assert snap.failures == [{"name": "d3", "error": "llm_error", "at": snap.failures[0]["at"]}]
+    assert [(f["name"], f["error"]) for f in snap.failures] == [("d3", "llm_error")]
     assert snap.today["processed"] == 4 and snap.repo == "mailroom-reloaded"
+
+
+def test_ledger_failure_snapshot_renders_alert(ledger):
+    """A failed document in the ledger must page, not crash the scan (failures carry epoch floats)."""
+    from mailroom_reloaded.obs import pager
+    from mailroom_reloaded.obs.pager_core import PagerState, plan_scan
+    from mailroom_reloaded.obs.run_context import live_run_id
+
+    for i in range(3):
+        _close(ledger, live_run_id(), f"f{i}", "failed", failure_reason="llm_error")
+    ledger.flush()
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": [MOBILE], "timezone": "America/Chicago"}, {},
+                              environment="live")
+    snap = pager.collect_snapshot(cfg, window_minutes=10)
+    assert all(isinstance(f["at"], float) for f in snap.failures)
+    out, _ = plan_scan(snap, cfg, PagerState(), snap.taken_at)
+    assert any("failed" in m.text for m in out.messages)
 
 
 def test_eval_run_is_progress_with_total(ledger):
