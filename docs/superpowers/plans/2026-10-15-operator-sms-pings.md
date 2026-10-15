@@ -42,7 +42,7 @@ Every tunable lives in a `pager:` block of the repo's existing `taxonomy.yaml`. 
 
   | Module | Max lines |
   |---|---|
-  | `pager_core.py` | 380 |
+  | `pager_core.py` | 460 (includes rule copy + payload builder) |
   | `sms_notify.py` / `sms.py` | 150 |
   | `pager.py` (llm-mailroom) | 430 (snapshot + host + settings + prompt + CLI) |
   | `pager.py` (mailroom-reloaded) | 340 (CLI verbs live in `cli.py`) |
@@ -137,7 +137,8 @@ The same verbs exist in both repos. In `llm-mailroom` they run as `PYTHONPATH=sr
 | `pager number add NUMBER` / `pager number remove NUMBER` | Edit the list. For example, keep both a mobile and a Google Voice number. |
 | `pager number list` | Masked list; `--show` prints the numbers unmasked. |
 | `pager test [--to NUMBER]` | Send `✅ MAILROOM PAGER TEST · <host> · <time>` to the saved numbers, or to `--to` without saving it. Works while the pager is OFF. Prints each `SendResult`; exits 1 if any send failed. |
-| `pager preview [--mode production\|research] [--alert]` | Print a real digest or alert to the console; never sends. |
+| `pager preview [--mode production\|research] [--alert] [--json]` | Print a real digest or alert to the console as the phone would show it. `--json` prints the machine payload instead. Never sends or logs. |
+| `pager log [-n 10] [--json] [--ref P-…]` | Recent texts from `pager_log.jsonl`. The default is a one-line human summary per text; `--json` gives raw lines for scripts. |
 | `pager mute 2h\|30m\|off` | Suppress everything except criticals (which still obey `quiet_hours.allow`). |
 | `pager run` | Run the pager in the foreground (standalone host). |
 
@@ -181,65 +182,143 @@ Each scan and each digest tick passes through these gates, in this order:
 6. **Healthy.** No open keys and nothing recovered → nothing is sent (R8).
 7. **Send failure.** A failed send never marks an alert sent, so the next scan retries it. The digest clock still advances, so a failed send never causes a burst of late digests.
 
-## Message house style (fixed copy — tests pin it)
+## Message design (fixed copy — tests pin it)
 
-`ascii` style maps `🟢→[OK] 🟠→[WARN] 🔴→[CRIT] 🟡→[REV] 💤→[idle] ✅→[OK] 🚨→[ALERT] 🧪→[RUN] 📬→[MAIL] ⏸→[PAUSED] 🔕→[MUTED] ▓→# ░→-`.
+Every text is two artifacts from one call:
+- **Human text (SMS):** plain, professional sentences. It is the *only* thing that reaches the phone.
+- **Machine payload (JSON):** the same facts as typed fields, *never* in the SMS. It goes to the local message log, and optionally to a webhook (see "Machine-readable channel"). The two are tied together by the `Ref` id printed on the last line of the text.
 
-Production digest:
-```
-📬 MAILROOM · LIVE · 14:20 CDT
-🟢 HEALTHY · up 3h12m · git a1b2c3d
+### Writing rules (human text)
+1. **Line 1 = header:** `Mailroom LIVE|RESEARCH|ALERT|RESOLVED · <h:mm AM/PM TZ>`.
+2. **Line 2 = verdict:** one status mark and one sentence that says whether the operator must act.
+   - `🟢 All clear — no action needed.`
+   - `🟠 Watch: <top warning>.`
+   - `🔴 Action needed: <top critical>.`
+   - `⏸ Ingestion paused by <actor>: <reason>.`
+   - Muted adds ` (alerts muted until 4:20 PM)`.
+3. When action is needed, the problem block comes next: what failed, since when, the blast radius (documents affected), and one `Next:` line taken from the rule's `next_step`. **Needs-to-know information always comes before routine metrics.**
+4. Then progress or throughput, metrics, queues and models, in that order. Each is one short sentence-like line.
+5. **Units are spelled for humans:**
+   - Times: `48s/doc (median)`, `~31 min left`, `1h 04m`.
+   - Money: `$0.21` (2 dp), or `$0.033/doc` (3 dp) per document.
+   - Rates: whole percentages.
+   - Clock times: `2:20 PM`.
+6. At most **one** status mark per text (the verdict line); no bars, tables or code. The `ascii` style swaps the mark for a word: `🟢→OK:` `🟠→WATCH:` `🔴→ACTION:` `⏸→PAUSED:` `✅→OK:` `▶→START:`. That keeps the text GSM-7.
+7. **Last line:** `Ref P-<HHMM>-<4 hex>`. It is the only machine token in the text, and it lets the operator or a script find the JSON. `machine.ref_in_text: false` drops it.
+8. **Overflow** beyond `max_chars` drops whole lines, lowest priority first: models → queues → today → window. It never drops the verdict, problem, `Next:` or Ref lines, and it appends `(+N more in pager log)`.
 
-LAST 10 MIN
-In 14 → ✅ 11 archived · 🟡 2 review · 🔴 1 failed
-p50 48s · $0.21 · first-pass 79%
+### Samples
 
-QUEUES
-inbox 3 · processing 1 · review 6 · failed 2
+Production — healthy digest:
+```
+Mailroom LIVE · 2:20 PM CDT
+🟢 All clear — no action needed.
+Last 10 min: 14 received, 11 archived, 2 to review, 1 failed.
+48s/doc (median) · $0.21 · 79% first-pass.
+Today: 312 processed · 9 to review · 4 failed · $4.86.
+Queues: 3 waiting, 1 in progress, 6 awaiting review.
+Models: Modal fast up; extract and vision idle (scaled to zero). OpenRouter OK, $4.12 credit left.
+Ref P-1420-7c3e
+```
+Production — digest while an alert is open:
+```
+Mailroom LIVE · 2:30 PM CDT
+🔴 Action needed: Modal extract tier is down.
+Since 2:23 PM: 5 extraction calls failed (HTTP 502); 3 documents failed.
+Next: check `modal app logs mailroom-vllm`, then run `pager status`.
+Last 10 min: 9 received, 4 archived, 1 to review, 3 failed.
+Queues: 7 waiting, 0 in progress, 6 awaiting review.
+Models: Modal extract DOWN; fast up. OpenRouter OK.
+Ref P-1430-91aa
+```
+Research — progress digest:
+```
+Mailroom RESEARCH · 2:20 PM CDT
+🟢 Run on track — no action needed.
+pilot-real-1019 (run_pilot --real): 58 of 100 docs (58%), ~31 min left, started 1:42 PM.
+Accuracy 86% · review 6% · 1 failed.
+$1.92 so far ($0.033/doc) · 41s/doc (median).
+Models: Modal extract warm (1 container, 2 cold-start retries). OpenRouter OK, $4.12 credit left.
+Ref P-1420-a01b
+```
+`Accuracy` appears only when the run reports ground truth. `~N min left` appears once 3 or more docs are done. With more than 2 active runs, the third and later collapse to `+N more runs (see pager log)`.
 
-PROVIDERS
-Modal fast 🟢 · extract 💤 · vision 💤
-OpenRouter 🟢 $4.12 left
+Alert (watcher scan; critical first, other open problems one line each):
+```
+Mailroom ALERT · 2:23 PM CDT
+🔴 Action needed: Modal extract tier is down.
+5 calls failed in 3 min (HTTP 502). Extraction is stalled; 3 documents failed since 2:20 PM.
+Latest: claim_0042.pdf — extraction timed out.
+Next: check `modal app logs mailroom-vllm`.
+Also: review queue at 22 (limit 20).
+Ref P-1423-5d10
+```
+Resolved:
+```
+Mailroom RESOLVED · 2:41 PM CDT
+✅ Modal extract tier is back up after 18 min. No action needed.
+Ref P-1441-0c2e
+```
+Run started / finished:
+```
+Mailroom RESEARCH · 1:42 PM CDT
+▶ Run started: pilot-real-1019 · 100 docs · run_pilot --real.
+Ref P-1342-1b9d
+```
+```
+Mailroom RESEARCH · 3:46 PM CDT
+✅ Run finished: pilot-real-1019 — 100 docs in 1h 04m.
+Accuracy 88% · review 5% · 1 failed · $3.30 total.
+Ref P-1546-77f0
+```
 
-WATCH 10m: 0 alerts
-```
-The header state is `🟢 HEALTHY`, `🟠 DEGRADED` (open warning), `🔴 ATTENTION` (open critical) or `⏸ PAUSED` (ingestion paused); `🔕 MUTED until 16:20` is appended while muted. The `LAST 10 MIN` label follows the configured cadence. The WATCH line reads e.g. `WATCH 10m: 2 alerts (1 resolved) · +3 held`.
+Rule copy: the verdict phrase plus the `Next:` line for each rule. The `<…>` parts are filled from the snapshot.
 
-Research digest (at most 2 run blocks, then `+N more runs`):
-```
-🧪 MAILROOM · RESEARCH · 14:20 CDT
-run pilot-real-1019 · run_pilot --real
-▓▓▓▓▓▓░░░░ 58/100 · ETA ~31m
-acc 0.86 · review 6% · failed 1
-$1.92 · $0.033/doc · p50 41s
+| key | verdict phrase | Next: |
+|---|---|---|
+| `watcher_down` | `the watcher has stopped (no heartbeat for <age>)` | `restart with python -m pipeline.watcher` / `mailroom watch` |
+| `provider_down:modal:<t>` | `Modal <t> tier is down` | `check modal app logs mailroom-vllm` |
+| `provider_down:openrouter` | `OpenRouter is rejecting requests (<detail>)` | `check OPENROUTER_API_KEY and openrouter.ai/settings/credits` |
+| `provider_degraded:<p>` | `<p> is degraded (<detail>)` | `no action unless it persists; pager status for detail` |
+| `openrouter_credit` | `OpenRouter credit is low ($X.XX left)` | `top up at openrouter.ai/settings/credits` |
+| `docs_failed` | `<n> documents failed since <time>` | `inspect data/failed/ and the latest error above` |
+| `review_backlog` | `review queue at <n> (limit <threshold>)` | `resolve items in the review queue` |
+| `stuck_docs` | `<n> documents stuck over <minutes> min` | `check data/processing/ and the watcher log` |
+| `ingestion_paused` | `ingestion paused by <actor>: <reason>` | `clear the pause once resolved (see deploy/README.md)` |
+| `outbox_dead` | `<n> echo emails could not be delivered` | `check the Gmail channel credentials` |
+| `run_stalled:<id>` | `run <id> has made no progress for <minutes> min` | `check the run's console/log` |
 
-PROVIDERS
-Modal extract 🟢 1 warm · 503s 2
-OpenRouter 🟢 $4.12 left
+### Machine-readable channel
 
-WATCH 10m: 1 alert (resolved)
+`pager_core.build_payload(...)` returns a dict with schema `mailroom.pager/v1`. Its keys are exact; values are `null` when a source was unavailable:
+```json
+{"schema":"mailroom.pager/v1","ref":"P-1430-91aa","kind":"digest|alert|resolved|run_started|run_finished|test",
+ "mode":"production|research","sent_at":"2026-10-15T19:30:00Z","host":"…","repo":"llm-mailroom|mailroom-reloaded",
+ "status":"healthy|watch|action|paused","action_required":true,"muted_until":null,
+ "window":{"minutes":10,"received":9,"archived":4,"review":1,"failed":3,"p50_latency_s":48.0,"cost_usd":0.21,"first_pass_rate":0.79},
+ "today":{"processed":312,"review":9,"failed":4,"cost_usd":4.86},
+ "queues":{"inbox":7,"processing":0,"review":6,"failed":2},
+ "watcher":{"alive":true,"heartbeat_age_s":1.2,"uptime_s":11520,"sha":"a1b2c3d"},
+ "providers":[{"key":"modal:extract","state":"down","detail":"HTTP 502 ×5","calls_10m":5,"errors_10m":5}],
+ "openrouter":{"limit_remaining":4.12,"usage":15.88,"is_free_tier":false},
+ "runs":[{"run_id":"pilot-real-1019","label":"run_pilot --real","done":58,"total":100,"eta_s":1860,"started_at":"…","finished":false,"metrics":{"acc":0.86,"review_rate":0.06,"failed":1,"cost_usd":1.92,"p50_latency_s":41.0}}],
+ "alerts":{"new":[{"key":"provider_down:modal:extract","severity":"critical","title":"…","detail":"…","next_step":"…","since":"…"}],
+           "open":[…],"recovered":[{"key":"…","open_s":1080}],"held":0},
+ "text":"<the exact SMS body>",
+ "delivery":[{"to":"+1•••••1234","ok":true,"transport":"twilio","segments":3,"detail":"SM…"}]}
 ```
-`acc` appears only when the run reports ground-truth accuracy. ETA appears only once `done ≥ 3`.
+- **Local log (always on while the pager is active):** each text appends one JSON line to `<base_dir>/pager_log.jsonl`, with `delivery` filled in after sending. The file rotates to `pager_log.jsonl.1` at 5 MB, keeping a single generation.
+- **Webhook (optional):** `machine.webhook_url` in the taxonomy (env `MAILROOM_PAGER_WEBHOOK_URL`) receives the same JSON as `POST application/json` (timeout 5 s, fail-soft, no retries). If `MAILROOM_PAGER_WEBHOOK_SECRET` is set, the request carries `X-Mailroom-Signature: sha256=<hmac of body>`.
+- **CLI:** `pager log [-n 10] [--json] [--ref P-…]`. The default prints `time · kind · status · ref · first verdict line`. `--json` prints the raw JSON lines, for scripts (`pager log --json -n 1 | jq .window`).
+- Payloads carry masked recipients only and never contain secrets.
 
-Alert / recovered / run events:
+Taxonomy addition (inside `pager:`):
+```yaml
+  machine:
+    ref_in_text: true            # print "Ref P-…" as the last SMS line
+    log: true                    # <base_dir>/pager_log.jsonl
+    webhook_url: ""              # env MAILROOM_PAGER_WEBHOOK_URL (+ MAILROOM_PAGER_WEBHOOK_SECRET)
 ```
-🚨 MAILROOM ALERT · 14:23 CDT
-🔴 Modal extract tier DOWN
-5 calls failed in 3m (HTTP 502)
-🟠 3 docs failed since 14:20
-last: claim_0042.pdf — extraction timeout
-→ next: check data/watcher.out · GET /health
-```
-```
-✅ MAILROOM RECOVERED · 14:41 CDT
-Modal extract tier — OK after 18m
-```
-```
-🧪 RUN STARTED · pilot-real-1019 · 100 docs
-🧪 RUN FINISHED · pilot-real-1019 · 1h04m
-acc 0.88 · review 5% · failed 1 · $3.30
-```
-Formats: durations `3h12m` / `18m` / `45s`; money `$0.21` (2 dp) and per-doc `$0.033` (3 dp); integer percentages; 10-cell progress bar rounded down. Overflow past `max_chars` drops whole lines from the lowest-priority section first, then appends `…+N more`. Priority, highest first: header → alerts/WATCH → window metrics → providers → queues.
 
 ## Review Focus
 
@@ -267,7 +346,7 @@ Dispatch with **superpowers:subagent-driven-development**. The controller (this 
 | Final whole-branch review, per repo | — | `sonnet` · `high` |
 
 Rules for usage efficiency:
-- Each implementer prompt contains **only**: its task section, the Global Constraints, the Configuration block, the house style (Tasks 2/6 only), and the Interfaces it consumes. Never the whole plan.
+- Each implementer prompt contains **only**: its task section, the Global Constraints, the Configuration block, the "Message design" section (Tasks 2/6 only), and the Interfaces it consumes. Never the whole plan.
 - One combined review per task, not two passes. A failed review re-dispatches the **same** implementer via `SendMessage` with the findings; it is not a fresh agent.
 - Each implementer runs only its own test file plus the named neighbor suites. The full suite runs once per repo, in the final review.
 - Order: `1 → 2 → 3 → 4 → 5` (llm-mailroom), then `6 → 7` (mailroom-reloaded). Task 6 may start as soon as Tasks 1–3 are approved.
@@ -345,22 +424,25 @@ def test_taxonomy_has_pager_block():  # load_config()["pager"] has keys digest, 
 - Data model:
   - `@dataclass(frozen=True) class ProviderStatus: name: str; state: Literal["up","warm","idle","degraded","down","unknown"]; detail: str = ""`
   - `@dataclass(frozen=True) class RunProgress: run_id: str; label: str; total: int; done: int; started_at: float; updated_at: float; finished: bool; metrics: dict`
-  - `@dataclass(frozen=True) class RunSnapshot: taken_at: float; mode: str; watcher_alive: bool | None; heartbeat_age_s: float | None; uptime_s: float | None; sha: str | None; queues: dict[str, int]; window: dict; stuck: int; paused: dict | None; outbox_dead: int | None; providers: list[ProviderStatus]; runs: list[RunProgress]; failures: list[dict]; openrouter: dict | None`
-  - `@dataclass(frozen=True) class Alert: key: str; severity: Literal["critical","warning"]; title: str; detail: str = ""; next_step: str = ""`
+  - `@dataclass(frozen=True) class RunSnapshot: taken_at: float; mode: str; watcher_alive: bool | None; heartbeat_age_s: float | None; uptime_s: float | None; sha: str | None; queues: dict[str, int]; window: dict; stuck: int; paused: dict | None; outbox_dead: int | None; providers: list[ProviderStatus]; runs: list[RunProgress]; failures: list[dict]; openrouter: dict | None; today: dict | None = None; host: str = ""; repo: str = ""`
+  - `@dataclass(frozen=True) class Alert: key: str; severity: Literal["critical","warning"]; title: str; detail: str = ""; next_step: str = ""; since: float | None = None` — `title` is the verdict phrase and `next_step` the `Next:` copy from the rule-copy table in "Message design".
 - Rules and state:
   - `evaluate_rules(snap: RunSnapshot, cfg: PagerConfig, baseline: dict) -> list[Alert]` — one helper per rule in `cfg.rules`, skipping disabled rules. Keys: `watcher_down`, `provider_down:<name>`, `provider_degraded:<name>`, `openrouter_credit`, `docs_failed` (critical at `critical_at`), `review_backlog`, `stuck_docs`, `ingestion_paused`, `outbox_dead` (skipped when `snap.outbox_dead is None`), `run_stalled:<run_id>`.
   - `@dataclass class PagerState` (`open`, `pending`, `sent_log: list[float]`, `next_digest`, `last_idle_digest`, `muted_until`, `in_quiet`, `held`, `runs_seen`, `baseline`) with `to_json() -> dict` / `from_json(d) -> PagerState`.
-  - `@dataclass(frozen=True) class Outbox: texts: list[tuple[str, str, list[str]]]`, where each entry is `(kind, body, alert_keys)` and `kind ∈ {"alert","recovered","digest","run"}`.
+  - `@dataclass(frozen=True) class Message: kind: str; ref: str; text: str; payload: dict; alert_keys: tuple[str, ...] = ()`. `kind` is one of `digest|alert|resolved|run_started|run_finished|test`. `payload` is `build_payload(...)` with `"text"` set and `"delivery": []`.
+  - `@dataclass(frozen=True) class Outbox: messages: list[Message]`.
   - `plan_scan(snap, cfg, state, now) -> tuple[Outbox, PagerState]` — applies the **Frequency state machine** gates 1–6.
   - `plan_digest(snap, cfg, state, now) -> tuple[Outbox, PagerState]` — handles digest due (with `align_to_clock`), idle suppression and heartbeat, quiet/mute/cap, and catch-up.
   - `mark_sent(state, kind, alert_keys, now, ok: bool) -> PagerState` — gate 7: on failure, keys stay pending.
   - `next_digest_at(cfg, mode, now) -> float`.
-- Renderers (pure, honour `style`/`max_chars`/`timezone`):
-  - `render_digest(snap, cfg, state, now) -> str`
-  - `render_alert(alerts, snap, cfg, now) -> str`
-  - `render_recovered(items: list[tuple[Alert, float]], cfg, now) -> str`
-  - `render_run_event(run, event, cfg, now) -> str`
-  - `fit(sections: list[tuple[int, list[str]]], max_chars: int) -> str`
+- Renderers (pure; honour `style`/`max_chars`/`timezone`/`machine.ref_in_text`; copy, ordering and overflow exactly as in "Message design"):
+  - `make_ref(now: float, seed: str) -> str` → `P-<HHMM>-<first 4 hex of sha1(seed)>` (deterministic in tests).
+  - `build_payload(kind, snap, cfg, state, now, *, ref, alerts_new=(), recovered=()) -> dict` — the `mailroom.pager/v1` dict.
+  - `render_digest(snap, cfg, state, now) -> Message`
+  - `render_alert(alerts, snap, cfg, state, now) -> Message`
+  - `render_recovered(items: list[tuple[Alert, float]], snap, cfg, state, now) -> Message`
+  - `render_run_event(run, event: Literal["started","finished"], snap, cfg, state, now) -> Message`
+  - `fit(lines: list[tuple[int, str]], max_chars: int) -> str` — `(priority, line)`; priority 0 lines are never dropped.
 
 - [ ] **Step 1: Write failing tests** (house-style goldens as inline triple-quoted strings, `timezone="America/Chicago"`, fixed `now`):
 ```python
@@ -390,8 +472,14 @@ def test_digest_aligned_to_clock_and_custom_cadence(): ...          # 10 → :10
 def test_digest_disabled_when_minutes_zero(): ...
 def test_idle_suppressed_except_heartbeat(): ...                    # when_idle false, heartbeat 60
 def test_each_rule_toggle_and_threshold(): ...                      # parametrized over cfg.rules
-def test_golden_production_digest(): ...  test_golden_research_digest(): ...
-def test_golden_alert(): ...  test_golden_recovered(): ...  test_golden_run_events(): ...
+def test_golden_production_healthy(): ...  test_golden_production_with_open_alert(): ...  test_golden_research_digest(): ...
+def test_golden_alert(): ...  test_golden_resolved(): ...  test_golden_run_started(): ...  test_golden_run_finished(): ...
+# each golden = the exact sample text in "Message design" (seeded ref)
+def test_payload_schema_and_text_match(): ...       # schema key set exact; payload["text"] == message.text; status/action_required agree with verdict
+def test_payload_null_when_source_missing(): ...    # openrouter None → "openrouter": null; today None → null
+def test_human_text_has_no_json_or_keys(): ...      # no '{', '"schema"', 'mailroom.pager' in any text
+def test_needs_to_know_precedes_metrics(): ...      # Action/Next lines index < 'Last 10 min' index
+def test_ref_in_text_toggle(): ...
 def test_ascii_style_is_gsm7(): ...
 def test_fit_drops_lowest_priority_whole_lines(): ...
 def test_state_json_roundtrip(): ...
@@ -430,7 +518,7 @@ def test_state_json_roundtrip(): ...
 **Interfaces — Consumes:** `pager_core.RunSnapshot`, `ProviderStatus`, `RunProgress`, `PagerConfig` (Task 2); `read_provider_health` (Task 3); `pipeline.bins` (`count_inbox_pending`, `review_dir`, `failed_dir`, `processing_dir`, `get_pause_info`, `watcher_heartbeat_age`); `pipeline.watchdog.read_heartbeat`, `_pid_alive`; `llm.quota.get_breaker()`.
 
 **Interfaces — Produces:**
-- `catalog.window_stats(since: datetime, run_id: str | None = None) -> dict` → `received` (`created_at ≥ since`), `archived`/`review`/`failed` (current stage, `updated_at ≥ since`), `cost_usd`, `p50_latency_s`, `first_pass_rate`.
+- `catalog.window_stats(since: datetime, run_id: str | None = None) -> dict` (called twice per snapshot: once for the digest window, once since local midnight for `today`) → `received` (`created_at ≥ since`), `archived`/`review`/`failed` (current stage, `updated_at ≥ since`), `cost_usd`, `p50_latency_s`, `first_pass_rate`.
 - `catalog.recent_failures(since: datetime, limit: int = 3) -> list[dict]` → `{"filename", "stage", "reason"}`, newest first. `reason` is `gmail_intake.friendly_reason(...)[0]` when available, else the first 60 chars.
 - `mail_outbox.count_dead() -> int` (one `SELECT COUNT(*)`, added there).
 - `pager.report_run_progress(run_id: str, *, label: str, total: int, done: int, metrics: dict | None = None, finished: bool = False) -> None` — atomic write to `<base_dir>/pager_runs/<safe id>.json`, keeping the first `started_at`; never raises.
@@ -464,9 +552,10 @@ def test_state_json_roundtrip(): ...
     1. Scan if due: `collect_snapshot` → `plan_scan`.
     2. Digest if due: `plan_digest`.
     3. Run started/finished events: `runs_seen` transitions → `render_run_event`.
-    4. Send every `Outbox` text to every recipient.
+    4. Send every `Message.text` to every recipient.
     5. `mark_sent`.
-    6. Persist state.
+    6. Append `payload` (with `delivery` filled) to `pager_log.jsonl`, and POST it to the webhook when one is configured.
+    7. Persist state.
 
     Never raises.
   - `start_background() -> threading.Thread | None` — daemon thread that calls `tick` every `min(scan.seconds, 15)` s. Returns `None` when inactive or when the lock is held.
@@ -504,6 +593,9 @@ def test_watchdog_down_also_pages(monkeypatch): ...           # Review Focus 5; 
 def test_run_started_and_finished_texts_once(): ...
 def test_run_pilot_reports_progress(temp_base_dir): ...       # run_pilot.main(["--mock","--max-docs","3"]) → done == total == 3, finished
 def test_cli_preview_and_status_never_send(capsys): ...
+def test_log_jsonl_written_with_delivery_and_rotates(temp_base_dir): ...  # one line per text; delivery masked; rotate at 5 MB
+def test_webhook_posts_payload_with_signature(): ...                     # MockTransport; hmac header when secret set; failure is soft
+def test_cli_log_human_and_json(temp_base_dir, capsys): ...
 def test_cli_on_off_persists_and_running_pager_picks_up(temp_base_dir): ...  # off → tick sends nothing; on → next scan sends
 def test_cli_number_set_add_remove_list_masked(temp_base_dir, capsys): ...  # "608-555-1234" saved as "+16085551234"
 def test_cli_bad_number_exits_2(): ...
