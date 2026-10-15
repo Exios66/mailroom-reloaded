@@ -541,6 +541,15 @@ def test_watcher_down_without_heartbeat_has_no_unknown_age():
     assert "mailroom watch" in a.next_step
 
 
+def test_batched_resolved_lowercases_mid_sentence_phrases():
+    now = at("14:37")
+    items = [(Alert("provider_down:modal:extract", "critical", "x"), 840.0),
+             (Alert("docs_failed", "warning", "y"), 840.0), (Alert("watcher_down", "critical", "z"), 60.0)]
+    msg = render_recovered(items, snap(now), cfg(), PagerState(), now)
+    assert ("✅ Resolved: Modal extract tier is back up after 14 min; document failures have stopped after 14 min; "
+            "the watcher is running again after 1 min. No action needed.") in msg.text
+
+
 def test_core_is_verbatim_port():
     from pathlib import Path
 

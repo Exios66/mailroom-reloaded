@@ -707,13 +707,23 @@ def render_alert(alerts: list[Alert], snap: RunSnapshot, cfg: PagerConfig, state
     return _finish("alert", lines, snap, cfg, state, now, alerts_new=alerts, keys=keys)
 
 
+def _mid_sentence(phrase: str) -> str:
+    """Lowercase a resolved phrase's first word unless it is a name (Modal, OpenRouter, Run …)."""
+    return phrase[0].lower() + phrase[1:] if phrase.split(" ", 1)[0] in _COMMON_STARTS else phrase
+
+
+_COMMON_STARTS = {"The", "Document", "No", "Ingestion", "Echo"}
+
+
 def render_recovered(items: list[tuple[Alert, float]], snap: RunSnapshot, cfg: PagerConfig, state: PagerState,
                      now: float) -> Message:
     if len(items) == 1:
         a, s = items[0]
         line = f"✅ {_resolved_phrase(a.key)} after {_dur(s)}. No action needed."
     else:
-        line = "✅ Resolved: " + "; ".join(f"{_resolved_phrase(a.key)} after {_dur(s)}" for a, s in items) + \
+        phrases = [_resolved_phrase(a.key) for a, _ in items]
+        phrases = phrases[:1] + [_mid_sentence(p) for p in phrases[1:]]
+        line = "✅ Resolved: " + "; ".join(f"{p} after {_dur(s)}" for p, (_, s) in zip(phrases, items, strict=True)) + \
                ". No action needed."
     return _finish("resolved", [(0, "RESOLVED"), (0, line)], snap, cfg, state, now,
                    recovered=items, keys=[a.key for a, _ in items])
