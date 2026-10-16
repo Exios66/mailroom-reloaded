@@ -73,6 +73,25 @@ RETIRED_PROMPT_KEYS: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
+#: CMS DE-SynPUF table tokens. The published merge labels every CMS row
+#: ``claim_type=health`` while the frozen insurance prompt (and mailroom's
+#: ``INSURANCE_CLAIM_TYPES``) direct the specialist to the table token, so a
+#: correct, more specific answer used to score as a wrong name (SAND-042 RCA).
+CMS_CLAIM_TYPES: frozenset[str] = frozenset({"pde", "inpatient", "outpatient", "carrier"})
+
+
+def canonical_claim_type(predicted: Any, expected: Any) -> Any:
+    """Fold a CMS table token onto ``health`` when the GT is ``health``.
+
+    Only the CMS → health direction is folded: ``health`` predicted against
+    a CMS-token GT, or one CMS token against another, still mismatches.
+    """
+    pred = str(predicted).strip().lower()
+    if pred in CMS_CLAIM_TYPES and str(expected).strip().lower() == "health":
+        return "health"
+    return predicted
+
+
 def get_ambiguous_band() -> tuple[float, float]:
     return get_settings().field_scoring.ambiguous_band
 
@@ -1125,6 +1144,35 @@ def _get_embedding() -> Optional[_EmbeddingMatcher]:
         return None
 
 
+def embed_texts(texts: list[str]) -> Optional[list[list[float]]]:
+    """Embed ``texts`` with the scorer's own model (unit-normalized vectors).
+
+    The public handle on the embedding backend that ``similarity`` uses:
+    the local SentenceTransformer named by ``get_embedding_model()`` when it
+    loads, else the remote fallback. Vectors are cached per text for the
+    process. Returns ``None`` when embeddings are disabled or no backend is
+    available, or if any text fails to embed (fail-soft — callers skip the
+    cosine signal rather than score with a partial batch).
+    """
+    matcher = _get_embedding()
+    if matcher is None:
+        return None
+    try:
+        matcher._load_local()
+        out: list[list[float]] = []
+        for text in texts:
+            vector = matcher._vectors.get(text)
+            if vector is None:
+                vector = matcher._embed(text)
+                if vector is None:
+                    return None
+                matcher._vectors[text] = vector
+            out.append([float(x) for x in vector])
+        return out
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Dispatch + composite scoring
 # ---------------------------------------------------------------------------
@@ -1291,6 +1339,8 @@ def score_extraction(
         if is_empty_value(exp_value):
             continue
         field_type = field_types.get(key) or _heuristic_field_type(key, exp_value)
+        # Judge escalation uses the configured type's band, not the
+        # containment override applied for scoring below.
         original_field_type = field_type
         pred_value = predicted.get(key)
         if pred_value is not None:
@@ -1299,6 +1349,9 @@ def score_extraction(
             exp_value = normalize_intent(doc_class, exp_value) or exp_value
             if pred_value is not None:
                 pred_value = normalize_intent(doc_class, pred_value) or pred_value
+        if (doc_class == "insurance_claim" and key == "claim_type"
+                and pred_value is not None):
+            pred_value = canonical_claim_type(pred_value, exp_value)
         if pred_value is None:
             # A null answer satisfies a null-expectation date (blank-template
             # or label-only GT holds no real date).
