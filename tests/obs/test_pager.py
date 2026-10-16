@@ -684,3 +684,49 @@ def test_recurring_alert_does_not_inherit_the_old_incident_delivery(host):
     p.state.open["review_backlog"]["since"] = at("16:00")  # cleared quietly, then fired again
     p._deliver(msg, at("16:01"))
     assert [to for to, _ in rec.sent] == [MOBILE, MOBILE]
+
+
+def _flaky_pager(pager):
+    class Flaky(Rec):
+        def __init__(self):
+            super().__init__()
+            self.down = {GV}
+
+        def send(self, to, body):
+            self.ok = to not in self.down
+            return super().send(to, body)
+
+    t = Flaky()
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": [MOBILE, GV], "timezone": "America/Chicago"},
+                              {}, environment="live")
+    p = pager.Pager(cfg, transport=t)
+    p.state.open["review_backlog"] = {"since": at("14:00"), "fail": 5, "clear": 0, "last_sent": None,
+                                      "severity": "warning", "title": "Review backlog", "detail": "", "next_step": ""}
+    return p, t
+
+
+def test_alert_that_recurs_within_the_ttl_goes_to_everyone_again(host):
+    pager, _, _ = host
+    from mailroom_reloaded.obs.pager_core import Message
+    p, t = _flaky_pager(pager)
+    msg = Message("alert", "r1", "x", {}, ("review_backlog",))
+    p._deliver(msg, at("14:01"))  # MOBILE ok, GV fails: partial
+    assert [to for to, _ in t.sent] == [MOBILE, GV]
+    p.state.open["review_backlog"]["since"] = at("14:20")  # cleared, then a new incident
+    t.down, t.sent = set(), []
+    p._deliver(msg, at("14:21"))
+    assert [to for to, _ in t.sent] == [MOBILE, GV]
+
+
+def test_recovery_that_recurs_does_not_reuse_a_partial_recovery_record(host):
+    pager, _, _ = host
+    from mailroom_reloaded.obs.pager_core import Message
+    p, t = _flaky_pager(pager)
+    e = p.state.open.pop("review_backlog")
+    p.state.recovered["review_backlog"] = {**e, "open_s": 60.0}
+    msg = Message("resolved", "r1", "x", {}, ("review_backlog",))
+    p._deliver(msg, at("14:01"))  # partial
+    p.state.recovered["review_backlog"]["since"] = at("14:20")  # the alert fired and recovered again
+    t.down, t.sent = set(), []
+    p._deliver(msg, at("14:21"))
+    assert [to for to, _ in t.sent] == [MOBILE, GV]
