@@ -651,6 +651,47 @@ def test_credentialless_pager_does_not_take_the_send_lock(host, monkeypatch):
         sender.release()
 
 
+@pytest.mark.parametrize("credential", ["HOST", "USER", "PASSWORD"])
+@pytest.mark.parametrize("value", [None, "", " \t\n"])
+def test_pager_releases_lock_when_smtp_credentials_are_lost(host, monkeypatch, credential, value):
+    pager, rec, _ = host
+    set_transport_override(None)
+    for key, initial in {"HOST": "smtp.example.com", "USER": "ops@example.com", "PASSWORD": "pw"}.items():
+        monkeypatch.setenv(f"MAILROOM_SMTP_{key}", initial)
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": ["6085551234@vtext.com"],
+                               "transport": "email_gateway", "digest": {"production_minutes": 0}},
+                              {}, environment="live")
+    owner = pager.Pager(cfg)
+    successor = pager.Pager(cfg, transport=rec)
+    try:
+        owner.tick(at("14:01"))
+        assert owner._lock is not None
+        successor.tick(at("14:01"))
+        assert successor._lock is None
+
+        if value is None:
+            monkeypatch.delenv(f"MAILROOM_SMTP_{credential}")
+        else:
+            monkeypatch.setenv(f"MAILROOM_SMTP_{credential}", value)
+        assert owner.tick(at("14:01") + 1) == []
+        assert owner._lock is None
+        successor.tick(at("14:01") + 1)
+        assert successor._lock is not None
+    finally:
+        owner.release()
+        successor.release()
+
+
+def test_email_gateway_eligibility_does_not_parse_smtp_port(host, monkeypatch):
+    pager, _, _ = host
+    set_transport_override(None)
+    for key in ("HOST", "USER", "PASSWORD"):
+        monkeypatch.setenv(f"MAILROOM_SMTP_{key}", "present")
+    monkeypatch.setenv("MAILROOM_SMTP_PORT", "not-a-port")
+    cfg = PagerConfig.resolve({"transport": "email_gateway"}, {}, environment="live")
+    assert pager.Pager(cfg)._can_deliver()
+
+
 def test_new_digest_is_not_limited_by_an_earlier_partial_digest(host):
     pager, _, _ = host
 

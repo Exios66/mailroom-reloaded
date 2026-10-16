@@ -488,7 +488,11 @@ class Pager:
         """
         from mailroom_reloaded.obs import sms
 
-        return bool(self.transport or sms._OVERRIDE is not None or not _missing_env(self.cfg))
+        if self.transport or sms._OVERRIDE is not None:
+            return True
+        if self.cfg.transport == "email_gateway":
+            return all(os.environ.get(f"MAILROOM_SMTP_{k}", "").strip() for k in ("HOST", "USER", "PASSWORD"))
+        return not _missing_env(self.cfg)
 
     def acquire(self) -> bool:
         """Keep an exclusive sender lock, returning False if acquisition fails.
