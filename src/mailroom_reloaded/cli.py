@@ -63,7 +63,13 @@ def serve(
         None, "--pager/--no-pager", help="Text alerts on/off for this run (skips the start prompt)."
     ),
 ) -> None:
-    """Serve the API and the ``/ui`` page."""
+    """Serve the API and the ``/ui`` page.
+
+    Resolve the pager start prompt before launching the API. An explicit
+    ``pager`` flag saves the toggle and skips prompting; enabling without
+    recipients raises SystemExit(2). The API lifespan starts an active pager
+    unless embedding is disabled.
+    """
     import uvicorn
 
     from mailroom_reloaded.obs import pager as pager_mod
@@ -91,7 +97,12 @@ def watch(
         None, "--pager/--no-pager", help="Text alerts on/off for this run (skips the start prompt)."
     ),
 ) -> None:
-    """Drain ``inbox/`` forever as a standalone watcher."""
+    """Drain ``inbox/`` forever as a standalone watcher.
+
+    Prompt for production text alerts and start an active pager in the
+    background. An explicit ``pager`` flag saves the toggle and skips the
+    prompt; enabling without recipients raises SystemExit(2).
+    """
     from mailroom_reloaded.obs import pager as pager_mod
     from mailroom_reloaded.settings import get_settings
     from mailroom_reloaded.storage.bins import Bins
@@ -158,7 +169,11 @@ def eval(
         False, "--page", help="Text run progress to the operator (pager must be ON)."
     ),
 ) -> None:
-    """Run an evaluation posture and print its ``run_id``."""
+    """Run an evaluation posture and print its ``run_id``.
+
+    ``page`` starts an already enabled pager in research mode; it does not
+    enable alerts or prompt for a recipient.
+    """
     from mailroom_reloaded.eval.runner import EvalConfig, run_eval
 
     if page:

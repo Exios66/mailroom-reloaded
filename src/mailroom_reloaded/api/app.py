@@ -1039,6 +1039,9 @@ async def lifespan(application: FastAPI):
     The embedded watcher is opt-in (``MAILROOM_EMBED_WATCHER=1``), because the
     ``split-watcher`` profile runs it as its own service and tests must not race
     a background drainer.
+
+    Also attempt to start an active operator pager unless
+    ``MAILROOM_PAGER_EMBED=0``; pager startup failures do not abort startup.
     """
     _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)

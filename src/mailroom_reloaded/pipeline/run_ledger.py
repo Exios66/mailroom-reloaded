@@ -130,6 +130,10 @@ def open_run(
     A run id has exactly one ``run_opened`` / ``run_closed`` pair: an id that was already
     closed is never reopened (``False``), and a failed append leaves the run unregistered
     so the next document retries.
+
+    ``total`` records the expected document count for progress reporting when
+    provided, including zero; None omits it. Existing run metadata is not
+    updated. Exceptions during registration are caught and return False.
     """
     try:
         with _lock:  # rare path (first document of a run per process), so the DB calls stay inside

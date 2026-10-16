@@ -27,6 +27,11 @@ CAP, FLUSH_S = 200, 5.0
 
 
 def provider_key(base_url: str | None, model: str | None) -> str:
+    """Group a base URL under a Modal tier, OpenRouter, or another hostname.
+
+    The configured vLLM URL maps to ``modal:vllm``. ``model`` does not affect
+    this grouping.
+    """
     url, model = str(base_url or ""), str(model or "")
     vllm = (get_settings().vllm_base_url or "").strip().rstrip("/")
     if vllm and url.rstrip("/") == vllm:
@@ -40,12 +45,14 @@ def provider_key(base_url: str | None, model: str | None) -> str:
 
 
 def _path() -> Path:
+    """Create the configured base directory and return its provider health file path."""
     base = Path(get_settings().base_dir)
     base.mkdir(parents=True, exist_ok=True)
     return base / "provider_health.json"
 
 
 def _load(path: Path) -> dict:
+    """Read a JSON object, returning an empty dict for unreadable or invalid content."""
     try:
         data = json.loads(path.read_text())
         return data if isinstance(data, dict) else {}
@@ -55,12 +62,18 @@ def _load(path: Path) -> dict:
 
 class _Buffer:
     def __init__(self):
+        """Initialize an empty event buffer and per-provider success history."""
         self.events: dict[str, list] = {}
         self.last_ok: dict[str, bool] = {}
         self.last_flush = 0.0
         self.lock = threading.Lock()
 
     def add(self, key: str, event: list, now: float) -> None:
+        """Buffer ``[epoch_seconds, ok, status, latency_seconds]`` for a provider.
+
+        Flush on a transition to failure or when at least ``FLUSH_S`` seconds
+        have elapsed. Flush errors propagate to the caller.
+        """
         with self.lock:
             self.events.setdefault(key, []).append(event)
             turned_bad = self.last_ok.get(key, True) and not event[1]
@@ -69,6 +82,12 @@ class _Buffer:
             self.flush(now)
 
     def flush(self, now: float | None = None) -> None:
+        """Drain buffered events into the shared health file under an exclusive lock.
+
+        Keep the latest ``CAP`` events per provider. ``now`` is epoch seconds,
+        defaulting to the current time; filesystem and serialization errors
+        propagate after the pending events have been removed from the buffer.
+        """
         with self.lock:
             pending, self.events = self.events, {}
             self.last_flush = time.time() if now is None else now
@@ -90,6 +109,7 @@ atexit.register(lambda: _safe(_BUF.flush))
 
 
 def _safe(fn, *a, **kw):
+    """Return the callable result, or None if it raises an Exception."""
     try:
         return fn(*a, **kw)
     except Exception:  # noqa: BLE001 — health logging must never break an LLM call
@@ -98,6 +118,12 @@ def _safe(fn, *a, **kw):
 
 def record_llm_outcome(base_url, model, *, ok: bool, status: int | None, latency_s: float | None,
                        now: float | None = None) -> None:
+    """Buffer one completion attempt, suppressing recording errors.
+
+    ``status`` is the HTTP status or None for no response; ``latency_s`` is
+    elapsed seconds and ``now`` is epoch seconds, defaulting to the current
+    time. ``MAILROOM_PROVIDER_HEALTH=0`` disables recording.
+    """
     if os.environ.get("MAILROOM_PROVIDER_HEALTH", "1") == "0":
         return
     now = time.time() if now is None else now
@@ -113,6 +139,17 @@ def _outage(e: list) -> bool:
 
 
 def read_provider_health(now: float | None = None, window_s: float = 600) -> dict[str, dict]:
+    """Summarize persisted and buffered attempts within ``window_s`` seconds.
+
+    ``now`` is epoch seconds, defaulting to the current time. Providers with
+    no events at or after ``now - window_s`` are omitted. Each summary has
+    call and outage counts, a failure streak since the last success, the
+    last success timestamp, a 503 count, and median latency in seconds.
+    Non-outage failures neither extend nor reset the streak.
+
+    Unreadable or invalid JSON is treated as empty history. Errors creating
+    the base directory and errors in malformed event data can propagate.
+    """
     now = time.time() if now is None else now
     data = _safe(_load, _path()) or {}
     with _BUF.lock:
