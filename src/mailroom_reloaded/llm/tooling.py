@@ -18,6 +18,7 @@ import openai
 import structlog
 from pydantic import BaseModel, ValidationError
 
+from .health import record_llm_outcome
 from .retry import with_retry
 from .usage import Usage
 
@@ -119,14 +120,28 @@ def execute_tool(tools: dict[str, ToolLike], name: str, raw_args: str | dict[str
 
 
 def chat_create(client: Any, req: dict[str, Any]) -> tuple[Any, Usage]:
-    """One chat completion with transport retries; usage counts the successful call only."""
+    """Return a chat completion and its usage, retrying transient transport failures.
+
+    Record every attempt for passive provider health. Usage includes only
+    the successful call, with latency in seconds. Nonretryable errors and
+    the final request error after retries propagate, as do errors in retry
+    configuration or usage conversion.
+    """
     timing: dict[str, float] = {}
 
     def _once() -> Any:
-        """Request one completion and record its duration in seconds on success."""
+        """Request one completion; record its duration and its outcome for the pager."""
         start = time.monotonic()
-        resp = client.chat.completions.create(**req)
+        url = str(getattr(client, "base_url", "") or "")
+        try:
+            resp = client.chat.completions.create(**req)
+        except Exception as exc:
+            code = getattr(exc, "status_code", None)
+            record_llm_outcome(url, req.get("model"), ok=False, status=code if isinstance(code, int) else None,
+                               latency_s=time.monotonic() - start)
+            raise
         timing["s"] = time.monotonic() - start
+        record_llm_outcome(url, req.get("model"), ok=True, status=200, latency_s=timing["s"])
         return resp
 
     resp = with_retry(_once)

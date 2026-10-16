@@ -987,6 +987,24 @@ def _embed_watcher_enabled() -> bool:
     }
 
 
+def _start_pager():
+    """Start the opt-in operator SMS pager in the background and return it (``MAILROOM_PAGER_EMBED=0`` skips it).
+
+    Only ``mailroom pager run`` as its own process can text ``watcher_down`` when the API dies.
+    """
+    if (os.environ.get("MAILROOM_PAGER_EMBED") or "").strip() == "0":
+        return None
+    try:
+        from mailroom_reloaded.obs.pager import Pager
+
+        # Poll even while off, so a later `mailroom pager on` reaches this running process.
+        p = Pager()
+        return p if p.start_background(idle_ok=True) is not None else None
+    except Exception:
+        logger.warning("pager_start_failed", exc_info=True)
+        return None
+
+
 _RETENTION_INTERVAL_S = 86400
 
 
@@ -1022,10 +1040,14 @@ async def lifespan(application: FastAPI):
     The embedded watcher is opt-in (``MAILROOM_EMBED_WATCHER=1``), because the
     ``split-watcher`` profile runs it as its own service and tests must not race
     a background drainer.
+
+    Also attempt to start an active operator pager unless
+    ``MAILROOM_PAGER_EMBED=0``; pager startup failures do not abort startup.
     """
     _enforce_bind_policy()
     _bins().inbox.mkdir(parents=True, exist_ok=True)
     retention_task = await _start_retention()
+    pager = _start_pager()
     watcher = None
     watcher_thread = None
     if _embed_watcher_enabled():
@@ -1071,6 +1093,9 @@ async def lifespan(application: FastAPI):
     finally:
         if retention_task is not None:
             retention_task.cancel()
+        if pager is not None:
+            pager.stop()
+            pager.release()
         if watcher is not None:
             watcher.stop()
         if watcher_thread is not None:

@@ -752,6 +752,7 @@ def run_eval(cfg: EvalConfig) -> str:
         prompt_set=cfg.prompt_set,
         environment="eval",
         source="eval",
+        total=len(selected),
     )
     closed_by = "interrupted"
     try:

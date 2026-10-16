@@ -1,0 +1,139 @@
+$ python seed_ledger.py   # real archive ledger, live run: 11 archived, 2 parked, 3 failed
+seeded 16 doc_closed entries in live-20261015
+
+$ mailroom pager status
+Text alerts: OFF
+Recipients: none
+Transport: twilio — not deliverable, missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER|TWILIO_MESSAGING_SERVICE_SID
+Mode: production · digest every 10 min · scan every 60s
+Last text: none
+[exit 0]
+
+$ mailroom pager on --to +16085551234
+Text alerts ON → +1•••••1234
+warning: not deliverable yet — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER|TWILIO_MESSAGING_SERVICE_SID
+[exit 0]
+
+$ mailroom pager number add (414) 555-9876
+saved +14145559876
+[exit 0]
+
+$ mailroom pager number list
+2 saved number(s):
+  +1•••••1234
+  +1•••••9876
+[exit 0]
+
+$ mailroom pager number set 12345
+not a valid number — use E.164, e.g. +16085551234
+[exit 2]
+
+$ mailroom pager preview
+Mailroom LIVE · 6:49 PM CDT
+🟢 All clear — no action needed.
+Last 10 min: 16 received, 11 archived, 2 to review, 3 failed.
+48s/doc (median) · $0.24.
+Today: 16 processed · 2 to review · 3 failed · $0.24.
+Queues: 0 waiting, 0 in progress, 0 awaiting review.
+Ref P-1849-1f78
+[exit 0]
+
+$ mailroom pager preview --alert
+Mailroom ALERT · 6:49 PM CDT
+🔴 Action needed: the watcher has stopped (no watcher process is running).
+Latest: claim_1845 — llm_error.
+Next: restart with `mailroom watch`.
+Also: 3 documents failed since 6:49 PM.
+Ref P-1849-9027
+[exit 0]
+
+$ mailroom pager test --to +16085551234
+2026-10-15 23:49:59 [warning  ] pager_transport_unconfigured   missing=['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_FROM_NUMBER or TWILIO_MESSAGING_SERVICE_SID'] transport=twilio
+not deliverable — missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER|TWILIO_MESSAGING_SERVICE_SID
+[exit 1]
+
+$ mailroom pager mute 2h
+Muted (criticals still text) for 2h.
+[exit 0]
+
+$ mailroom pager off
+Text alerts OFF (numbers kept).
+[exit 0]
+
+$ mailroom pager status
+Text alerts: OFF
+Recipients: +1•••••1234, +1•••••9876
+Transport: twilio — not deliverable, missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER|TWILIO_MESSAGING_SERVICE_SID
+Mode: production · digest every 10 min · scan every 60s · MUTED
+Last text: none
+[exit 0]
+
+$ mailroom pager preview --alert --json
+{
+ "schema": "mailroom.pager/v1",
+ "ref": "P-1850-fedb",
+ "kind": "alert",
+ "mode": "production",
+ "sent_at": "2026-10-15T23:50:17Z",
+ "host": "vm",
+ "repo": "mailroom-reloaded",
+ "status": "action",
+ "action_required": true,
+ "muted_until": "2026-10-16T01:50:03Z",
+ "window": {
+  "minutes": 10,
+  "received": 16,
+  "archived": 11,
+  "review": 2,
+  "failed": 3,
+  "p50_latency_s": 47.5,
+  "cost_usd": 0.24,
+  "first_pass_rate": null
+ },
+ "today": {
+  "processed": 16,
+  "review": 2,
+  "failed": 3,
+  "cost_usd": 0.24
+ },
+ "queues": {
+  "inbox": 0,
+  "processing": 0,
+  "review": 0,
+  "failed": 0
+ },
+ "watcher": {
+  "alive": false,
+  "heartbeat_age_s": null,
+  "uptime_s": null,
+  "sha": "29b4e06"
+ },
+ "providers": [],
+ "openrouter": null,
+ "runs": [],
+ "alerts": {
+  "new": [
+   {
+    "key": "watcher_down",
+    "severity": "critical",
+    "title": "the watcher has stopped (no watcher process is running)",
+    "detail": "",
+    "next_step": "restart with `mailroom watch`",
+    "since": "2026-10-15T23:50:17Z"
+   },
+   {
+    "key": "docs_failed",
+    "severity": "warning",
+    "title": "3 documents failed since 6:49 PM",
+    "detail": "",
+    "next_step": "inspect data/failed/ and the latest error above",
+    "since": "2026-10-15T23:50:17Z"
+   }
+  ],
+  "open": [],
+  "recovered": [],
+  "held": 0
+ },
+ "text": "Mailroom ALERT · 6:50 PM CDT\n🔴 Action needed: the watcher has stopped (no watcher process is running) (alerts muted until 8:50 PM).\nLatest: claim_1845 — llm_error.\nNext: restart with `mailroom watch`.\nAlso: 3 documents failed since 6:49 PM.\nRef P-1850-fedb",
+ "delivery": []
+}

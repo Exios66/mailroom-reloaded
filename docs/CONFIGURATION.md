@@ -119,6 +119,32 @@ does not include `psycopg`. The `supabase` backend uses `httpx` and needs no ext
 `MAILROOM_GMAIL_STATE` are read in `intake/gmail.py:259-276` and fully documented
 in [gmail-intake.md](gmail-intake.md).
 
+### Operator SMS pager
+
+Text alerts to the operator's phone (mobile or Google Voice). **Off by default.** `enabled` and
+`recipients` resolve settings file (`<base_dir>/pager_settings.json`, written by `mailroom pager`) →
+env → the `pager:` taxonomy block → default; every other key resolves env → taxonomy → default.
+`mailroom pager status --full` prints each resolved key and its source.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MAILROOM_PAGER` | `0` | Enable text alerts (the settings file wins). |
+| `MAILROOM_PAGER_TO` | unset | Comma list of E.164 numbers (the settings file wins). |
+| `MAILROOM_PAGER_TRANSPORT` | `twilio` | `twilio` \| `email_gateway` \| `console`. |
+| `MAILROOM_PAGER_MODE` | `auto` | `auto` (from `MAILROOM_ENVIRONMENT`: `live` = production) \| `production` \| `research`. |
+| `MAILROOM_PAGER_DIGEST_MINUTES` | `10` | Digest cadence (sets production and research; `0` disables digests). |
+| `MAILROOM_PAGER_SCAN_SECONDS` | `60` | Watcher scan cadence (floor 15); healthy scans send nothing. |
+| `MAILROOM_PAGER_STYLE` / `_TZ` / `_QUIET_HOURS` | `emoji` / host / unset | ASCII (GSM-7) texts, clock zone, `22:00-07:00` quiet window. |
+| `MAILROOM_PAGER_WEBHOOK_URL` / `_SECRET` | unset | POST the `mailroom.pager/v1` JSON, HMAC-signed. |
+| `MAILROOM_PAGER_PROMPT` | `1` | `0` skips the start prompt on `serve` / `watch`. |
+| `MAILROOM_PAGER_EMBED` | `1` | `0` keeps the API lifespan from starting a sender. |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` or `TWILIO_MESSAGING_SERVICE_SID` | unset | Twilio transport credentials. |
+| `MAILROOM_SMTP_HOST`, `_PORT` (465), `_USER`, `_PASSWORD` | unset | Email-gateway transport (carrier `number@vtext.com` addresses). |
+
+Cadences, cooldowns, debounce, the hourly cap and the alert rules live in the `pager:` block. Twilio and
+Google Voice setup (trial verification, A2P 10DLC, segment cost) is in llm-mailroom's
+[Operator SMS pings](https://github.com/exios66/llm-mailroom/blob/main/deploy/README.md#operator-sms-pings) section.
+
 ## `taxonomy.yaml` blocks
 
 `load_taxonomy` parses the packaged file and builds `Taxonomy`

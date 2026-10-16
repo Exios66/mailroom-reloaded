@@ -28,6 +28,53 @@ llm_retry:
   modal_cold_start_delay: 90.0
   modal_cold_start_max_delay: 240.0
 
+# Operator SMS pager (obs/pager.py; same block as llm-mailroom). Rule outbox_dead is ignored here.
+pager:
+  enabled: false                 # default OFF; `pager on|off` (settings file) > env MAILROOM_PAGER > this
+  recipients: []                 # `pager number …` (settings file) > env MAILROOM_PAGER_TO (comma list) — mobile and/or Google Voice, E.164
+  transport: twilio              # twilio | email_gateway | console        env MAILROOM_PAGER_TRANSPORT
+  mode: auto                     # auto | production | research           env MAILROOM_PAGER_MODE
+  style: emoji                   # emoji | ascii (ascii = GSM-7, ~2.3x cheaper)   env MAILROOM_PAGER_STYLE
+  max_chars: 640                 # per text, floor 160
+  timezone: ""                   # IANA name; blank = host local          env MAILROOM_PAGER_TZ
+  digest:
+    production_minutes: 10       # 0 disables digests                    env MAILROOM_PAGER_DIGEST_MINUTES (sets both)
+    research_minutes: 10
+    align_to_clock: true         # fire at :00/:10/:20… instead of start-relative
+    when_idle: true              # false: skip windows with 0 docs and no open alerts…
+    idle_heartbeat_minutes: 60   # …but still send one "· IDLE" digest this often (0 = never)
+  scan:
+    seconds: 60                  # floor 15                               env MAILROOM_PAGER_SCAN_SECONDS
+    degraded_after_scans: 2      # warnings must persist N scans before texting
+    recover_after_scans: 2       # an alert must stay clear N scans before "recovered"
+  alerts:
+    critical_cooldown_minutes: 15  # re-text a still-open critical
+    warning_cooldown_minutes: 60   # re-text a still-open warning
+    send_recovered: true
+    max_texts_per_hour: 12         # all texts; see "Frequency state machine"
+  quiet_hours:
+    window: ""                   # "22:00-07:00" (may cross midnight); blank = off   env MAILROOM_PAGER_QUIET_HOURS
+    allow: critical              # none | critical | all — what may text during quiet hours
+    catch_up_digest: true        # one digest when quiet hours end
+  rules:                         # each: enabled + its thresholds; severity fixed per rule
+    watcher_down:        {enabled: true}
+    provider_down:       {enabled: true}
+    provider_degraded:   {enabled: true, error_rate: 0.25, min_calls: 4}
+    openrouter_credit:   {enabled: true, below_usd: 1.0}
+    docs_failed:         {enabled: true, critical_at: 5}
+    review_backlog:      {enabled: true, threshold: 20}
+    stuck_docs:          {enabled: true, minutes: 15}
+    ingestion_paused:    {enabled: true}
+    outbox_dead:         {enabled: true}      # llm-mailroom only; ignored in mailroom-reloaded
+    run_stalled:         {enabled: true, minutes: 15}
+  providers:
+    openrouter_cache_minutes: 5
+    probe_modal: false           # opt-in; only probes tiers that already have a warm container
+  machine:
+    ref_in_text: true            # print "Ref P-…" as the last SMS line
+    log: true                    # <base_dir>/pager_log.jsonl
+    webhook_url: ""              # env MAILROOM_PAGER_WEBHOOK_URL (+ MAILROOM_PAGER_WEBHOOK_SECRET)
+
 # Self-hosted model-id remap (DMR-052): when DEFAULT_PROVIDER=vllm the agents'
 # taxonomy models are OpenRouter champion slugs; a vLLM serve exposes the HF id
 # (e.g. Qwen/Qwen3-8B). This map rewrites the champion to the served id before
