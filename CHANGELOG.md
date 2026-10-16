@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Dropped the unused `respx` dependency from the `dev` extra (`pyproject.toml`, the `deploy/Dockerfile.dev` comment, `uv.lock`); it had no consumer in `src/` or `tests/`.
+- Re-vendored `llm-dojo-scoring` from v0.21.0 to commit `8c7b7f1` (`src/mailroom_reloaded/scoring/`, `scoring/PARITY.md`, the `parity` extra in `pyproject.toml`, `uv.lock`). Interim pin: it becomes v0.22.0 once the dojo tags it. The local judge-band patch is dropped because upstream now carries it (`score_extraction` calls `field_is_ambiguous(<configured type>, score)`). The only remaining vendored divergences from upstream are the `EXTRACT_CLASS_ALIASES` stub and the `.config` import rewrite. No mailroom call site uses the breaking-change APIs (`metric_id_for`, `Emitter`, archive block, `compare_serving`, batch helpers); those live in unvendored dojo modules.
 
 ### Removed
 
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Scoring, via the re-vendored dojo (`scoring/maud.py`, `scoring/field_scoring.py`, `scoring/gt_metadata.py`; tests `tests/scoring/test_scoring.py`): MAUD `> 5 business days` no longer folds onto `5 business days` (the old fold made the two classes indistinguishable), `Greater than 5` and `> 5` share one class, multi-class answers are order-insensitive, and composite classes canonicalize to the sorted set of their parts. The question keys in `agents/specialists.py` (`_maud_question_key`) use this fold. Insurance `claim_type`: a CMS table token predicted against GT `health` now scores as a match (`pde` vs `health` 0.2222 -> 1.0; the reverse direction still mismatches). `expected_subclass` is an annotation and no longer scored as a field (a probe contract row went 0.5 -> 1.0).
 - Pager email-gateway eligibility (`obs/pager.py`) treats whitespace-only SMTP host, user and password values as missing, so credential loss releases the sender lock for another eligible pager. SMTP port parsing stays in transport construction.
 - Provider health (`src/mailroom_reloaded/llm/health.py`) restores failed flush batches for retry, preserves events recorded during the flush, and propagates the error.
 - `/tui` contrast: the same vendored dark `--term-fg-dim` (4.0–4.3:1) sits on real terminal content — boot lines, `ls` counts, kv keys, the status bar, the replay grid's `dim` station — so `/tui` derives a passing dim locally (`--tui-dim`) on dark only, exactly as `/ui` does. light/hc keep the token, and `tokens.css` is still untouched.

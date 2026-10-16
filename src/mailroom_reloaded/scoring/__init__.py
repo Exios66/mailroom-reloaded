@@ -1,4 +1,4 @@
-"""Slim vendored subset of ``llm-dojo-scoring`` v0.21.0 (see PARITY.md).
+"""Slim vendored subset of ``llm-dojo-scoring`` 8c7b7f1 (see PARITY.md; becomes v0.22.0 once tagged).
 
 Upstream signatures are unchanged; ``subclass_vocab`` is the only addition.
 """
