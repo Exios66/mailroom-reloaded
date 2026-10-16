@@ -655,3 +655,32 @@ def test_cap_limits_recipients_texted_and_the_rest_stay_pending(host):
     assert [to for to, _ in rec.sent] == [MOBILE]  # cap of 1: only one recipient this hour
     assert len(p.state.sent_log) == 1 and not p.state.open["review_backlog"]["last_sent"]
     assert "review_backlog" in p.state.pending
+
+
+def _warn_pager(pager, rec, cap):
+    p = pager.Pager(PagerConfig.resolve({"enabled": True, "recipients": [MOBILE, GV], "timezone": "America/Chicago",
+                                         "alerts": {"max_texts_per_hour": cap}}, {}, environment="live"), transport=rec)
+    p.state.open["review_backlog"] = {"since": at("14:00"), "fail": 5, "clear": 0, "last_sent": None,
+                                      "severity": "warning", "title": "Review backlog", "detail": "", "next_step": ""}
+    return p
+
+
+def test_delivery_record_outlives_an_hour_while_the_alert_is_unacked(host):
+    pager, rec, _ = host
+    from mailroom_reloaded.obs.pager_core import Message
+    p = _warn_pager(pager, rec, 1)
+    msg = Message("alert", "r1", "x", {}, ("review_backlog",))
+    p._deliver(msg, at("14:01"))
+    p._deliver(msg, at("15:30"))  # allowance is back: the other recipient, not the first again
+    assert [to for to, _ in rec.sent] == [MOBILE, GV]
+
+
+def test_recurring_alert_does_not_inherit_the_old_incident_delivery(host):
+    pager, rec, _ = host
+    from mailroom_reloaded.obs.pager_core import Message
+    p = _warn_pager(pager, rec, 1)
+    msg = Message("alert", "r1", "x", {}, ("review_backlog",))
+    p._deliver(msg, at("14:01"))  # MOBILE only
+    p.state.open["review_backlog"]["since"] = at("16:00")  # cleared quietly, then fired again
+    p._deliver(msg, at("16:01"))
+    assert [to for to, _ in rec.sent] == [MOBILE, MOBILE]

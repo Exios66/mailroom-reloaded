@@ -579,11 +579,19 @@ class Pager:
 
         transport = self.transport or build_transport(self.cfg.transport)
         track = bool(msg.alert_keys)  # digests carry no alert keys: a new digest is new text, so no carried-over state
-        mid = f"{msg.kind}|{','.join(sorted(msg.alert_keys))}"
-        h = lambda to: hashlib.sha1(to.encode()).hexdigest()[:10]
         st = self.state
-        st.delivered = {k: v for k, v in st.delivered.items() if now - v.get("at", 0) < 3600 and (
-            not k.startswith("alert|") or all(x in st.open for x in k[6:].split(",")))}  # drop entries for cleared alerts
+        # incident identity: an alert that cleared and re-fired has a new `since`, so it never inherits old delivery state
+        ident = lambda k: f"{k}@{st.open[k].get('since')}" if k in st.open else k
+        mid = f"{msg.kind}|{','.join(sorted(ident(k) for k in msg.alert_keys))}"
+        h = lambda to: hashlib.sha1(to.encode()).hexdigest()[:10]
+
+        def live(k: str, v: dict) -> bool:  # kept while the alert is open and unacked; a 24h safety TTL otherwise
+            if now - v.get("at", 0) >= 86400:
+                return False
+            if not k.startswith("alert|"):
+                return True
+            return all(x.partition("@")[0] in st.open and ident(x.partition("@")[0]) == x for x in k[6:].split(","))
+        st.delivered = {k: v for k, v in st.delivered.items() if live(k, v)}
         done = set(st.delivered.get(mid, {}).get("to", [])) if track else set()
         todo = [to for to in self.cfg.recipients if h(to) not in done]
         critical = msg.kind == "alert" and any(st.open.get(k, {}).get("severity") == "critical" for k in msg.alert_keys)
