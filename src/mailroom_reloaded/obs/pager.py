@@ -574,21 +574,30 @@ class Pager:
         optional log and webhook. An unavailable transport yields no results;
         transport exceptions propagate, while log-write errors are suppressed.
         """
-        from mailroom_reloaded.obs.pager_core import mark_sent
+        from mailroom_reloaded.obs.pager_core import _recent, mark_sent
         from mailroom_reloaded.obs.sms import build_transport
 
         transport = self.transport or build_transport(self.cfg.transport)
+        track = bool(msg.alert_keys)  # digests carry no alert keys: a new digest is new text, so no carried-over state
         mid = f"{msg.kind}|{','.join(sorted(msg.alert_keys))}"
         h = lambda to: hashlib.sha1(to.encode()).hexdigest()[:10]
-        done = set(self.state.delivered.get(mid, {}).get("to", []))
-        sent = [(to, transport.send(to, msg.text)) for to in self.cfg.recipients if h(to) not in done] if transport else []
+        st = self.state
+        st.delivered = {k: v for k, v in st.delivered.items() if now - v.get("at", 0) < 3600 and (
+            not k.startswith("alert|") or all(x in st.open for x in k[6:].split(",")))}  # drop entries for cleared alerts
+        done = set(st.delivered.get(mid, {}).get("to", [])) if track else set()
+        todo = [to for to in self.cfg.recipients if h(to) not in done]
+        critical = msg.kind == "alert" and any(st.open.get(k, {}).get("severity") == "critical" for k in msg.alert_keys)
+        if not critical:  # the hourly cap counts every send, so text only as many recipients as it still allows
+            todo = todo[:max(0, self.cfg.alerts.max_texts_per_hour - _recent(st, now))]
+        sent = [(to, transport.send(to, msg.text)) for to in todo] if transport else []
         done |= {h(to) for to, r in sent if r.ok}
         everyone = bool(self.cfg.recipients) and all(h(to) in done for to in self.cfg.recipients)
+        acked = everyone if track else any(r.ok for _, r in sent)
         # ack only once every recipient has the text; each successful send still counts toward the hourly cap
-        self.state = mark_sent(self.state, msg.kind, msg.alert_keys, now, everyone, sends=sum(r.ok for _, r in sent))
-        keep = {k: v for k, v in self.state.delivered.items() if now - v.get("at", 0) < 3600 and k != mid}
-        self.state.delivered = keep if everyone or not done else {**keep, mid: {"to": sorted(done), "at": now}}
-        partial = bool(done) and not everyone
+        self.state = mark_sent(st, msg.kind, msg.alert_keys, now, acked, sends=sum(r.ok for _, r in sent))
+        keep = {k: v for k, v in self.state.delivered.items() if k != mid}
+        self.state.delivered = {**keep, mid: {"to": sorted(done), "at": now}} if track and done and not everyone else keep
+        partial = track and bool(done) and not everyone
         payload = {**msg.payload, **({"delivery_partial": True} if partial else {}), "delivery":
                    [{"to": _mask(to), "ok": r.ok, "transport": r.transport,
                      "segments": r.segments, "detail": r.detail} for to, r in sent]}

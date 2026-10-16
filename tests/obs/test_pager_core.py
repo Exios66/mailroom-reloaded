@@ -663,3 +663,12 @@ def test_core_is_verbatim_port():
     if not upstream.exists():
         pytest.skip("llm-mailroom checkout not next to this one")
     assert here.read_text().splitlines()[1:] == upstream.read_text().splitlines()[1:]
+
+
+def test_cap_of_one_still_lets_one_warning_through():
+    c = cfg(alerts={"max_texts_per_hour": 1})
+    w = snap(at("14:20"), queues={"inbox": 0, "processing": 0, "review": 50, "failed": 0}, providers=[])
+    st = PagerState()
+    _, st = plan_scan(w, c, st, at("14:19"))
+    out, st = plan_scan(w, c, st, at("14:20"))
+    assert [k for m in out.messages for k in m.alert_keys] == ["review_backlog"] and st.held == []

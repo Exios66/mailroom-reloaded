@@ -522,11 +522,15 @@ def test_research_background_pager_flushes_at_exit(host, monkeypatch):
     registered = []
     monkeypatch.setattr("atexit.register", lambda fn, *a, **k: registered.append(fn))
     p = make(pager, rec, mode="research")
+    thread = None
     try:
-        assert p.start_background() is not None
+        thread = p.start_background()
+        assert thread is not None
         assert p.flush in registered
     finally:
         p.stop()
+        if thread is not None:
+            thread.join(timeout=5)
 
 
 def test_digest_snapshot_only_taken_when_due(host):
@@ -612,5 +616,42 @@ def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
         assert second._lock is not None  # took over once the owner left
     finally:
         second.stop()
+        if thread is not None:
+            thread.join(timeout=5)
         second.release()
         first.release()
+
+
+def test_new_digest_is_not_limited_by_an_earlier_partial_digest(host):
+    pager, _, _ = host
+
+    class Flaky(Rec):
+        def __init__(self):
+            super().__init__()
+            self.down = {GV}
+
+        def send(self, to, body):
+            self.ok = to not in self.down
+            return super().send(to, body)
+
+    t = Flaky()
+    p = pager.Pager(PagerConfig.resolve({"enabled": True, "recipients": [MOBILE, GV], "timezone": "America/Chicago"},
+                                        {}, environment="live"), transport=t)
+    p.tick(at("14:10") + 5)  # first digest: GV fails
+    t.down, t.sent = set(), []
+    p.tick(at("14:20") + 5)  # next digest is new text: every recipient gets it
+    assert [to for to, _ in t.sent] == [MOBILE, GV]
+
+
+def test_cap_limits_recipients_texted_and_the_rest_stay_pending(host):
+    pager, rec, feed = host
+    feed["fn"] = lambda now: healthy(now, queues={"inbox": 0, "processing": 0, "review": 50, "failed": 0})
+    p = pager.Pager(PagerConfig.resolve({"enabled": True, "recipients": [MOBILE, GV], "timezone": "America/Chicago",
+                                         "alerts": {"max_texts_per_hour": 1}}, {}, environment="live"), transport=rec)
+    p.state.open["review_backlog"] = {"since": at("14:00"), "fail": 5, "clear": 0, "last_sent": None,
+                                      "severity": "warning", "title": "Review backlog", "detail": "", "next_step": ""}
+    from mailroom_reloaded.obs.pager_core import Message
+    p._deliver(Message("alert", "r1", "x", {}, ("review_backlog",)), at("14:01"))
+    assert [to for to, _ in rec.sent] == [MOBILE]  # cap of 1: only one recipient this hour
+    assert len(p.state.sent_log) == 1 and not p.state.open["review_backlog"]["last_sent"]
+    assert "review_backlog" in p.state.pending
