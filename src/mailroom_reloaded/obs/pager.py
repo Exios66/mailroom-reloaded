@@ -201,12 +201,18 @@ def _eval_score(run_id: str) -> float | None:
     return None if v is None else float(v)
 
 
-def eval_runs(ledger, now: float) -> list[RunProgress]:
-    """Open ``eval`` runs as research progress: done = documents closed, total from ``run_opened``."""
+def eval_runs(ledger, now: float, max_age_s: float = 86400) -> list[RunProgress]:
+    """``eval`` runs as research progress: open ones, plus ones closed within ``max_age_s`` (finished).
+
+    done = documents closed, total from ``run_opened``."""
+    ids = [(r, None) for r in ledger.open_runs(kind="eval")]
+    for c in ledger.entries(kind="run_closed", limit=50, descending=True):
+        if 0 <= now - _ts(c) <= max_age_s:
+            ids.append((c.run_id, c))
     out = []
-    for run_id in ledger.open_runs(kind="eval"):
+    for run_id, closed_entry in ids:
         opened = (ledger.entries(run_id=run_id, kind="run_opened", limit=1) or [None])[0]
-        if opened is None:
+        if opened is None or opened.payload.get("kind") != "eval":
             continue
         p = opened.payload
         closed = ledger.entries(run_id=run_id, kind="doc_closed", limit=1, descending=True)
@@ -218,7 +224,8 @@ def eval_runs(ledger, now: float) -> list[RunProgress]:
             metrics["acc"] = score
         out.append(RunProgress(run_id, f"eval {p.get('posture_label') or p.get('mode') or ''}".strip(),
                                int(p.get("total") or 0), ledger.count("doc_closed", run_id), _ts(opened),
-                               _ts(closed[0]) if closed else _ts(opened), False, metrics))
+                               _ts(closed_entry) if closed_entry else _ts(closed[0]) if closed else _ts(opened),
+                               closed_entry is not None, metrics))
     return out
 
 
@@ -480,8 +487,11 @@ class Pager:
         if secret:
             headers["X-Mailroom-Signature"] = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
         try:
-            (self.http or httpx.Client(timeout=5.0)).post(self.cfg.machine.webhook_url, content=body,
-                                                          headers=headers, timeout=5.0)
+            if self.http is not None:
+                self.http.post(self.cfg.machine.webhook_url, content=body, headers=headers, timeout=5.0)
+            else:
+                with httpx.Client(timeout=5.0) as c:
+                    c.post(self.cfg.machine.webhook_url, content=body, headers=headers)
         except Exception as exc:  # noqa: BLE001 — fail-soft, no retries
             logger.warning("pager_webhook_failed", error=type(exc).__name__)
 

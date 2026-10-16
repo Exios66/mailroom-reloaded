@@ -30,14 +30,25 @@ def test_provider_key_mapping(monkeypatch):
 
 
 def test_window_counts_and_consecutive(ph):
-    url, t = "https://openrouter.ai/api/v1", 1_000_000.0
+    url, t = "https://acme--mailroom-vllm-extract.modal.run/v1", 1_000_000.0
     for i, (ok, st) in enumerate([(True, 200), (False, 503), (False, 502), (True, 200), (False, 503), (False, 503)]):
         ph.record_llm_outcome(url, "m", ok=ok, status=st, latency_s=1.0 + i, now=t + i)
-    h = ph.read_provider_health(now=t + 10)["openrouter"]
-    # 503 is a Modal cold start, not an outage: only the 502 counts as an error
+    h = ph.read_provider_health(now=t + 10)[ph.provider_key(url, "m")]
+    # a Modal 503 is a cold start, not an outage: only the 502 counts as an error
     assert h["calls"] == 6 and h["errors"] == 1 and h["consecutive_errors"] == 0 and h["ok_calls"] == 2
     assert h["count_503"] == 3 and h["last_status"] == 503 and h["last_ok_at"] == t + 3
     assert h["p50_latency_s"] == 3.5
+
+
+def test_openrouter_503_is_an_outage(ph):
+    """Only Modal's 503 means cold start; OpenRouter answering 503 is an outage."""
+    url = "https://openrouter.ai/api/v1"
+    for i in range(3):
+        ph.record_llm_outcome(url, "m", ok=False, status=503, latency_s=0.1, now=1000.0 + i)
+    h = ph.read_provider_health(now=1005.0)["openrouter"]
+    assert h["errors"] == 3
+    assert h["consecutive_errors"] == 3
+    assert h["last_status"] == 503
 
 
 def test_old_events_age_out(ph):

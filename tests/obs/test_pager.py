@@ -183,6 +183,22 @@ def test_eval_run_is_progress_with_total(ledger):
     assert r.metrics["failed"] == 1
 
 
+def test_closed_eval_run_is_reported_finished(ledger):
+    """A closed eval run is reported finished (for a day), so `eval --page` sends its finished text."""
+    from mailroom_reloaded.obs import pager
+    from mailroom_reloaded.pipeline import run_ledger
+
+    assert run_ledger.open_run(ledger, "ev2", "eval", posture_label="pipeline", total=2)
+    ledger.flush()
+    _close(ledger, "ev2", "a", "completed")
+    _close(ledger, "ev2", "b", "completed")
+    run_ledger.close_run(ledger, "ev2")
+    ledger.flush()
+    [r] = pager.eval_runs(ledger, time.time())
+    assert (r.run_id, r.done, r.finished) == ("ev2", 2, True)
+    assert pager.eval_runs(ledger, time.time() + 2 * 86400) == []  # a day-old finish is not re-announced
+
+
 def test_snapshot_survives_missing_ledger(base, monkeypatch):
     from mailroom_reloaded.obs import pager
     from mailroom_reloaded.storage import ledger as ledger_mod
