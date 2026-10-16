@@ -8,6 +8,7 @@ CLI: ``mailroom pager <verb>`` (see ``main``).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -569,7 +570,7 @@ class Pager:
     def _deliver(self, msg, now: float) -> list:
         """Send a message to every recipient and return their send results.
 
-        Mark it sent if any delivery succeeds. Add masked delivery records to the
+        Mark it sent only once every recipient has succeeded (a retry texts just the rest). Add masked delivery records to the
         optional log and webhook. An unavailable transport yields no results;
         transport exceptions propagate, while log-write errors are suppressed.
         """
@@ -577,14 +578,26 @@ class Pager:
         from mailroom_reloaded.obs.sms import build_transport
 
         transport = self.transport or build_transport(self.cfg.transport)
-        sent = [(to, transport.send(to, msg.text)) for to in self.cfg.recipients] if transport else []
-        self.state = mark_sent(self.state, msg.kind, msg.alert_keys, now, any(r.ok for _, r in sent))
-        payload = {**msg.payload, "delivery": [{"to": _mask(to), "ok": r.ok, "transport": r.transport,
-                                                "segments": r.segments, "detail": r.detail} for to, r in sent]}
+        mid = f"{msg.kind}|{','.join(sorted(msg.alert_keys))}"
+        h = lambda to: hashlib.sha1(to.encode()).hexdigest()[:10]
+        done = set(self.state.delivered.get(mid, {}).get("to", []))
+        sent = [(to, transport.send(to, msg.text)) for to in self.cfg.recipients if h(to) not in done] if transport else []
+        done |= {h(to) for to, r in sent if r.ok}
+        everyone = bool(self.cfg.recipients) and all(h(to) in done for to in self.cfg.recipients)
+        # ack only once every recipient has the text; each successful send still counts toward the hourly cap
+        self.state = mark_sent(self.state, msg.kind, msg.alert_keys, now, everyone, sends=sum(r.ok for _, r in sent))
+        keep = {k: v for k, v in self.state.delivered.items() if now - v.get("at", 0) < 3600 and k != mid}
+        self.state.delivered = keep if everyone or not done else {**keep, mid: {"to": sorted(done), "at": now}}
+        partial = bool(done) and not everyone
+        payload = {**msg.payload, **({"delivery_partial": True} if partial else {}), "delivery":
+                   [{"to": _mask(to), "ok": r.ok, "transport": r.transport,
+                     "segments": r.segments, "detail": r.detail} for to, r in sent]}
         if self.cfg.machine.log:
             _source("pager_log", lambda: _log(payload), None)
         if self.cfg.machine.webhook_url:
             self._webhook(payload)
+        if partial:
+            logger.warning("pager_delivery_partial", kind=msg.kind, ref=msg.ref, ok=sum(r.ok for _, r in sent), to=len(sent))
         logger.info("pager_sent", kind=msg.kind, ref=msg.ref, ok=sum(r.ok for _, r in sent), to=len(sent))
         return [r for _, r in sent]
 
@@ -614,15 +627,16 @@ class Pager:
     def start_background(self, *, idle_ok: bool = False) -> threading.Thread | None:
         """Return a daemon polling thread, or None if inactive or another sender holds the lock.
 
-        ``idle_ok`` keeps an inactive pager polling so a later ``pager on`` takes
-        effect. Research mode registers a forced scan at process exit. Errors
+        ``idle_ok`` keeps an inactive pager, or one blocked by another sender's
+        lock, polling so a later ``pager on`` or the lock's release takes effect. Research mode registers a forced scan at process exit. Errors
         opening the sender lock or starting the thread propagate.
         """
         if not self.cfg.active and not idle_ok:
             return None
         if self.cfg.active and not self.acquire():
             logger.info("pager_passive", reason="another process holds pager.lock")
-            return None
+            if not idle_ok:
+                return None  # idle_ok hosts keep polling: _tick retries the lock if its holder exits
 
         def loop():
             """Tick until stopped, waiting at most 15 seconds between attempts."""
@@ -924,6 +938,9 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             msg = render_alert(alerts, snap, cfg, state, snap.taken_at)
         else:
+            from mailroom_reloaded.obs.pager_core import plan_scan
+
+            _, state = plan_scan(snap, cfg, state, snap.taken_at)  # fold in this snapshot's firing rules (nothing is sent or saved)
             msg = render_digest(snap, cfg, state, snap.taken_at)
         print(json.dumps(msg.payload, indent=1, ensure_ascii=False) if a.json else msg.text)
         return 0

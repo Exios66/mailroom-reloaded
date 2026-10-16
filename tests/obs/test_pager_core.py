@@ -254,6 +254,14 @@ def test_cap_lets_criticals_through_and_holds_rest():
     assert "🟠 Watch: review queue at 22 (limit 20); +1 held." in render_digest(snap(), c, held, at("14:30")).text
 
 
+def test_each_successful_send_counts_toward_the_cap_but_criticals_do_not():
+    st = PagerState(open={"review_backlog": {"severity": "warning"}, "watcher_down": {"severity": "critical"}})
+    part = mark_sent(st, "alert", ("review_backlog",), at("14:20"), False, sends=1)  # partial: counted, not acked
+    assert part.sent_log == [at("14:20")] and part.pending == ["review_backlog"]
+    assert mark_sent(st, "alert", ("review_backlog",), at("14:20"), True, sends=2).sent_log == [at("14:20")] * 2
+    assert mark_sent(st, "alert", ("watcher_down",), at("14:20"), True, sends=2).sent_log == []
+
+
 def test_digest_aligned_to_clock_and_custom_cadence():
     assert next_digest_at(cfg(), "production", at("14:13")) == at("14:20")
     assert next_digest_at(cfg(), "production", at("14:20")) == at("14:30")

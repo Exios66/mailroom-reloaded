@@ -560,3 +560,57 @@ def test_cli_accepts_gateway_address_with_email_gateway_transport(host, monkeypa
     monkeypatch.setenv("MAILROOM_PAGER_TRANSPORT", "email_gateway")
     assert pager.main(["on", "--to", "6085551234@vtext.com"]) == 0
     assert pager.load_pager_config().recipients == ("6085551234@vtext.com",)
+
+
+def test_preview_digest_reflects_active_failures(host):
+    _, _, feed = host
+    feed["fn"] = broken
+    r = cli("preview")
+    assert r.exit_code == 0 and "All clear" not in r.output
+
+
+def test_partial_delivery_retries_only_failed_recipients(host):
+    pager, _, feed = host
+
+    class Flaky(Rec):
+        def __init__(self):
+            super().__init__()
+            self.down = {GV}
+
+        def send(self, to, body):
+            self.ok = to not in self.down
+            return super().send(to, body)
+
+    feed["fn"] = broken
+    t = Flaky()
+    p = pager.Pager(PagerConfig.resolve({"enabled": True, "recipients": [MOBILE, GV], "timezone": "America/Chicago"},
+                                        {}, environment="live"), transport=t)
+    p.tick(at("14:01"))
+    assert [to for to, _ in t.sent] == [MOBILE, GV]
+    assert all(not e.get("last_sent") for e in p.state.open.values())  # not acked: GV still owed
+    assert pager._read_log()[0]["delivery_partial"] is True
+    t.down, t.sent = set(), []
+    p.tick(at("14:01") + 90)
+    assert [to for to, _ in t.sent] == [GV]  # MOBILE is not texted twice
+    assert all(e.get("last_sent") for e in p.state.open.values())
+    assert p.state.delivered == {}
+    p.tick(at("14:01") + 180)
+    assert [to for to, _ in t.sent] == [GV]  # acked: no further retry
+
+
+def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
+    pager, rec, _ = host
+    first, second = make(pager, rec), make(pager, rec)
+    assert first.acquire()
+    thread = None
+    try:
+        thread = second.start_background(idle_ok=True)
+        assert thread is not None and second._lock is None  # passive, but still polling
+        assert make(pager, rec).start_background() is None  # batch hosts still stand down
+        first.release()
+        second.tick(at("14:00") + 5)
+        assert second._lock is not None  # took over once the owner left
+    finally:
+        second.stop()
+        second.release()
+        first.release()

@@ -324,6 +324,7 @@ class PagerState:
     runs_seen: dict[str, str] = field(default_factory=dict)
     baseline: dict = field(default_factory=dict)
     recovered: dict[str, dict] = field(default_factory=dict)
+    delivered: dict[str, dict] = field(default_factory=dict)  # message id -> {"to": hashed recipients already texted, "at"}
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -567,13 +568,16 @@ def plan_digest(snap, cfg: PagerConfig, state: PagerState, now: float) -> tuple[
     return Outbox([render_digest(snap, cfg, st, now, idle=idle)]), st
 
 
-def mark_sent(state: PagerState, kind: str, alert_keys, now: float, ok: bool) -> PagerState:
+def mark_sent(state: PagerState, kind: str, alert_keys, now: float, ok: bool, sends: int | None = None) -> PagerState:
+    """Record a delivery. ``ok`` acks it; ``sends`` is how many recipients were texted (default 1 if ok, else 0)."""
     st = PagerState.from_json(state.to_json())
+    n = (1 if ok else 0) if sends is None else sends
+    critical = kind == "alert" and any(st.open.get(k, {}).get("severity") == "critical" for k in alert_keys)
+    if n or ok:
+        st.sent_log = [t for t in st.sent_log if now - t < 3600] + ([] if critical else [now] * n)
     if not ok:
         st.pending += [k for k in alert_keys if k not in st.pending and k in st.open]
         return st
-    critical = kind == "alert" and any(st.open.get(k, {}).get("severity") == "critical" for k in alert_keys)
-    st.sent_log = [t for t in st.sent_log if now - t < 3600] + ([] if critical else [now])
     for k in alert_keys:
         if k in st.open:
             st.open[k]["last_sent"] = now
