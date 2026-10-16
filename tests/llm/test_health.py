@@ -81,6 +81,41 @@ def test_two_writers_merge(ph):
     assert ph.read_provider_health(now=20.0)["modal:vllm"]["calls"] == 2
 
 
+@pytest.mark.parametrize("failure_point", ["path", "lock", "serialize", "write", "replace"])
+def test_failed_flush_restores_pending_and_new_events(ph, monkeypatch, failure_point):
+    first = [1.0, True, 200, 0.1]
+    second = [2.0, True, 200, 0.2]
+    same_provider = [3.0, True, 200, 0.3]
+    new_provider = [4.0, True, 200, 0.4]
+    ph._BUF.add("openrouter", first, now=1.0)
+    ph._BUF.add("modal:vllm", second, now=2.0)
+    error = TypeError("flush failed") if failure_point == "serialize" else OSError("flush failed")
+
+    def fail(*args, **kwargs):
+        ph._BUF.add("openrouter", same_provider, now=3.0)
+        ph._BUF.add("other:new", new_provider, now=4.0)
+        raise error
+
+    targets = {
+        "path": (ph, "_path"),
+        "lock": (ph, "open"),
+        "serialize": (ph.json, "dumps"),
+        "write": (ph.Path, "write_text"),
+        "replace": (ph.os, "replace"),
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(*targets[failure_point], fail, raising=failure_point != "lock")
+        with pytest.raises(type(error)) as exc:
+            ph._BUF.flush(now=2.0)
+        assert exc.value is error
+
+    expected = {"openrouter": [first, same_provider], "modal:vllm": [second], "other:new": [new_provider]}
+    assert ph._BUF.events == expected
+    ph._BUF.flush(now=4.0)
+    assert ph._BUF.events == {}
+    assert json.loads(ph._path().read_text()) == expected
+
+
 def test_cap_200_events_per_key(ph):
     for i in range(250):
         ph._BUF.add("openrouter", [float(i), True, 200, 0.1], now=float(i))
