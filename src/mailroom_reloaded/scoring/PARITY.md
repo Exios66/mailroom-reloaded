@@ -1,8 +1,9 @@
 # Parity record: vendored llm-dojo-scoring subset
 
 - Upstream: github.com/Exios66/llm-dojo-scoring
-- Commit: `8c7b7f1c9c3b18a7036ee58addcfaa35d816177d` (branch `claude/cool-wozniak-o044u4`)
+- Commit: `852b05274a97d2b1a5f5ba1d31991055083e60bc` (branch `claude/cool-wozniak-o044u4`)
 - Tag: none yet. **Interim:** this pin becomes `v0.22.0` once the dojo tags its release; re-pin then and update this file and the references listed under "Pins" below.
+- Intermediate pin: `8c7b7f1` (`8c7b7f1c9c3b18a7036ee58addcfaa35d816177d`). `8c7b7f1..852b052` changes none of the eleven vendored modules (verified with `git diff`); the new upstream commits add the importable eval-environment prompt lineage (`prompts/lineage.py`, `prompts/eval_environment_lineage.json`), which is not vendored. The `parity` extra installs it, and the dojo's package-data now ships `prompts/*.json`.
 - Previous pin: `v0.21.0` (`6a3053ccc32b4f3290a979ac75265affa77a6503`).
 
 Modules are copied from `llm_dojo_scoring/` at the pinned commit. Sha256 columns: upstream file, vendored file.
@@ -38,7 +39,7 @@ Parity test: `tests/scoring/test_parity.py` (needs the `parity` extra; skipped o
 
 ## Pins
 
-Every place that records the vendored pin, all at `8c7b7f1` (or the interim commit above):
+Every place that records the vendored pin, all at `852b052` (or the interim commit above):
 
 - `pyproject.toml` `[project.optional-dependencies] parity` and the `[tool.ruff]` comment.
 - `uv.lock` `llm-dojo-scoring` source (regenerated with `uv lock --upgrade-package llm-dojo-scoring`, not hand-edited).

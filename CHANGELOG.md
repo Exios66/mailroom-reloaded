@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Dropped the unused `respx` dependency from the `dev` extra (`pyproject.toml`, the `deploy/Dockerfile.dev` comment, `uv.lock`); it had no consumer in `src/` or `tests/`.
-- Re-vendored `llm-dojo-scoring` from v0.21.0 to commit `8c7b7f1` (`src/mailroom_reloaded/scoring/`, `scoring/PARITY.md`, the `parity` extra in `pyproject.toml`, `uv.lock`). Interim pin: it becomes v0.22.0 once the dojo tags it. The local judge-band patch is dropped because upstream now carries it (`score_extraction` calls `field_is_ambiguous(<configured type>, score)`). The only remaining vendored divergences from upstream are the `EXTRACT_CLASS_ALIASES` stub and the `.config` import rewrite. No mailroom call site uses the breaking-change APIs (`metric_id_for`, `Emitter`, archive block, `compare_serving`, batch helpers); those live in unvendored dojo modules.
+- Re-vendored `llm-dojo-scoring` from v0.21.0 to commit `852b052` (`src/mailroom_reloaded/scoring/`, `scoring/PARITY.md`, the `parity` extra in `pyproject.toml`, `uv.lock`). Interim pin: it becomes v0.22.0 once the dojo tags it. The local judge-band patch is dropped because upstream now carries it (`score_extraction` calls `field_is_ambiguous(<configured type>, score)`). The only remaining vendored divergences from upstream are the `EXTRACT_CLASS_ALIASES` stub and the `.config` import rewrite. No mailroom call site uses the breaking-change APIs (`metric_id_for`, `Emitter`, archive block, `compare_serving`, batch helpers); those live in unvendored dojo modules.
 
 ### Removed
 
