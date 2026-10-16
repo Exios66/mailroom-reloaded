@@ -120,7 +120,13 @@ def execute_tool(tools: dict[str, ToolLike], name: str, raw_args: str | dict[str
 
 
 def chat_create(client: Any, req: dict[str, Any]) -> tuple[Any, Usage]:
-    """One chat completion with transport retries; usage counts the successful call only."""
+    """Return a chat completion and its usage, retrying transient transport failures.
+
+    Record every attempt for passive provider health. Usage includes only
+    the successful call, with latency in seconds. Nonretryable errors and
+    the final request error after retries propagate, as do errors in retry
+    configuration or usage conversion.
+    """
     timing: dict[str, float] = {}
 
     def _once() -> Any:

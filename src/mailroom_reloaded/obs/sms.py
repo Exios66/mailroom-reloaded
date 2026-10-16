@@ -31,10 +31,16 @@ _OVERRIDE = None
 
 
 def status_recipient() -> str:
+    """Return the trimmed status inbox address, or an empty string if unset."""
     return os.environ.get("MAILROOM_STATUS_EMAIL", "").strip()
 
 
 def _smtp_config() -> dict | None:
+    """Read SMTP credentials from the process environment, or return None if incomplete.
+
+    The port defaults to 465. A noninteger ``MAILROOM_SMTP_PORT`` raises
+    ValueError when the required credentials are present.
+    """
     host, user, pw = (os.environ.get(f"MAILROOM_SMTP_{k}", "").strip() for k in ("HOST", "USER", "PASSWORD"))
     if not (host and user and pw):
         return None
@@ -63,6 +69,12 @@ def set_transport_override(t: Transport | None) -> None:
 
 
 def count_segments(body: str) -> tuple[Literal["GSM-7", "UCS-2"], int]:
+    """Return SMS encoding and segment count, counting an empty message as one segment.
+
+    GSM-7 extension characters use two septets. GSM-7 limits are 160 septets
+    for one segment and 153 per multipart segment; other text uses UTF-16
+    units with limits of 70 and 67, respectively.
+    """
     if all(c in _GSM7 or c in _GSM7_EXT for c in body):
         septets = sum(2 if c in _GSM7_EXT else 1 for c in body)
         return "GSM-7", 1 if septets <= 160 else math.ceil(septets / 153)
@@ -71,6 +83,7 @@ def count_segments(body: str) -> tuple[Literal["GSM-7", "UCS-2"], int]:
 
 
 def mask_number(s: str) -> str:
+    """Mask a phone number or email local part for display, retaining the email domain."""
     if "@" in s:
         local, _, domain = s.partition("@")
         return f"{local[:2]}•••{local[-2:]}@{domain}" if len(local) > 4 else f"•••@{domain}"
@@ -78,6 +91,11 @@ def mask_number(s: str) -> str:
 
 
 def valid_recipients(raw: Iterable[str], transport: str) -> list[str]:
+    """Trim and retain valid recipients in input order, including duplicates.
+
+    Require email addresses for ``email_gateway`` and E.164 numbers for other
+    transports. Exclude the status inbox case-insensitively.
+    """
     pattern = _EMAIL if transport == "email_gateway" else _E164
     keep = []
     for entry in (str(e).strip() for e in raw):
@@ -91,12 +109,14 @@ def valid_recipients(raw: Iterable[str], transport: str) -> list[str]:
 
 
 def _failed(transport: str, to: str, segments: int, detail: str) -> SendResult:
+    """Return a failed send result with occurrences of the recipient masked in its detail."""
     detail = detail.replace(to, mask_number(to)) if to else detail  # providers echo numbers
     logger.warning("pager_send_failed", transport=transport, to=mask_number(to), detail=detail)
     return SendResult(False, transport, segments, detail)
 
 
 def _json(resp: httpx.Response) -> dict:
+    """Return the response JSON as a dict, or an empty dict if parsing or conversion fails."""
     try:
         return dict(resp.json())
     except Exception:  # noqa: BLE001 — an unparseable body is just an empty dict
@@ -108,11 +128,22 @@ class TwilioTransport:
 
     def __init__(self, sid: str, token: str, *, from_number: str | None,
                  service_sid: str | None, client: httpx.Client | None = None) -> None:
+        """Configure Twilio authentication and prefer ``service_sid`` over ``from_number``.
+
+        Use the supplied HTTP client, or create one when omitted.
+        """
         self._sid, self._token = sid, token
         self._sender = {"MessagingServiceSid": service_sid} if service_sid else {"From": from_number or ""}
         self._client = client or httpx.Client()
 
     def send(self, to: str, body: str) -> SendResult:
+        """Submit an SMS to Twilio with a ten-second HTTP timeout.
+
+        Return success for HTTP 201, even if the response body is not valid JSON;
+        ``detail`` contains the message SID when available. Request exceptions
+        and other HTTP statuses become failed results. Success means accepted
+        by Twilio, not confirmed delivery to the phone.
+        """
         segments = count_segments(body)[1]
         try:
             resp = self._client.post(TWILIO_URL.format(sid=self._sid), timeout=10.0,
@@ -131,11 +162,22 @@ class EmailGatewayTransport:
     name = "email_gateway"
 
     def __init__(self, smtp_cfg: dict, smtp_factory=None) -> None:
+        """Configure a carrier gateway sender with an optional SMTP client factory.
+
+        Without a factory, use SMTP over SSL with the configured host and port
+        and a 30-second timeout.
+        """
         self._cfg = smtp_cfg
         self._factory = smtp_factory or partial(
             smtplib.SMTP_SSL, smtp_cfg["smtp_host"], smtp_cfg["smtp_port"], timeout=30)
 
     def send(self, to: str, body: str) -> SendResult:
+        """Send plain text with an empty subject through the configured SMTP account.
+
+        Return a failed result for the status inbox or for message, connection,
+        authentication, or send exceptions. Attempt to close the SMTP client,
+        suppressing cleanup errors.
+        """
         segments = count_segments(body)[1]
         if status_recipient() and to.lower() == status_recipient().lower():  # never the status inbox
             return SendResult(False, self.name, segments, "blocked: status inbox")
@@ -159,9 +201,14 @@ class ConsoleTransport:
     name = "console"
 
     def __init__(self, stream: TextIO | None = None) -> None:
+        """Use the supplied output stream, or resolve stdout when sending."""
         self._stream = stream
 
     def send(self, to: str, body: str) -> SendResult:
+        """Print the framed body, encoding, and segment count, then return success.
+
+        The recipient is unused. Output errors propagate to the caller.
+        """
         encoding, segments = count_segments(body)
         out = self._stream or sys.stdout
         print(f"{_RULE}\n{body}\n{_RULE}\n{encoding} · {segments} segments", file=out)
@@ -169,8 +216,13 @@ class ConsoleTransport:
 
 
 def build_transport(name: str, env: Mapping[str, str] | None = None) -> Transport | None:
-    """The transport called ``name``, or None with a ``pager_transport_unconfigured``
-    warning naming the missing env vars when its credentials are absent."""
+    """Build the named transport, or return None for an unknown or unconfigured one.
+
+    A transport override takes precedence over all configuration. ``env``
+    supplies Twilio credentials, defaulting to the process environment; the
+    email gateway always reads the process environment. Invalid SMTP ports
+    raise ValueError, and transport construction errors propagate.
+    """
     if _OVERRIDE is not None:
         return _OVERRIDE
     env = os.environ if env is None else env

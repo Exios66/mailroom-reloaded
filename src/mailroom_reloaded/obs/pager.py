@@ -35,12 +35,17 @@ logger = structlog.get_logger(__name__)
 
 
 def get_base_dir() -> Path:
+    """Return the configured data directory, creating it if necessary."""
     base = Path(get_settings().base_dir)
     base.mkdir(parents=True, exist_ok=True)
     return base
 
 
 def _atomic_write(path: Path, data) -> None:
+    """Replace a JSON file via a temporary file, creating parent directories as needed.
+
+    Serialization and filesystem errors propagate.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.{threading.get_ident()}.tmp")  # CLI and pager never share
     tmp.write_text(json.dumps(data, indent=1))
@@ -53,7 +58,12 @@ _OR_CACHE: dict = {}
 
 
 def openrouter_info(cfg: PagerConfig, client: httpx.Client | None = None) -> dict | None:
-    """OpenRouter key status (``GET /key``), cached ``providers.openrouter_cache_minutes``."""
+    """Return cached OpenRouter ``GET /key`` status, or None without a usable key.
+
+    Cache for ``providers.openrouter_cache_minutes`` minutes. HTTP failures,
+    request exceptions, and response parsing errors become cached dicts
+    with an ``error`` field.
+    """
     key = (get_settings().openrouter_api_key or "").strip()
     if not key or key == "mock-key":
         return None
@@ -89,11 +99,18 @@ def modal_warm(app: str = "mailroom-vllm", run=subprocess.run) -> dict[str, int]
 
 
 def _modal_tiers() -> list[str]:
+    """Return the vLLM tier when it is the configured provider, otherwise no tiers."""
     return ["vllm"] if get_settings().provider == "vllm" else []
 
 
 def provider_statuses(cfg: PagerConfig, health: dict, or_info: dict | None, warm: dict | None) -> list[ProviderStatus]:
-    """Pure: map passive health + Modal warm counts + OpenRouter /key onto provider states."""
+    """Combine passive health, Modal container counts, and key status into provider states.
+
+    Include the configured vLLM tier and Modal tiers present in ``health``.
+    Three consecutive outages mark a provider down. Modal degradation also
+    uses configured error thresholds or repeated 503s without a success.
+    Omit OpenRouter when neither key status nor traffic indicates its use.
+    """
     rd, warm = cfg.rules["provider_degraded"], warm or {}
     tiers = list(dict.fromkeys(_modal_tiers() + [k[6:] for k in health if k.startswith("modal:")]))
     out = []
@@ -131,6 +148,7 @@ def provider_statuses(cfg: PagerConfig, health: dict, or_info: dict | None, warm
 
 
 def _n_containers(n: int) -> str:
+    """Format a container count with singular or plural wording."""
     return f"{n} container{'' if n == 1 else 's'}"
 
 
@@ -138,6 +156,7 @@ def _n_containers(n: int) -> str:
 
 
 def _source(name: str, fn, default):
+    """Return a snapshot source result, or the supplied default if it raises an Exception."""
     try:
         return fn()
     except Exception as exc:  # noqa: BLE001 — one dead source never blanks the digest
@@ -146,6 +165,7 @@ def _source(name: str, fn, default):
 
 
 def _ts(entry) -> float:
+    """Convert a ledger entry ISO timestamp to epoch seconds; invalid timestamps raise ValueError."""
     return datetime.fromisoformat(str(entry.ts)).timestamp()
 
 
@@ -177,11 +197,18 @@ def _closed_since(ledger, since: float, run_ids: list[str] | None) -> list:
 
 
 def _doc_cost(e) -> float:
+    """Sum document usage costs across roles in USD, treating absent costs as zero."""
     return sum(float((u or {}).get("cost_usd") or 0) for u in (e.payload.get("usage_by_role") or {}).values())
 
 
 def window_stats(entries: list) -> dict:
-    """Pure: terminal outcomes, spend and median latency of ``doc_closed`` entries."""
+    """Summarize terminal ledger entries with USD spend and median latency in seconds.
+
+    ``received`` counts closed documents; parked outcomes count as review,
+    and failed or aborted outcomes count as failures. Zero or missing
+    latencies are excluded; an empty latency sample yields None.
+    ``first_pass_rate`` is unavailable and always None.
+    """
     outs = [e.payload.get("outcome") for e in entries]
     lats = [float(e.payload["duration_s"]) for e in entries if e.payload.get("duration_s")]
     return {"received": len(entries), "archived": outs.count("completed"), "review": outs.count("parked"),
@@ -191,6 +218,7 @@ def window_stats(entries: list) -> dict:
 
 
 def _eval_score(run_id: str) -> float | None:
+    """Return the mean non-null evaluation score, or None if absent; database errors propagate."""
     from sqlalchemy import text
 
     from mailroom_reloaded.eval.runner import _engine
@@ -230,7 +258,11 @@ def eval_runs(ledger, now: float, max_age_s: float = 86400) -> list[RunProgress]
 
 
 def watcher_running(base: Path) -> bool | None:
-    """True when another process holds ``watcher.lock`` (a free lock means no watcher)."""
+    """Return whether ``watcher.lock`` exists and cannot be exclusively locked.
+
+    A missing or free lock returns False. Lock acquisition errors return
+    True; errors opening the lock file propagate.
+    """
     import fcntl
 
     path = base / "watcher.lock"
@@ -246,6 +278,10 @@ def watcher_running(base: Path) -> bool | None:
 
 
 def _local_midnight(now: float, tz: str) -> datetime:
+    """Return midnight for the date containing epoch seconds ``now`` in ``tz``.
+
+    A blank timezone uses the host timezone. Timezone lookup errors propagate.
+    """
     from zoneinfo import ZoneInfo
 
     d = datetime.fromtimestamp(now, ZoneInfo(tz)) if tz else datetime.fromtimestamp(now).astimezone()
@@ -253,6 +289,7 @@ def _local_midnight(now: float, tz: str) -> datetime:
 
 
 def _git_sha() -> str | None:
+    """Return the short Git revision, or None for empty output or subprocess errors."""
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=3,
                            cwd=Path(__file__).resolve().parent, check=False)
@@ -262,11 +299,20 @@ def _git_sha() -> str | None:
 
 
 def _count(d: Path) -> int:
+    """Count immediate, nonhidden files excluding names ending in ``.meta``."""
     return sum(1 for p in d.iterdir() if p.is_file() and not p.name.startswith(".") and not p.name.endswith(".meta"))
 
 
 def collect_snapshot(cfg: PagerConfig, *, window_minutes: float, now: float | None = None) -> RunSnapshot:
-    """Gather everything the pager reports. Each source fails soft on its own."""
+    """Collect ledger, queue, watcher, and provider data for the pager.
+
+    ``now`` is epoch seconds, defaulting to the current time;
+    ``window_minutes`` selects the trailing ledger window. Production mode
+    restricts ledger statistics to live run IDs spanning that window or the
+    local day; research mode includes all runs. Individual source failures
+    use empty or unknown values. Base directory, timezone, and ledger data
+    conversion errors outside those source guards can propagate.
+    """
     from mailroom_reloaded.llm.health import read_provider_health
     from mailroom_reloaded.storage.bins import Bins
     from mailroom_reloaded.storage.ledger import get_ledger
@@ -275,6 +321,7 @@ def collect_snapshot(cfg: PagerConfig, *, window_minutes: float, now: float | No
     base, bins = get_base_dir(), Bins(get_base_dir())
     ledger = _source("ledger", get_ledger, None)
     def runs(since: float) -> list[str] | None:
+        """Select live run IDs since epoch seconds ``since``, or all runs in research mode."""
         return _live_run_ids(since, now) if cfg.run_mode == "production" else None
     queues = {"inbox": _source("inbox", lambda: _count(bins.inbox), 0),
               "processing": _source("processing", lambda: sum(
@@ -312,10 +359,12 @@ NO_NUMBER = "no number saved — use: pager on --to +1…"
 
 
 def _file(name: str) -> Path:
+    """Return a pager file path in the configured data directory, creating that directory."""
     return get_base_dir() / name
 
 
 def read_settings() -> dict:
+    """Return saved settings, or an empty dict for unreadable, invalid, or non-object JSON."""
     try:
         d = json.loads(_file("pager_settings.json").read_text())
         return d if isinstance(d, dict) else {}
@@ -324,6 +373,12 @@ def read_settings() -> dict:
 
 
 def write_settings(*, enabled: bool | None = None, recipients: list[str] | None = None, by: str) -> dict:
+    """Persist supplied settings and return the updated mapping.
+
+    None leaves the corresponding setting unchanged. Deduplicate recipients
+    in input order and record ``by`` as the update source with a UTC timestamp.
+    Filesystem and serialization errors propagate.
+    """
     s = read_settings()
     if enabled is not None:
         s["enabled"] = bool(enabled)
@@ -335,6 +390,11 @@ def write_settings(*, enabled: bool | None = None, recipients: list[str] | None 
 
 
 def load_pager_config(env=None) -> PagerConfig:
+    """Resolve defaults, taxonomy, environment, and saved settings in that precedence order.
+
+    ``env`` defaults to the process environment. An unreadable taxonomy uses
+    defaults; saved settings override the enabled flag and recipients.
+    """
     from mailroom_reloaded.settings import load_taxonomy
 
     env = os.environ if env is None else env
@@ -347,6 +407,7 @@ def load_pager_config(env=None) -> PagerConfig:
 
 
 def load_state():
+    """Restore pager state, or return fresh state if reading or deserialization raises an Exception."""
     from mailroom_reloaded.obs.pager_core import PagerState
 
     try:
@@ -356,16 +417,23 @@ def load_state():
 
 
 def save_state(state) -> None:
+    """Replace the saved pager state; serialization and filesystem errors propagate."""
     _atomic_write(_file("pager_state.json"), state.to_json())
 
 
 def _mask(to: str) -> str:
+    """Return the recipient masked for display."""
     from mailroom_reloaded.obs.sms import mask_number
 
     return mask_number(to)
 
 
 def _log(payload: dict) -> None:
+    """Append a JSON payload to the pager log, rotating an existing log over 5 MiB.
+
+    Keep one backup at ``pager_log.jsonl.1``. Filesystem and serialization
+    errors propagate.
+    """
     path = _file("pager_log.jsonl")
     if path.exists() and path.stat().st_size > LOG_MAX_BYTES:
         os.replace(path, path.with_name(path.name + ".1"))
@@ -384,6 +452,11 @@ class Pager:
     (`mute`) share it. `tick` never raises into its host."""
 
     def __init__(self, cfg: PagerConfig | None = None, *, transport=None):
+        """Restore state and use the supplied config and transport, or resolve them as needed.
+
+        Settings file changes are applied on later ticks even with an explicit
+        config. Filesystem errors outside state loading can propagate.
+        """
         self._own_cfg = cfg is None
         self.cfg = cfg or load_pager_config()
         self.transport, self.http, self._lock, self._last_scan = transport, None, None, None
@@ -393,6 +466,7 @@ class Pager:
 
     @staticmethod
     def _sig():
+        """Return the settings file modification time and size, or None on a stat error."""
         try:
             st = _file("pager_settings.json").stat()
             return st.st_mtime_ns, st.st_size
@@ -400,6 +474,10 @@ class Pager:
             return None
 
     def acquire(self) -> bool:
+        """Keep an exclusive sender lock, returning False if acquisition fails.
+
+        Return True when already held. Errors opening the lock file propagate.
+        """
         import fcntl
 
         if self._lock:
@@ -414,11 +492,19 @@ class Pager:
         return True
 
     def release(self) -> None:
+        """Close the held sender lock, allowing another pager to acquire it."""
         if self._lock:
             self._lock.close()
             self._lock = None
 
     def tick(self, now: float | None = None, *, force_scan: bool = False) -> list:
+        """Process due scans and digests and return per-recipient send results.
+
+        ``now`` is epoch seconds, defaulting to the current time. ``force_scan``
+        bypasses the scan interval, but sending still follows pager gates.
+        Inactive or passive pagers return an empty list. Exceptions are caught
+        and return an empty list even if some side effects already occurred.
+        """
         try:
             with self._mutex:
                 return self._tick(time.time() if now is None else now, force_scan=force_scan)
@@ -427,13 +513,25 @@ class Pager:
             return []
 
     def flush(self, now: float | None = None) -> list:
-        """One forced scan now (end of an `eval --page` run), so a finished run's text is not left unsent."""
+        """Force a scan through ``tick`` and return its send results.
+
+        Used at eval exit to attempt pending run events; quiet hours, mute, and
+        rate limits can still delay them.
+        """
         return self.tick(now, force_scan=True)
 
     def stop(self) -> None:
+        """Signal the background loop to exit without joining it or releasing the sender lock."""
         self._stop.set()
 
     def _tick(self, now: float, force_scan: bool = False, override: dict | None = None) -> list:
+        """Refresh saved settings and mute state, process due messages, and persist state.
+
+        ``now`` is epoch seconds; ``override`` replaces collected snapshot fields.
+        Return delivery results, or an empty list when inactive or unable to
+        acquire the sender lock. State-save errors are suppressed; other errors
+        propagate to ``tick``.
+        """
         from dataclasses import replace
 
         from mailroom_reloaded.obs.pager_core import plan_digest, plan_scan
@@ -449,6 +547,7 @@ class Pager:
         window = cfg.digest_minutes(cfg.run_mode)
 
         def snapshot():
+            """Collect the current window snapshot and apply any supplied field overrides."""
             s = collect_snapshot(cfg, window_minutes=window or 10, now=now)
             return replace(s, **override) if override else s
         if force_scan or self._last_scan is None or now - self._last_scan >= cfg.scan.seconds:
@@ -462,6 +561,12 @@ class Pager:
         return results
 
     def _deliver(self, msg, now: float) -> list:
+        """Send a message to every recipient and return their send results.
+
+        Mark it sent if any delivery succeeds. Add masked delivery records to the
+        optional log and webhook. An unavailable transport yields no results;
+        transport exceptions propagate, while log-write errors are suppressed.
+        """
         from mailroom_reloaded.obs.pager_core import mark_sent
         from mailroom_reloaded.obs.sms import build_transport
 
@@ -478,6 +583,11 @@ class Pager:
         return [r for _, r in sent]
 
     def _webhook(self, payload: dict) -> None:
+        """Post a payload once with a five-second HTTP timeout and optional HMAC signature.
+
+        Request exceptions are suppressed and HTTP error statuses are ignored;
+        JSON serialization errors propagate.
+        """
         import hashlib
         import hmac
 
@@ -496,7 +606,12 @@ class Pager:
             logger.warning("pager_webhook_failed", error=type(exc).__name__)
 
     def start_background(self, *, idle_ok: bool = False) -> threading.Thread | None:
-        """Tick on a daemon thread. `idle_ok` keeps an inactive pager polling so a later `pager on` takes effect."""
+        """Return a daemon polling thread, or None if inactive or another sender holds the lock.
+
+        ``idle_ok`` keeps an inactive pager polling so a later ``pager on`` takes
+        effect. Research mode registers a forced scan at process exit. Errors
+        opening the sender lock or starting the thread propagate.
+        """
         if not self.cfg.active and not idle_ok:
             return None
         if self.cfg.active and not self.acquire():
@@ -504,6 +619,7 @@ class Pager:
             return None
 
         def loop():
+            """Tick until stopped, waiting at most 15 seconds between attempts."""
             while not self._stop.is_set():
                 self.tick()
                 self._stop.wait(min(self.cfg.scan.seconds, 15))
@@ -521,6 +637,12 @@ class Pager:
 
 
 def send_test(cfg: PagerConfig, recipients) -> list:
+    """Send a test message regardless of the enabled flag and return recipient/result pairs.
+
+    Return an empty list when the transport is unavailable. Attempt to log
+    the results even when machine logging is disabled; log errors are
+    suppressed, while transport exceptions propagate.
+    """
     from mailroom_reloaded.obs.pager_core import _clock
     from mailroom_reloaded.obs.sms import build_transport
 
@@ -538,13 +660,20 @@ def send_test(cfg: PagerConfig, recipients) -> list:
 
 
 def _tty() -> bool:
+    """Return whether both standard input and output are terminals."""
     import sys
 
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
 def _ask(input_fn, question: str, timeout_s: float) -> str | None:
-    """One question; None on timeout/EOF so the caller takes the default."""
+    """Ask once and return trimmed input, or None on timeout or caught input errors.
+
+    ``timeout_s`` limits waiting only when ``input_fn`` is builtins.input;
+    an injected callable manages its own timeout. EOFError, interruption,
+    and exhausted iterators return None; EOF from built-in input's readline
+    returns an empty string.
+    """
     import builtins
     import select
     import sys
@@ -563,12 +692,21 @@ def _ask(input_fn, question: str, timeout_s: float) -> str | None:
 
 
 def _yes(answer: str | None, default: bool) -> bool:
+    """Use the default for empty answers; otherwise accept any answer starting with y, ignoring case."""
     return default if not answer else answer.lower().startswith("y")
 
 
 def prompt_on_start(cfg: PagerConfig, *, flag: bool | None, input_fn=input, isatty=None,
                     timeout_s: float = 30.0) -> PagerConfig:
-    """Live-production start: ask whether to text alerts (default: leave as is)."""
+    """Resolve a saved pager toggle or prompt interactively for a production start.
+
+    An explicit ``flag`` persists the toggle and skips prompting; enabling
+    without recipients raises SystemExit(2). Otherwise prompt only on a
+    terminal in production unless ``MAILROOM_PAGER_PROMPT=0``. Keep the
+    current toggle on unanswered prompts; newly enabling can save a
+    recipient and send a test text. ``timeout_s`` is the per-question wait
+    for built-in input. Settings-write and test-send errors can propagate.
+    """
     import sys
 
     from mailroom_reloaded.obs.pager_core import normalize_recipient
@@ -612,6 +750,7 @@ def prompt_on_start(cfg: PagerConfig, *, flag: bool | None, input_fn=input, isat
 
 
 def _missing_env(cfg: PagerConfig) -> list[str]:
+    """Return missing credential variable names for the configured transport."""
     if cfg.transport == "twilio":
         miss = [k for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN") if not os.environ.get(k)]
         if not (os.environ.get("TWILIO_FROM_NUMBER") or os.environ.get("TWILIO_MESSAGING_SERVICE_SID")):
@@ -623,6 +762,7 @@ def _missing_env(cfg: PagerConfig) -> list[str]:
 
 
 def _read_log() -> list[dict]:
+    """Read the current pager log, skipping invalid JSON lines; file read errors propagate."""
     path = _file("pager_log.jsonl")
     out = []
     for line in path.read_text().splitlines() if path.exists() else []:
@@ -634,6 +774,7 @@ def _read_log() -> list[dict]:
 
 
 def _summary_line(e: dict, tz: str) -> str:
+    """Format a log entry time, kind, status, reference, and verdict using ? for invalid timestamps."""
     from mailroom_reloaded.obs.pager_core import _clock
 
     try:
@@ -647,11 +788,20 @@ def _summary_line(e: dict, tz: str) -> str:
 
 
 def _duration(raw: str) -> float | None:
+    """Parse a nonnegative integer with an h or m suffix into seconds, or return None."""
     m = re.fullmatch(r"(\d+)\s*([hm])", raw.strip().lower())
     return int(m[1]) * (3600 if m[2] == "h" else 60) if m else None
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run a pager subcommand using ``argv``, or process arguments when omitted.
+
+    Commands inspect or persist settings, preview messages, send tests,
+    change mute state, or run the sender indefinitely. Return 0 on success,
+    1 on delivery failure or sender lock contention, and 2 for invalid input
+    or an inactive run request. Argument parsing raises SystemExit for help
+    or invalid syntax; unhandled filesystem and transport errors propagate.
+    """
     import argparse
     import sys
 
@@ -686,6 +836,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_pager_config()
 
     def number(raw):
+        """Normalize a recipient for the configured transport, reporting invalid input and returning None."""
         n = normalize_recipient(raw, cfg.transport)
         if not n:
             print(BAD_NUMBER, file=sys.stderr)
@@ -799,6 +950,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _getdotted(cfg: PagerConfig, key: str):
+    """Look up a dotted config path through attributes and dict keys; missing attributes raise AttributeError."""
     obj = cfg
     for part in key.split("."):
         obj = obj.get(part) if isinstance(obj, dict) else getattr(obj, part)
