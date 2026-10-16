@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pager email-gateway eligibility (`obs/pager.py`) treats whitespace-only SMTP host, user and password values as missing, so credential loss releases the sender lock for another eligible pager. SMTP port parsing stays in transport construction.
 - Provider health (`src/mailroom_reloaded/llm/health.py`) restores failed flush batches for retry, preserves events recorded during the flush, and propagates the error.
 - `/tui` contrast: the same vendored dark `--term-fg-dim` (4.0–4.3:1) sits on real terminal content — boot lines, `ls` counts, kv keys, the status bar, the replay grid's `dim` station — so `/tui` derives a passing dim locally (`--tui-dim`) on dark only, exactly as `/ui` does. light/hc keep the token, and `tokens.css` is still untouched.
 - `GET /ready` now probes the configured LLM provider instead of always reporting `llm_provider` `unconfigured` (`api/routes/ready.py`, `_probe_llm_provider`): it resolves the endpoint exactly as the LLM client does for the sorter role (`llm.client.resolve(...).base_url`, so `vllm` / `llamafile` / `openrouter` / `mock` each follow their own resolution) and HTTP-probes it — no credential is sent. An unreachable provider is `down`, which makes the aggregate `degraded` (HTTP 200) instead of a silent `ok`; a provider whose endpoint cannot be resolved stays `unconfigured`, and a probe failure is still never a 500. Tests `tests/api/test_ready_route.py` (22).

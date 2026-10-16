@@ -603,6 +603,7 @@ def test_partial_delivery_retries_only_failed_recipients(host):
 
 
 def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
+    """Keep an idle pager polling until it can acquire the released sender lock."""
     pager, rec, _ = host
     first, second = make(pager, rec), make(pager, rec)
     assert first.acquire()
@@ -622,7 +623,79 @@ def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
         first.release()
 
 
+def test_credentialless_pager_does_not_take_the_send_lock(host, monkeypatch):
+    """Leave the sender lock available until the pager has delivery credentials."""
+    pager, rec, feed = host
+    set_transport_override(None)  # real credential checks, not the test override
+    for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_MESSAGING_SERVICE_SID"):
+        monkeypatch.delenv(k, raising=False)
+    feed["fn"] = broken
+    cfg = {"enabled": True, "recipients": [MOBILE], "timezone": "America/Chicago", "transport": "twilio"}
+    blind = pager.Pager(PagerConfig.resolve(cfg, {}, environment="live"))  # embedded API pager: no creds
+    sender = pager.Pager(PagerConfig.resolve(cfg, {}, environment="live"), transport=rec)
+    thread = blind.start_background(idle_ok=True)  # starts first
+    try:
+        assert thread is not None and blind._lock is None  # idle, polling, not holding the lock
+        assert blind.tick(at("14:01")) == [] and blind._lock is None
+        assert sender.tick(at("14:01")) and rec.sent  # the pager that can deliver wins the lock
+        assert sender._lock is not None
+        sender.release()
+        monkeypatch.setenv("TWILIO_ACCOUNT_SID", "ACx")  # creds appear later: it competes normally
+        monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tok")
+        monkeypatch.setenv("TWILIO_FROM_NUMBER", "+16085550000")
+        blind.tick(at("14:02"))
+        assert blind._lock is not None
+    finally:
+        blind.stop()
+        if thread is not None:
+            thread.join(timeout=5)
+        blind.release()
+        sender.release()
+
+
+@pytest.mark.parametrize("credential", ["HOST", "USER", "PASSWORD"])
+@pytest.mark.parametrize("value", [None, "", " \t\n"])
+def test_pager_releases_lock_when_smtp_credentials_are_lost(host, monkeypatch, credential, value):
+    pager, rec, _ = host
+    set_transport_override(None)
+    for key, initial in {"HOST": "smtp.example.com", "USER": "ops@example.com", "PASSWORD": "pw"}.items():
+        monkeypatch.setenv(f"MAILROOM_SMTP_{key}", initial)
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": ["6085551234@vtext.com"],
+                               "transport": "email_gateway", "digest": {"production_minutes": 0}},
+                              {}, environment="live")
+    owner = pager.Pager(cfg)
+    successor = pager.Pager(cfg, transport=rec)
+    try:
+        owner.tick(at("14:01"))
+        assert owner._lock is not None
+        successor.tick(at("14:01"))
+        assert successor._lock is None
+
+        if value is None:
+            monkeypatch.delenv(f"MAILROOM_SMTP_{credential}")
+        else:
+            monkeypatch.setenv(f"MAILROOM_SMTP_{credential}", value)
+        assert owner.tick(at("14:01") + 1) == []
+        assert owner._lock is None
+        successor.tick(at("14:01") + 1)
+        assert successor._lock is not None
+    finally:
+        owner.release()
+        successor.release()
+
+
+def test_email_gateway_eligibility_does_not_parse_smtp_port(host, monkeypatch):
+    pager, _, _ = host
+    set_transport_override(None)
+    for key in ("HOST", "USER", "PASSWORD"):
+        monkeypatch.setenv(f"MAILROOM_SMTP_{key}", "present")
+    monkeypatch.setenv("MAILROOM_SMTP_PORT", "not-a-port")
+    cfg = PagerConfig.resolve({"transport": "email_gateway"}, {}, environment="live")
+    assert pager.Pager(cfg)._can_deliver()
+
+
 def test_new_digest_is_not_limited_by_an_earlier_partial_digest(host):
+    """Send each new digest to every recipient despite an earlier partial delivery."""
     pager, _, _ = host
 
     class Flaky(Rec):
