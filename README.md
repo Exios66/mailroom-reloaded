@@ -33,7 +33,7 @@ Optional extras (`pyproject.toml:37-49`): `bert` (ModernBERT via
 `mailroom-ml[serve]`), `eval` (`datasets`, `pandas`, `matplotlib`), `gmail`
 (Google client stack), `embeddings` (`sentence-transformers`), `deploy`
 (`modal`), `dev` (`pytest`, `scikit-learn`, `ruff`), `parity`
-(`llm-dojo-scoring` 8c7b7f1 for scoring parity tests; see `scoring/PARITY.md`).
+(`llm-dojo-scoring` 852b052 for scoring parity tests; see `scoring/PARITY.md`).
 
 ## Providers
 
