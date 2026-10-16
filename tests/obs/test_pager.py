@@ -603,6 +603,7 @@ def test_partial_delivery_retries_only_failed_recipients(host):
 
 
 def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
+    """Keep an idle pager polling until it can acquire the released sender lock."""
     pager, rec, _ = host
     first, second = make(pager, rec), make(pager, rec)
     assert first.acquire()
@@ -623,6 +624,7 @@ def test_idle_ok_pager_keeps_polling_when_another_sender_holds_the_lock(host):
 
 
 def test_credentialless_pager_does_not_take_the_send_lock(host, monkeypatch):
+    """Leave the sender lock available until the pager has delivery credentials."""
     pager, rec, feed = host
     set_transport_override(None)  # real credential checks, not the test override
     for k in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER", "TWILIO_MESSAGING_SERVICE_SID"):
@@ -693,6 +695,7 @@ def test_email_gateway_eligibility_does_not_parse_smtp_port(host, monkeypatch):
 
 
 def test_new_digest_is_not_limited_by_an_earlier_partial_digest(host):
+    """Send each new digest to every recipient despite an earlier partial delivery."""
     pager, _, _ = host
 
     class Flaky(Rec):
