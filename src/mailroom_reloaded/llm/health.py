@@ -86,22 +86,28 @@ class _Buffer:
 
         Keep the latest ``CAP`` events per provider. ``now`` is epoch seconds,
         defaulting to the current time; filesystem and serialization errors
-        propagate after the pending events have been removed from the buffer.
+        propagate after restoring pending events alongside any newly buffered events.
         """
         with self.lock:
             pending, self.events = self.events, {}
             self.last_flush = time.time() if now is None else now
         if not pending:
             return
-        path = _path()
-        with open(path.with_suffix(".lock"), "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            data = _load(path)
-            for key, evs in pending.items():
-                data[key] = sorted(data.get(key, []) + evs, key=lambda e: e[0])[-CAP:]
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data))
-            os.replace(tmp, path)
+        try:
+            path = _path()
+            with open(path.with_suffix(".lock"), "w") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                data = _load(path)
+                for key, evs in pending.items():
+                    data[key] = sorted(data.get(key, []) + evs, key=lambda e: e[0])[-CAP:]
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(data))
+                os.replace(tmp, path)
+        except Exception:
+            with self.lock:
+                for key, evs in pending.items():
+                    self.events[key] = evs + self.events.get(key, [])
+            raise
 
 
 _BUF = _Buffer()
