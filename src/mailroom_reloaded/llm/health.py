@@ -104,6 +104,14 @@ def record_llm_outcome(base_url, model, *, ok: bool, status: int | None, latency
     _safe(lambda: _BUF.add(provider_key(base_url, model), [now, bool(ok), status, latency_s], now))
 
 
+def _outage(e: list) -> bool:
+    """A failure that says the provider is unhealthy: no response, 5xx (503 is a Modal cold start), 401/403.
+
+    Rate limits (429) and request errors (400/404/422) are the caller's problem, not an outage."""
+    status = e[2]
+    return not e[1] and (status is None or status in (401, 403) or (status >= 500 and status != 503))
+
+
 def read_provider_health(now: float | None = None, window_s: float = 600) -> dict[str, dict]:
     now = time.time() if now is None else now
     data = _safe(_load, _path()) or {}
@@ -120,10 +128,12 @@ def read_provider_health(now: float | None = None, window_s: float = 600) -> dic
         for e in reversed(recent):
             if e[1]:
                 break
-            streak += 1
+            streak += _outage(e)  # 429/4xx/503 neither break nor extend an outage streak
         lats = [e[3] for e in recent if e[3] is not None]
-        out[key] = {"calls": len(recent), "errors": sum(1 for e in recent if not e[1]),
-                    "consecutive_errors": streak, "last_status": recent[-1][2],
+        last_bad = next((e[2] for e in reversed(recent) if _outage(e)), None)
+        out[key] = {"calls": len(recent), "errors": sum(1 for e in recent if _outage(e)),
+                    "ok_calls": sum(1 for e in recent if e[1]),
+                    "consecutive_errors": streak, "last_status": last_bad if streak else recent[-1][2],
                     "last_ok_at": next((e[0] for e in reversed(evs) if e[1]), None),
                     "count_503": sum(1 for e in recent if e[2] == 503),
                     "p50_latency_s": statistics.median(lats) if lats else None}

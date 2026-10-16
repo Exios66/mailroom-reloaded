@@ -130,6 +130,22 @@ def normalize_number(raw: str) -> str | None:
     return s if re.fullmatch(r"\+[1-9]\d{7,14}", s) else None
 
 
+def normalize_recipient(raw: str, transport: str) -> str | None:
+    """E.164 number, or a carrier email-to-SMS address when the transport is `email_gateway`."""
+    if transport == "email_gateway":
+        s = str(raw or "").strip().lower()
+        return s if re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-z]{2,}", s) else None
+    return normalize_number(raw)
+
+
+def _valid_tz(tz: str) -> bool:
+    try:
+        ZoneInfo(tz) if tz else None
+        return True
+    except (ValueError, KeyError, OSError):  # ZoneInfoNotFoundError subclasses KeyError
+        return False
+
+
 def _parse_quiet(window: str):
     m = re.fullmatch(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})", window or "")
     if not m:
@@ -166,6 +182,11 @@ class PagerConfig:
     def resolve(cls, block: Mapping | None, env: Mapping[str, str], *, environment: str,
                 settings: Mapping | None = None) -> PagerConfig:
         defaults, warn = _flat(DEFAULTS), []
+        if block is not None and not isinstance(block, Mapping):
+            warn.append(f"pager_config_invalid: pager block must be a mapping, got {type(block).__name__}")
+            block = None
+        if settings is not None and not isinstance(settings, Mapping):
+            settings = None
         vals, sources = dict(defaults), {k: "default" for k in defaults}
         layers = [("taxonomy", _flat(block or {})),
                   ("env", {k: env[e] for e, ks in ENV.items() if env.get(e, "").strip() for k in ks}),
@@ -179,6 +200,8 @@ class PagerConfig:
                     v = _coerce(defaults[k], v)
                     if k in ENUMS and v not in ENUMS[k]:
                         raise ValueError(v)
+                    if k == "timezone" and not _valid_tz(v):
+                        raise ValueError(v)
                 except (ValueError, TypeError):
                     warn.append(f"pager_config_invalid: {k}={v!r} ({src})")
                     continue
@@ -187,13 +210,7 @@ class PagerConfig:
                 elif k.endswith(("minutes", "_scans")):
                     v = max(0, v)
                 vals[k], sources[k] = v, src
-        recips = []
-        for r in vals["recipients"]:
-            n = normalize_number(r)
-            if n:
-                recips.append(n)
-            else:
-                warn.append(f"pager_config_invalid: recipient {r[:3]}…")
+        recips = _recipients(vals["recipients"], vals["transport"], warn)
         quiet = _parse_quiet(vals["quiet_hours.window"])
         if vals["quiet_hours.window"] and quiet is None:
             warn.append(f"pager_config_invalid: quiet_hours.window={vals['quiet_hours.window']!r}")
@@ -206,6 +223,18 @@ class PagerConfig:
                    timezone=vals["timezone"], rules=rules, environment=environment, run_mode=mode, quiet=quiet,
                    sources=sources, warnings=tuple(warn), **sect)
 
+    def apply_settings(self, settings: Mapping | None) -> PagerConfig:
+        """Re-apply the CLI's saved toggle/numbers (`pager_settings.json`) onto a host-built config."""
+        from dataclasses import replace
+
+        s, warn = settings if isinstance(settings, Mapping) else {}, list(self.warnings)
+        out = {}
+        if isinstance(s.get("enabled"), bool):
+            out["enabled"] = s["enabled"]
+        if isinstance(s.get("recipients"), list):
+            out["recipients"] = tuple(dict.fromkeys(_recipients(s["recipients"], self.transport, warn)))
+        return replace(self, warnings=tuple(warn), **out)
+
     @property
     def active(self) -> bool:
         """Sending needs the toggle ON and at least one valid recipient."""
@@ -213,6 +242,17 @@ class PagerConfig:
 
     def digest_minutes(self, mode: str) -> float:
         return self.digest.production_minutes if mode == "production" else self.digest.research_minutes
+
+
+def _recipients(raw: list, transport: str, warn: list) -> list[str]:
+    out = []
+    for r in raw:
+        n = normalize_recipient(r, transport)
+        if n:
+            out.append(n)
+        else:
+            warn.append(f"pager_config_invalid: recipient {str(r)[:3]}…")
+    return out
 
 
 # ── data model ───────────────────────────────────────────────────────
@@ -283,6 +323,7 @@ class PagerState:
     held: list[str] = field(default_factory=list)
     runs_seen: dict[str, str] = field(default_factory=dict)
     baseline: dict = field(default_factory=dict)
+    recovered: dict[str, dict] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -326,7 +367,7 @@ def evaluate_rules(snap: RunSnapshot, cfg: PagerConfig, baseline: dict) -> list[
     def add(key, sev, title, nxt, detail=""):
         out.append(Alert(key, sev, title, detail, nxt, baseline.get(key, now)))
 
-    if R["watcher_down"]["enabled"] and snap.watcher_alive is False:
+    if R["watcher_down"]["enabled"] and snap.watcher_alive is False and snap.mode != "research":
         why = (f"no heartbeat for {_dur(snap.heartbeat_age_s)}" if snap.heartbeat_age_s is not None
                else "no watcher process is running")
         cmd = "mailroom watch" if snap.repo == "mailroom-reloaded" else "python -m pipeline.watcher"
@@ -440,8 +481,8 @@ def _active(state: PagerState, cfg: PagerConfig) -> list[Alert]:
 def plan_scan(snap: RunSnapshot, cfg: PagerConfig, state: PagerState, now: float) -> tuple[Outbox, PagerState]:
     st = PagerState.from_json(state.to_json())
     firing = {a.key: a for a in evaluate_rules(snap, cfg, st.baseline)}
-    recovered: list[tuple[Alert, float]] = []
     for key, a in firing.items():
+        st.recovered.pop(key, None)
         e = st.open.setdefault(key, {"since": now, "fail": 0, "clear": 0, "last_sent": None})
         e.update(severity=a.severity, title=a.title, detail=a.detail, next_step=a.next_step, fail=e["fail"] + 1, clear=0)
     for key in [k for k in st.open if k not in firing]:
@@ -450,7 +491,7 @@ def plan_scan(snap: RunSnapshot, cfg: PagerConfig, state: PagerState, now: float
         if not e["last_sent"]:
             del st.open[key]
         elif e["clear"] >= cfg.scan.recover_after_scans:
-            recovered.append((_alert_of(key, e), now - e["since"]))
+            st.recovered[key] = {**e, "open_s": now - e["since"]}
             del st.open[key]
     st.pending = [k for k in st.pending if k in st.open]
     st.held = [k for k in st.held if k in st.open]
@@ -475,15 +516,16 @@ def plan_scan(snap: RunSnapshot, cfg: PagerConfig, state: PagerState, now: float
         due.sort(key=lambda a: a.severity != "critical")
         msgs.append(render_alert(due, snap, cfg, st, now))
     may_send = lambda: _gate(cfg, st, now, False) and _recent(st, now) + len(msgs) < cfg.alerts.max_texts_per_hour
-    if recovered and cfg.alerts.send_recovered and may_send():
-        msgs.append(render_recovered(recovered, snap, cfg, st, now))
+    if not cfg.alerts.send_recovered:
+        st.recovered = {}
+    elif st.recovered and may_send():  # kept until a send succeeds (mark_sent), so quiet/mute/cap only delay it
+        items = [(_alert_of(k, e), e["open_s"]) for k, e in st.recovered.items()]
+        msgs.append(render_recovered(items, snap, cfg, st, now))
     for r in snap.runs:
         seen = st.runs_seen.get(r.run_id)
         event = "finished" if r.finished and seen != "finished" else ("started" if not seen else None)
-        if event:
-            st.runs_seen[r.run_id] = event
-            if may_send():
-                msgs.append(render_run_event(r, event, snap, cfg, st, now))
+        if event and may_send():  # runs_seen advances in mark_sent, so a gated event goes out later
+            msgs.append(render_run_event(r, event, snap, cfg, st, now))
     return Outbox(msgs), st
 
 
@@ -498,8 +540,9 @@ def next_digest_at(cfg: PagerConfig, mode: str, now: float) -> float:
     return midnight + (math.floor((now - midnight) / step) + 1) * step
 
 
-def plan_digest(snap: RunSnapshot, cfg: PagerConfig, state: PagerState, now: float) -> tuple[Outbox, PagerState]:
-    st, mode = PagerState.from_json(state.to_json()), snap.mode
+def plan_digest(snap, cfg: PagerConfig, state: PagerState, now: float) -> tuple[Outbox, PagerState]:
+    """`snap` is a RunSnapshot or a zero-arg callable, taken only when a digest is rendered."""
+    st, mode = PagerState.from_json(state.to_json()), cfg.run_mode if callable(snap) else snap.mode
     quiet, was_quiet = _in_quiet(cfg, now), st.in_quiet
     st.in_quiet = quiet
     if cfg.digest_minutes(mode) <= 0:
@@ -513,6 +556,7 @@ def plan_digest(snap: RunSnapshot, cfg: PagerConfig, state: PagerState, now: flo
     st.next_digest = next_digest_at(cfg, mode, now)
     if not _gate(cfg, st, now, False) or _recent(st, now) >= cfg.alerts.max_texts_per_hour:
         return Outbox([]), st
+    snap = snap() if callable(snap) else snap
     w, idle = snap.window or {}, False
     if not cfg.digest.when_idle and not w.get("received") and not _active(st, cfg) and \
             not any(not r.finished for r in snap.runs):
@@ -532,6 +576,10 @@ def mark_sent(state: PagerState, kind: str, alert_keys, now: float, ok: bool) ->
     for k in alert_keys:
         if k in st.open:
             st.open[k]["last_sent"] = now
+        if kind == "resolved":
+            st.recovered.pop(k, None)
+        if kind.startswith("run_") and k.startswith("run:"):
+            st.runs_seen[k[4:]] = kind[4:]
     st.pending = [k for k in st.pending if k not in alert_keys]
     st.held = [] if kind == "digest" else [k for k in st.held if k not in alert_keys]
     return st
@@ -741,7 +789,7 @@ def render_run_event(run: RunProgress, event: Literal["started", "finished"], sn
             ([f"{m['failed']} failed"] if m.get("failed") is not None else []) + \
             ([f"${m['cost_usd']:.2f} total"] if m.get("cost_usd") is not None else [])
         lines += [(4, " · ".join(stats) + ".")] if stats else []
-    return _finish(f"run_{event}", [(0, _label(snap))] + lines, snap, cfg, state, now)
+    return _finish(f"run_{event}", [(0, _label(snap))] + lines, snap, cfg, state, now, keys=[f"run:{run.run_id}"])
 
 
 def _iso(ts: float | None) -> str | None:

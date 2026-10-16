@@ -34,7 +34,8 @@ def test_window_counts_and_consecutive(ph):
     for i, (ok, st) in enumerate([(True, 200), (False, 503), (False, 502), (True, 200), (False, 503), (False, 503)]):
         ph.record_llm_outcome(url, "m", ok=ok, status=st, latency_s=1.0 + i, now=t + i)
     h = ph.read_provider_health(now=t + 10)["openrouter"]
-    assert h["calls"] == 6 and h["errors"] == 4 and h["consecutive_errors"] == 2
+    # 503 is a Modal cold start, not an outage: only the 502 counts as an error
+    assert h["calls"] == 6 and h["errors"] == 1 and h["consecutive_errors"] == 0 and h["ok_calls"] == 2
     assert h["count_503"] == 3 and h["last_status"] == 503 and h["last_ok_at"] == t + 3
     assert h["p50_latency_s"] == 3.5
 
@@ -97,3 +98,15 @@ def test_chat_create_records_each_attempt(ph, monkeypatch):
     assert chat_create(client, {"model": "m", "messages": []})[0] is ok
     h = ph.read_provider_health()["modal:vllm"]
     assert h["calls"] == 2 and h["count_503"] == 1 and h["consecutive_errors"] == 0
+
+
+def test_rate_limits_and_bad_requests_are_not_outages(ph):
+    url = "https://openrouter.ai/api/v1"
+    for status in (429, 429, 400, 429):
+        ph.record_llm_outcome(url, "m", ok=False, status=status, latency_s=0.1, now=1000.0)
+    h = ph.read_provider_health(now=1001.0)["openrouter"]
+    assert h["errors"] == 0 and h["consecutive_errors"] == 0
+    for status in (502, None, 500):
+        ph.record_llm_outcome(url, "m", ok=False, status=status, latency_s=0.1, now=1002.0)
+    h = ph.read_provider_health(now=1003.0)["openrouter"]
+    assert h["errors"] == 3 and h["consecutive_errors"] == 3

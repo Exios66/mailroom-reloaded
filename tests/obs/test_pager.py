@@ -389,3 +389,107 @@ def test_lifespan_starts_pager_only_when_enabled(host, monkeypatch):
     with TestClient(create_app()):
         pass
     assert started == [True]
+
+
+# ── final-review fixes ───────────────────────────────────────────────
+
+
+def test_explicit_config_pager_honors_cli_off_and_number_changes(host):
+    pager, rec, feed = host
+    feed["fn"] = broken
+    p = make(pager, rec)  # serve/watch/eval --page pass an explicit cfg
+    p.tick(at("14:01"))
+    assert len(rec.sent) == 1
+    assert pager.main(["off"]) == 0
+    for m in range(2, 50):
+        p.tick(at("14:00") + m * 60)
+    assert len(rec.sent) == 1
+    assert pager.main(["number", "set", GV]) == 0 and pager.main(["on"]) == 0
+    p.tick(at("14:51"))
+    assert rec.sent[-1][0] == GV
+
+
+def test_state_save_failure_does_not_resend_alerts(host, monkeypatch):
+    pager, rec, feed = host
+    feed["fn"] = broken
+    p = make(pager, rec)
+
+    def full(_):
+        raise OSError("No space left on device")
+    monkeypatch.setattr(pager, "save_state", full)
+    for m in range(1, 7):
+        p.tick(at("14:00") + m * 60)
+    assert sum(b.startswith("Mailroom ALERT") for _, b in rec.sent) == 1
+
+
+def test_cli_mute_reaches_running_pager_without_clobbering_its_state(host, base):
+    pager, rec, feed = host
+    feed["fn"] = broken
+    p = make(pager, rec)
+    p.tick(at("14:01"))
+    key = next(iter(p.state.open))
+    sent_at = p.state.open[key]["last_sent"]
+    (base / "pager_state.json").write_text("{}")  # a CLI read-modify-write from a stale copy
+    assert pager.main(["mute", "2h"]) == 0
+    p.tick(at("14:02"))
+    assert p.state.muted_until and p.state.open[key]["last_sent"] == sent_at
+    assert sum(b.startswith("Mailroom ALERT") for _, b in rec.sent) == 1
+
+
+def test_flush_sends_run_finished_before_exit(host):
+    from mailroom_reloaded.obs.pager_core import RunProgress
+
+    pager, rec, feed = host
+    run = RunProgress("r1", "mailroom eval", 3, 0, at("14:00"), at("14:00"), False, {})
+    feed["fn"] = lambda now: healthy(now, mode="research", runs=[run])
+    p = make(pager, rec, mode="research")
+    p.tick(at("14:00"))
+    done = RunProgress("r1", "mailroom eval", 3, 3, at("14:00"), at("14:00") + 20, True, {"failed": 0})
+    feed["fn"] = lambda now: healthy(now, mode="research", runs=[done])
+    p.flush(at("14:00") + 21)  # well inside the 60 s scan interval
+    assert [b.splitlines()[1][:14] for _, b in rec.sent] == ["▶ Run started:", "✅ Run finished"]
+
+
+def test_research_background_pager_flushes_at_exit(host, monkeypatch):
+    pager, rec, _ = host
+    registered = []
+    monkeypatch.setattr("atexit.register", lambda fn, *a, **k: registered.append(fn))
+    p = make(pager, rec, mode="research")
+    try:
+        assert p.start_background() is not None
+        assert p.flush in registered
+    finally:
+        p.stop()
+
+
+def test_digest_snapshot_only_taken_when_due(host):
+    pager, rec, feed = host
+    calls = []
+    feed["fn"] = lambda now: calls.append(now) or healthy(now)
+    p = make(pager, rec, digest={"production_minutes": 0})
+    ticks(p, at("14:00") + 5, 3, step=15)  # 12 host ticks, 3 scans
+    assert len(calls) == 3
+    calls.clear()
+    p.release()
+    q = make(pager, rec, quiet_hours={"window": "22:00-07:00"})
+    ticks(q, at("23:00") + 5, 3, step=15)
+    assert len(calls) == 3
+
+
+def test_research_eval_does_not_page_watcher_down(base, monkeypatch):
+    from mailroom_reloaded.obs import pager
+    from mailroom_reloaded.obs.pager_core import PagerState, evaluate_rules, plan_scan
+
+    cfg = PagerConfig.resolve({"enabled": True, "recipients": [MOBILE], "mode": "research"}, {}, environment="live")
+    snap = pager.collect_snapshot(cfg, window_minutes=10)
+    assert snap.watcher_alive is False  # no `mailroom watch` running
+    assert "watcher_down" not in [a.key for a in evaluate_rules(snap, cfg, {})]
+    out, _ = plan_scan(snap, cfg, PagerState(), snap.taken_at)
+    assert not [m for m in out.messages if m.kind == "alert"]  # a run_started text is fine; an alert is not
+
+
+def test_cli_accepts_gateway_address_with_email_gateway_transport(host, monkeypatch):
+    pager, *_ = host
+    monkeypatch.setenv("MAILROOM_PAGER_TRANSPORT", "email_gateway")
+    assert pager.main(["on", "--to", "6085551234@vtext.com"]) == 0
+    assert pager.load_pager_config().recipients == ("6085551234@vtext.com",)

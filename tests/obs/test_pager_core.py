@@ -407,9 +407,9 @@ def test_golden_run_started():
     assert m.text == with_ref("""Mailroom RESEARCH · 1:42 PM CDT
 ▶ Run started: pilot-real-1019 · 100 docs · run_pilot --real.
 Ref P-XXXX""", m)
-    out, st = plan_scan(snap(at("13:42"), mode="research", runs=[run]), cfg(), PagerState(), at("13:42"))
+    out, st = scan(cfg(), snap(at("13:42"), mode="research", runs=[run]), PagerState(), at("13:42"))
     assert [m.kind for m in out.messages] == ["run_started"]
-    out, _ = plan_scan(snap(at("13:43"), mode="research", runs=[run]), cfg(), st, at("13:43"))
+    out, _ = scan(cfg(), snap(at("13:43"), mode="research", runs=[run]), st, at("13:43"))
     assert out.messages == []
 
 
@@ -548,6 +548,103 @@ def test_batched_resolved_lowercases_mid_sentence_phrases():
     msg = render_recovered(items, snap(now), cfg(), PagerState(), now)
     assert ("✅ Resolved: Modal extract tier is back up after 14 min; document failures have stopped after 14 min; "
             "the watcher is running again after 1 min. No action needed.") in msg.text
+
+
+# ── final-review fixes ───────────────────────────────────────────────
+
+
+def test_recovered_text_waits_out_quiet_hours_instead_of_vanishing():
+    c = cfg(quiet_hours={"window": "22:00-07:00"})
+    _, st = scan(c, down_snap(at("23:30")), PagerState(), at("23:30"))
+    assert st.open["provider_down:modal:extract"]["last_sent"]
+    sent = []
+    for t in (at("23:36"), at("23:37"), at("23:38")):
+        out, st = scan(c, snap(t), st, t)
+        sent += out.messages
+    assert sent == []  # recovery is not critical: held through quiet hours
+    out, st = scan(c, snap(at("07:01", day=16)), st, at("07:01", day=16))
+    assert [m.kind for m in out.messages] == ["resolved"]
+    assert "back up" in out.messages[0].text
+    out, _ = scan(c, snap(at("07:02", day=16)), st, at("07:02", day=16))
+    assert out.messages == []  # sent once
+
+
+def test_recovered_text_retried_after_failed_send():
+    c = cfg()
+    _, st = scan(c, down_snap(at("14:00")), PagerState(), at("14:00"))
+    out, st = scan(c, snap(at("14:01")), st, at("14:01"))
+    out, st = scan(c, snap(at("14:02")), st, at("14:02"), ok=False)
+    assert [m.kind for m in out.messages] == ["resolved"]
+    out, st = scan(c, snap(at("14:03")), st, at("14:03"))
+    assert [m.kind for m in out.messages] == ["resolved"]
+    out, _ = scan(c, snap(at("14:04")), st, at("14:04"))
+    assert out.messages == []
+
+
+def test_run_event_not_lost_while_gated():
+    c = cfg(quiet_hours={"window": "22:00-07:00"})
+    run = RunProgress("eval-1", "eval", 50, 0, at("23:00"), at("23:00"), False, {})
+    out, st = scan(c, snap(at("23:00"), mode="research", runs=[run]), PagerState(), at("23:00"))
+    assert out.messages == []
+    t = at("07:00", day=16)
+    run = RunProgress("eval-1", "eval", 50, 20, at("23:00"), t, False, {})  # still progressing
+    out, st = scan(c, snap(t, mode="research", runs=[run]), st, t)
+    assert [m.kind for m in out.messages] == ["run_started"]
+    out, _ = scan(c, snap(t + 60, mode="research", runs=[run]), st, t + 60)
+    assert out.messages == []
+
+
+def test_invalid_timezone_falls_back_and_warns():
+    c = cfg(timezone="Mars/Base")
+    assert c.timezone == "" and any("timezone" in w for w in c.warnings)
+    out, _ = plan_digest(snap(at("14:20")), c, PagerState(next_digest=at("14:10")), at("14:20"))
+    assert len(out.messages) == 1
+
+
+def test_non_mapping_pager_block_is_ignored_with_warning():
+    for block in ("x", ["x"], 3):
+        c = PagerConfig.resolve(block, {}, environment="live")
+        assert c.enabled is False and any("pager_config_invalid" in w for w in c.warnings)
+
+
+def test_email_gateway_accepts_gateway_addresses():
+    c = PagerConfig.resolve({"transport": "email_gateway", "enabled": True,
+                             "recipients": ["6085551234@VText.com", "+16085551234"]}, {}, environment="live")
+    assert c.recipients == ("6085551234@vtext.com",) and c.active
+    tw = PagerConfig.resolve({"recipients": ["6085551234@vtext.com", "608-555-1234"]}, {}, environment="live")
+    assert tw.recipients == ("+16085551234",)
+    from mailroom_reloaded.obs.pager_core import normalize_recipient
+    assert normalize_recipient("6085551234@vtext.com", "email_gateway") == "6085551234@vtext.com"
+    assert normalize_recipient("6085551234@vtext.com", "twilio") is None
+    assert normalize_recipient("(608) 555-1234", "twilio") == "+16085551234"
+
+
+def test_watcher_down_is_not_raised_in_research_mode():
+    keys = [a.key for a in evaluate_rules(snap(mode="research", watcher_alive=False), cfg(), {})]
+    assert "watcher_down" not in keys
+    assert "watcher_down" in [a.key for a in evaluate_rules(snap(watcher_alive=False), cfg(), {})]
+
+
+def test_apply_settings_overrides_explicit_config():
+    c = cfg(enabled=True, recipients=["+16085551234"])
+    off = c.apply_settings({"enabled": False})
+    assert off.enabled is False and off.recipients == c.recipients
+    moved = c.apply_settings({"recipients": ["414-555-9876", "junk"]})
+    assert moved.recipients == ("+14145559876",) and moved.enabled
+
+
+def test_plan_digest_takes_snapshot_only_when_rendering():
+    calls = []
+
+    def lazy():
+        calls.append(1)
+        return snap(at("14:20"))
+    c = cfg(quiet_hours={"window": "22:00-07:00"})
+    plan_digest(lazy, c, PagerState(next_digest=at("14:30")), at("14:20"))
+    plan_digest(lazy, c, PagerState(in_quiet=True, next_digest=at("23:10")), at("23:05"))
+    assert calls == []
+    out, _ = plan_digest(lazy, c, PagerState(next_digest=at("14:10")), at("14:20"))
+    assert calls == [1] and len(out.messages) == 1
 
 
 def test_core_is_verbatim_port():
