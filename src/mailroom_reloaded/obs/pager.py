@@ -19,6 +19,7 @@ import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -70,6 +71,11 @@ def openrouter_info(cfg: PagerConfig, client: httpx.Client | None = None) -> dic
     if _OR_CACHE and time.time() - _OR_CACHE["at"] < cfg.providers.openrouter_cache_minutes * 60:
         return _OR_CACHE["info"]
     base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    u = urlparse(base)
+    if u.scheme != "https" and not (u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")):
+        info = {"error": "insecure base URL"}  # never send the API key in cleartext
+        _OR_CACHE.update(at=time.time(), info=info)
+        return info
     try:
         c = client or httpx.Client(timeout=5.0)
         r = c.get(f"{base}/key", headers={"Authorization": f"Bearer {key}"}, timeout=5.0)
@@ -905,9 +911,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{_mask(t)}: ok={r.ok} transport={r.transport} segments={r.segments} {r.detail}")
         return 0 if all(r.ok for _, r in results) else 1
     if a.verb == "preview":
-        mode = a.mode or cfg.run_mode
-        snap = collect_snapshot(cfg, window_minutes=cfg.digest_minutes(mode) or 10)
         from dataclasses import replace
+
+        mode = a.mode or cfg.run_mode
+        snap = collect_snapshot(replace(cfg, run_mode=mode), window_minutes=cfg.digest_minutes(mode) or 10)
 
         snap, state = replace(snap, mode=mode), load_state()
         if a.alert:

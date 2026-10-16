@@ -305,7 +305,7 @@ class RunSnapshot:
 class Alert:
     key: str
     severity: Literal["critical", "warning"]
-    title: str
+    title: str = ""
     detail: str = ""
     next_step: str = ""
     since: float | None = None
@@ -315,7 +315,7 @@ class Alert:
 class PagerState:
     open: dict[str, dict] = field(default_factory=dict)
     pending: list[str] = field(default_factory=list)
-    sent_log: list[float] = field(default_factory=list)
+    sent_log: list[float] = field(default_factory=list)  # non-critical sends only
     next_digest: float | None = None
     last_idle_digest: float | None = None
     muted_until: float | None = None
@@ -572,7 +572,8 @@ def mark_sent(state: PagerState, kind: str, alert_keys, now: float, ok: bool) ->
     if not ok:
         st.pending += [k for k in alert_keys if k not in st.pending and k in st.open]
         return st
-    st.sent_log = [t for t in st.sent_log if now - t < 3600] + [now]
+    critical = kind == "alert" and any(st.open.get(k, {}).get("severity") == "critical" for k in alert_keys)
+    st.sent_log = [t for t in st.sent_log if now - t < 3600] + ([] if critical else [now])
     for k in alert_keys:
         if k in st.open:
             st.open[k]["last_sent"] = now

@@ -57,7 +57,17 @@ def base(monkeypatch, tmp_path):
     monkeypatch.setenv("MAILROOM_BASE_DIR", str(tmp_path))
     monkeypatch.setenv("MAILROOM_PAGER_TZ", "America/Chicago")
     monkeypatch.delenv("MAILROOM_ENVIRONMENT", raising=False)
-    return tmp_path
+    from mailroom_reloaded.storage import db
+    from mailroom_reloaded.storage.ledger import reset_ledger
+
+    # The default engine is process-wide: without this, another test's ledger leaks into snapshots.
+    reset_ledger()
+    monkeypatch.setattr(db, "_default_engine", None)
+    yield tmp_path
+    reset_ledger()
+    if db._default_engine is not None:
+        db._default_engine.dispose()
+    db._default_engine = None
 
 
 @pytest.fixture
@@ -385,26 +395,67 @@ def test_watch_no_pager_flag_skips_prompt(host, monkeypatch):
     assert r.exit_code == 0 and asked == [] and pager.read_settings()["enabled"] is False
 
 
-def test_lifespan_starts_pager_only_when_enabled(host, monkeypatch):
+def test_lifespan_hosts_an_idle_pager_so_pager_on_takes_effect(host, monkeypatch):
     pager, *_ = host
     from fastapi.testclient import TestClient
 
     from mailroom_reloaded.api.app import create_app
 
     started = []
-    monkeypatch.setattr(pager.Pager, "start_background", lambda self: started.append(self.cfg.active))
+    monkeypatch.setattr(pager.Pager, "start_background",
+                        lambda self, idle_ok=False: started.append((self._own_cfg, idle_ok)))
     monkeypatch.setenv("MAILROOM_EMBED_WATCHER", "0")
     with TestClient(create_app()):
         pass
-    assert started == []
-    pager.write_settings(enabled=True, recipients=[MOBILE], by="test")
-    with TestClient(create_app()):
-        pass
-    assert started == [True]
+    assert started == [(True, True)]  # off at start, still polling settings
     monkeypatch.setenv("MAILROOM_PAGER_EMBED", "0")
     with TestClient(create_app()):
         pass
-    assert started == [True]
+    assert started == [(True, True)]
+
+
+def test_watch_hosts_an_idle_pager_so_pager_on_takes_effect(host, monkeypatch):
+    pager, *_ = host
+    from mailroom_reloaded import watcher
+
+    started = []
+    monkeypatch.setattr(pager.Pager, "start_background",
+                        lambda self, idle_ok=False: started.append((self._own_cfg, idle_ok)))
+    monkeypatch.setattr(watcher.Watcher, "run_forever", lambda self: None)
+    from mailroom_reloaded.cli import app
+
+    r = CliRunner().invoke(app, ["watch", "--no-pager"])
+    assert r.exit_code == 0 and started == [(True, True)]
+
+
+def test_openrouter_info_refuses_plain_http_for_remote_hosts(host, monkeypatch):
+    pager, *_ = host
+    cfg = pager.load_pager_config()
+    monkeypatch.setattr(pager, "get_settings", lambda: type("S", (), {"openrouter_api_key": "sk-real"})())
+    pager._OR_CACHE.clear()
+    sent = []
+
+    class C:
+        def get(self, url, **kw):
+            sent.append(url)
+            return type("R", (), {"status_code": 200, "json": lambda self: {"data": {}}})()
+
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "http://proxy.example.com/v1")
+    assert pager.openrouter_info(cfg, client=C()) == {"error": "insecure base URL"}
+    assert sent == []
+    pager._OR_CACHE.clear()
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "http://localhost:4000/v1")
+    assert "error" not in pager.openrouter_info(cfg, client=C())
+    assert sent == ["http://localhost:4000/v1/key"]
+
+
+def test_preview_mode_research_collects_research_stats(host, monkeypatch):
+    pager, *_ = host
+    seen = []
+    real = pager.collect_snapshot
+    monkeypatch.setattr(pager, "collect_snapshot", lambda cfg, **kw: seen.append(cfg.run_mode) or real(cfg, **kw))
+    r = cli("preview", "--mode", "research")
+    assert r.exit_code == 0 and seen == ["research"]
 
 
 # ── final-review fixes ───────────────────────────────────────────────

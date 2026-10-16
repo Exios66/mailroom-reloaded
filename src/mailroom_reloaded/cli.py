@@ -99,8 +99,8 @@ def watch(
 ) -> None:
     """Drain ``inbox/`` forever as a standalone watcher.
 
-    Prompt for production text alerts and start an active pager in the
-    background. An explicit ``pager`` flag saves the toggle and skips the
+    Prompt for production text alerts and start the pager in the background
+    (idle until enabled). An explicit ``pager`` flag saves the toggle and skips the
     prompt; enabling without recipients raises SystemExit(2).
     """
     from mailroom_reloaded.obs import pager as pager_mod
@@ -108,11 +108,15 @@ def watch(
     from mailroom_reloaded.storage.bins import Bins
     from mailroom_reloaded.watcher import Watcher
 
-    cfg = pager_mod.prompt_on_start(pager_mod.load_pager_config(), flag=pager)
-    if cfg.active:
-        pager_mod.Pager(cfg).start_background()
-
-    Watcher(Bins(get_settings().base_dir), worker_id, concurrency).run_forever()
+    pager_mod.prompt_on_start(pager_mod.load_pager_config(), flag=pager)
+    # Poll even while off, so a later `mailroom pager on` reaches this running watcher.
+    paging = pager_mod.Pager()
+    paging.start_background(idle_ok=True)
+    try:
+        Watcher(Bins(get_settings().base_dir), worker_id, concurrency).run_forever()
+    finally:
+        paging.stop()
+        paging.release()
 
 
 @app.command()
