@@ -235,7 +235,7 @@ class Watcher:
                 continue
             if owner is not None and owner.status == "processing":
                 current = self._manifest_file(owner)
-                if current is not None and current != path:
+                if current is not None:
                     logger.warning(
                         "orphan_duplicate_skipped", path=key, doc_id=owner.doc_id
                     )

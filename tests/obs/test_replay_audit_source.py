@@ -355,6 +355,32 @@ def test_rejected_parked_document_is_failed(engine) -> None:
     assert ent.final_status == "failed" and ent.failure_class is None
 
 
+@pytest.mark.parametrize(
+    ("terminal", "status"),
+    [
+        (("human_review", "parked", {}), "parked"),
+        (("archive", "archived", {}), "archived"),
+        (("review", "review_resolved", {"action": "approve"}), "processing"),
+    ],
+)
+@pytest.mark.parametrize("at", [3.0, 8.0])
+def test_later_terminal_event_supersedes_rejection(engine, terminal, status, at) -> None:
+    """Audit sequence determines disposition even when wall-clock time moves back."""
+    _chain(
+        engine,
+        "drej",
+        [
+            ("ingest", "completed", {"elapsed_s": 1.0}, 1.0),
+            ("human_review", "parked", {}, 2.0),
+            ("review", "review_resolved", {"action": "reject"}, 5.0),
+            (*terminal, at),
+        ],
+    )
+    tl = timeline_from_audit("doc", "drej", engine=engine)
+    assert tl is not None
+    assert tl.entities[0].final_status == status
+
+
 def test_last_attempt_failed_stays_failed(engine) -> None:
     _chain(
         engine,

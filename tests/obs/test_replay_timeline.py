@@ -799,3 +799,39 @@ def test_reprocessed_after_reject_keeps_span_status(tmp_path: Path) -> None:
         assert _entity(out, "doc-j").final_status == "parked"
     finally:
         eng.dispose()
+
+
+@pytest.mark.parametrize("initially_rejected", [False, True])
+def test_warm_span_cache_tracks_review_disposition(
+    tmp_path: Path, monkeypatch, initially_rejected: bool
+) -> None:
+    from mailroom_reloaded.storage import audit_log
+
+    eng = _audit_engine(tmp_path, "doc-j", [("human_review", "parked", {})])
+    store = _store(tmp_path, _parked_only_rows())
+    try:
+        if initially_rejected:
+            audit_log.append("doc-j", "review", "review_resolved", {"action": "reject"}, engine=eng)
+        first = build_timeline("doc:doc-j", store=store, engine=eng)
+        initial_status = "failed" if initially_rejected else "parked"
+        assert first is not None and _entity(first, "doc-j").final_status == initial_status
+        token = store.change_token()
+
+        def unexpected_read(*args, **kwargs):
+            pytest.fail("unchanged spans should reuse the cached timeline")
+
+        monkeypatch.setattr(tlmod, "_read_rows", unexpected_read)
+        audit_log.append("doc-j", "review", "review_resolved", {"action": "reject"}, engine=eng)
+        rejected = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert rejected is not None and _entity(rejected, "doc-j").final_status == "failed"
+        assert _entity(first, "doc-j").final_status == initial_status
+
+        audit_log.append("doc-j", "human_review", "parked", {"reason": "reprocessed"}, engine=eng)
+        reprocessed = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert reprocessed is not None
+        assert _entity(reprocessed, "doc-j").final_status == "parked"
+        assert _entity(rejected, "doc-j").final_status == "failed"
+        assert store.change_token() == token
+    finally:
+        store.close()
+        eng.dispose()

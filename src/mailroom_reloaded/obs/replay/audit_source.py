@@ -323,12 +323,16 @@ def timeline_from_audit(
     segs: list[tuple[str, str, str, datetime, datetime, dict[str, Any]]] = []
     evs: list[tuple[str, str, str, datetime, dict[str, Any]]] = []
     seen_docs: dict[str, None] = {}
+    last_terminal: dict[str, tuple[str, dict[str, Any]]] = {}
     for r in audit:
         at = _ts(r.ts)
         if at is None:
             continue
         seen_docs[r.doc_id] = None
         p = _payload(r.payload)
+        if r.event in {"parked", "archived", "review_resolved", "node_failed"}:
+            # Rows follow audit sequence; wall-clock timestamps can move backwards.
+            last_terminal[r.doc_id] = (r.event, p)
         if r.event in ("completed", "node_failed"):
             if _station_id(r.node) is None or r.node in _EVENT_NODES:
                 continue  # unknown node: tolerated, skipped
@@ -388,15 +392,10 @@ def timeline_from_audit(
         )
         for doc, node, event, at, p in sorted(evs, key=lambda e: (e[3], e[0]))
     ]
-    ev_kinds: dict[str, set[str]] = defaultdict(set)
     archived_at: dict[str, float] = {}
-    last_review: dict[str, str] = {}  # doc -> action of its latest review_resolved (events are time-ordered)
     for e in events:
-        ev_kinds[e.doc_id].add(e.kind)
         if e.kind == "archived":
             archived_at[e.doc_id] = max(e.t, archived_at.get(e.doc_id, e.t))
-        if e.kind == "review_resolved":
-            last_review[e.doc_id] = str(e.payload.get("action"))
     for doc in [d for d, f in last_failed.items() if archived_at.get(d, -1.0) >= f[2]]:
         del last_failed[doc]  # archived after the last failure: the doc recovered
 
@@ -410,14 +409,14 @@ def timeline_from_audit(
         failure = (
             attrs.failure_class_for(last_failed[doc][1]) if doc in last_failed else None
         )
-        kinds = ev_kinds.get(doc, set())
+        terminal, payload = last_terminal.get(doc, (None, {}))
         if doc in last_failed:
             status = "failed"
-        elif "archived" in kinds:
+        elif terminal == "archived":
             status = "archived"
-        elif last_review.get(doc) == "reject":
+        elif terminal == "review_resolved" and payload.get("action") == "reject":
             status = "failed"  # a rejected park is terminal, even though it was parked first
-        elif "parked" in kinds and "review_resolved" not in kinds:
+        elif terminal == "parked":
             status = "parked"
         elif ev and ev.get("status"):
             status = _token(ev["status"], 32)

@@ -7,7 +7,8 @@ message key), so even a row carrying content cannot leak it into the payload.
 
 :func:`build_timeline` resolves a session id, reads the span store, falls back to the
 audit log when there are no spans, applies the window and payload cap, and caches the
-result keyed by the store change token.
+span-derived result keyed by the store change token. Audit review dispositions are
+applied to a separate response copy on every request.
 """
 
 from __future__ import annotations
@@ -767,7 +768,8 @@ def build_timeline(
     Spans are the exact source; with no spans the audit log gives an approximate
     timeline. ``from_s``/``to_s`` select a window (``complete`` is then false); a
     payload over the cap is windowed automatically. Span-sourced results are cached by
-    the store's change token, so any insert or prune invalidates them.
+    the store's change token, so any insert or prune invalidates them. Review
+    dispositions are read from the audit log on every request, including cache hits.
     """
     from mailroom_reloaded.obs.replay.sessions import parse_session_id
 
@@ -836,7 +838,9 @@ def _build(
     if watermark is not None:
         hit = _cache_get(cache_key)
         if hit is not None:
-            return hit.model_copy(deep=True)  # callers may mutate; the cache stays pristine
+            result = hit.model_copy(deep=True)
+            _apply_review_rejections(result, engine)
+            return result
 
     from mailroom_reloaded.storage import span_store
 
@@ -847,8 +851,6 @@ def _build(
     if tl is not None and truncated:
         # the store silently cuts a read at the cap: say so, before any window is applied
         tl.session.window.complete = False
-    if tl is not None:
-        _apply_review_rejections(tl, engine)
     if tl is None:
         from mailroom_reloaded.obs.replay.audit_source import timeline_from_audit
 
@@ -858,4 +860,6 @@ def _build(
     result = _finalize(tl, from_s, to_s)
     if from_spans and watermark is not None:
         _cache_put(cache_key, result.model_copy(deep=True))
+    if from_spans:
+        _apply_review_rejections(result, engine)
     return result
