@@ -53,7 +53,7 @@ Each command is read-only unless marked (control).
 > Closure requires criterion → evidence → PR → merged SHA mapping; use `Refs #64`,
 > not `Closes #64`. This historical plan is not reactivated.
 
-- [ ] **B5 `queue`/`review queue`**: list items awaiting review with transcript view (`review show <id>` renders the conversation, verdict, rubric scores); `resolve` already exists for decisions.
+- [x] **B5 `queue`/`review queue`**: list items awaiting review with transcript view (`review show <id>` renders the conversation, verdict, rubric scores); `resolve` already exists for decisions. Evidence: `docs/demo/p6b5-review/` (PR for #65 B5; existing `/v1/documents` routes, no new route).
 - [ ] **B6 `ingest` (control)**: `ingest upload` (exists as `upload`), `ingest folder <path>` (server-side path inside the configured intake dir only), `ingest gmail poll` (`POST /v1/intake/gmail/poll`). Result is streamed into the existing `watch` view.
 - [ ] **B7 `watcher start|stop|status` (control)** against `/v1/watcher` (5). Shows the watcher mode (in-process vs `split-watcher` container) and refuses start when split.
 - [ ] **B8 `eval run <suite> [--sandbox] [--scenarios …]` (control)** posts to `/v1/evals`, returns an eval id, then `eval status|log <id>` follows it; finished evals link to `replay` and Phoenix (project filter).

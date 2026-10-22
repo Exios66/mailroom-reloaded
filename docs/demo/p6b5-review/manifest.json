@@ -1,0 +1,18 @@
+{
+  "base_commit": "366c17805a557c80bf8091f1f897b714d4f08bab",
+  "note": "base commit is the parent of the B5 commit; captured with Playwright (Chrome, 1200x800, dark) against `JEV=1 scripts/tui_dev.sh up` (mock stack, no token). Parked documents come from the Jev dev seeds; their verdict/grade/rubric data is absent by construction, which the command prints as 'absent'.",
+  "images": [
+    {
+      "file": "review-queue.png",
+      "command": "review queue",
+      "bytes": 274490,
+      "sha256": "34932cd6211f3782f4d43340e9636c3d22c9dc6b4245e5b1b98ce902770fb8c9"
+    },
+    {
+      "file": "review-show.png",
+      "command": "review show 03a9efe794321eb2",
+      "bytes": 252348,
+      "sha256": "14e2207fff609cf35118cca701a83e1dfad638233594d10175438e29725f0559"
+    }
+  ]
+}

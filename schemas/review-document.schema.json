@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Existing GET /v1/documents/{doc_id} response",
+  "description": "State and report are existing open objects, not a new review API. Transcript and verdict can be absent; no rubric scores are promised.",
+  "type": "object",
+  "required": ["doc_id", "status", "manifest", "report", "catalog"],
+  "additionalProperties": false,
+  "properties": {
+    "doc_id": {"type": "string"},
+    "status": {"type": "string"},
+    "manifest": {"$ref": "#/$defs/manifest"},
+    "report": {"type": ["object", "null"]},
+    "catalog": {"$ref": "#/$defs/catalog"}
+  },
+  "$defs": {
+    "manifest": {
+      "type": ["object", "null"],
+      "required": ["doc_id", "filename", "content_sha256", "status", "completed_nodes", "state", "catalog_pending", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "doc_id": {"type": "string"},
+        "filename": {"type": "string"},
+        "content_sha256": {"type": "string"},
+        "status": {"type": "string"},
+        "completed_nodes": {"type": "array", "items": {"type": "string"}},
+        "state": {"type": "object"},
+        "catalog_pending": {"type": ["object", "null"]},
+        "updated_at": {"type": "string"}
+      }
+    },
+    "catalog": {
+      "type": ["object", "null"],
+      "required": ["doc_id", "filename", "doc_type", "doc_subclass", "status", "archive_path", "file_sha256", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "doc_id": {"type": "string"},
+        "filename": {"type": "string"},
+        "doc_type": {"type": ["string", "null"]},
+        "doc_subclass": {"type": ["string", "null"]},
+        "status": {"type": "string"},
+        "archive_path": {"type": ["string", "null"]},
+        "file_sha256": {"type": ["string", "null"]},
+        "updated_at": {"type": "string"}
+      }
+    }
+  }
+}

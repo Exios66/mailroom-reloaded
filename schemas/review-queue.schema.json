@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Existing GET /v1/documents?status=parked response",
+  "type": "object",
+  "required": ["documents", "count"],
+  "additionalProperties": false,
+  "properties": {
+    "documents": {"type": "array", "items": {"$ref": "#/$defs/catalog"}},
+    "count": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "catalog": {
+      "type": "object",
+      "required": ["doc_id", "filename", "doc_type", "doc_subclass", "status", "archive_path", "file_sha256", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "doc_id": {"type": "string"},
+        "filename": {"type": "string"},
+        "doc_type": {"type": ["string", "null"]},
+        "doc_subclass": {"type": ["string", "null"]},
+        "status": {"type": "string"},
+        "archive_path": {"type": ["string", "null"]},
+        "file_sha256": {"type": ["string", "null"]},
+        "updated_at": {"type": "string"}
+      }
+    }
+  }
+}
