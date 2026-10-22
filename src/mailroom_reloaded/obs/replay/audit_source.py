@@ -390,10 +390,13 @@ def timeline_from_audit(
     ]
     ev_kinds: dict[str, set[str]] = defaultdict(set)
     archived_at: dict[str, float] = {}
+    last_review: dict[str, str] = {}  # doc -> action of its latest review_resolved (events are time-ordered)
     for e in events:
         ev_kinds[e.doc_id].add(e.kind)
         if e.kind == "archived":
             archived_at[e.doc_id] = max(e.t, archived_at.get(e.doc_id, e.t))
+        if e.kind == "review_resolved":
+            last_review[e.doc_id] = str(e.payload.get("action"))
     for doc in [d for d, f in last_failed.items() if archived_at.get(d, -1.0) >= f[2]]:
         del last_failed[doc]  # archived after the last failure: the doc recovered
 
@@ -412,6 +415,8 @@ def timeline_from_audit(
             status = "failed"
         elif "archived" in kinds:
             status = "archived"
+        elif last_review.get(doc) == "reject":
+            status = "failed"  # a rejected park is terminal, even though it was parked first
         elif "parked" in kinds and "review_resolved" not in kinds:
             status = "parked"
         elif ev and ev.get("status"):

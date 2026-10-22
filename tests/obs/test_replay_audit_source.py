@@ -338,6 +338,23 @@ def test_archived_after_failure_wins(engine) -> None:
     assert tl.entities[0].failure_class is None
 
 
+def test_rejected_parked_document_is_failed(engine) -> None:
+    """A review rejection after a park is the document's terminal disposition (#114)."""
+    _chain(
+        engine,
+        "drej",
+        [
+            ("ingest", "completed", {"elapsed_s": 1.0}, 1.0),
+            ("human_review", "parked", {"reason": "other"}, 2.0),
+            ("review", "review_resolved", {"action": "reject", "reviewer": "bob"}, 5.0),
+        ],
+    )
+    tl = timeline_from_audit("doc", "drej", engine=engine)
+    assert tl is not None
+    (ent,) = tl.entities
+    assert ent.final_status == "failed" and ent.failure_class is None
+
+
 def test_last_attempt_failed_stays_failed(engine) -> None:
     _chain(
         engine,

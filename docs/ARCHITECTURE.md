@@ -121,7 +121,11 @@ block is descriptive only; `Bins` hardcodes these names (`storage/bins.py:10`,
   `completed_nodes` (`schemas/manifest.py:24-30`). On startup the watcher calls
   `resume_processing`, which re-runs every manifest still in status `processing`
   from that node (`watcher.py:121-149`); nodes already done are skipped by
-  `_guard_node` (`pipeline/flow.py:291-292`).
+  `_guard_node` (`pipeline/flow.py:291-292`). Two crash windows have their own
+  recovery: `archive_document` writes an `archiving` audit entry before the
+  rename so `reconcile_archived` can finish a document moved but not yet
+  `archived`; and `Watcher._recover_orphans` runs files left under `processing/`
+  that no manifest names (a crash between claim and the first checkpoint).
 
 The `split-watcher` Docker profile exists because `watcher.lock` (an exclusive
 `flock`) admits only one draining process: `run_forever` raises `WatcherLockHeld`

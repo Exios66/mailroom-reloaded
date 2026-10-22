@@ -7,7 +7,8 @@
   manifest (no sorter call).
 * ``correct`` — re-run from ``extract`` with a corrected ``doc_type`` /
   ``doc_subclass`` (no sorter call).
-* ``reject`` — move the document to ``failed/``.
+* ``reject`` — move the document to ``failed/`` and close its archive-ledger
+  invocation as ``failed`` (best effort).
 
 Every disposition appends a hash-chained ``review_resolved`` audit entry. The
 resume uses :func:`mailroom_reloaded.pipeline.flow.run_document` with
@@ -26,7 +27,9 @@ from typing import Any, Literal
 
 import structlog
 
+from mailroom_reloaded.obs.run_context import ensure_run_scope
 from mailroom_reloaded.pipeline import flow as _flow
+from mailroom_reloaded.pipeline import run_ledger
 from mailroom_reloaded.pipeline.state import MailroomState
 from mailroom_reloaded.schemas.audit import CatalogRecord
 from mailroom_reloaded.schemas.manifest import Manifest
@@ -170,6 +173,7 @@ def _resolve_claimed(
             )
         except Exception as exc:  # noqa: BLE001 - catalog is best-effort durability
             logger.warning("catalog_upsert_failed", doc_id=doc_id, error=str(exc))
+        _record_rejection(doc_id, state)
         logger.info("review_rejected", doc_id=doc_id, reviewer=reviewer)
         return state
 
@@ -195,6 +199,29 @@ def _resolve_claimed(
         status=state.status,
     )
     return state
+
+
+def _record_rejection(doc_id: str, state: MailroomState) -> None:
+    """Close the rejected invocation in the archive ledger as ``failed`` (#114).
+
+    Best effort, like ``flow.reconcile_archived``: a ledger failure is logged and
+    never changes the rejection. A rejection is terminal (the manifest is no longer
+    ``parked``), so a repeated reject returns before reaching this point.
+    """
+    try:
+        with ensure_run_scope("review") as scope:
+            ledger = run_ledger.ledger_for(None)
+            run_id = run_ledger.ensure_live_run(ledger, scope)
+            if run_id is not None:
+                run_ledger.record_review_rejected(
+                    ledger,
+                    run_id,
+                    doc_id,
+                    state.sort.doc_type if state.sort else None,
+                    list(state.route_trail),
+                )
+    except Exception:  # the ledger must never mask the rejection
+        logger.warning("ledger_review_reject_failed", doc_id=doc_id, exc_info=True)
 
 
 def _sha256(path: Path) -> str:

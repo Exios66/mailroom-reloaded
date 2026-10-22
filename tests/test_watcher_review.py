@@ -339,6 +339,90 @@ def test_review_reject_moves_failed(env, mock_provider, monkeypatch):
     assert audit_log.verify_chain(entries).ok
 
 
+@pytest.fixture
+def ledger_state():
+    """Start from empty process-level ledger registries and drop the ledger after the test."""
+    from mailroom_reloaded.pipeline import run_ledger
+
+    for registry in (run_ledger._open, run_ledger._invocations, run_ledger._closed, run_ledger._rolled):
+        registry.clear()
+    try:
+        yield
+    finally:
+        from mailroom_reloaded.storage.ledger import reset_ledger
+
+        reset_ledger()
+
+
+def _doc_closed(doc_id):
+    """The archive ledger's ``doc_closed`` entries for one document, in seq order."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    ledger = get_ledger()
+    assert ledger.flush()
+    return ledger.entries(kind="doc_closed", doc_id=doc_id, limit=100)
+
+
+def test_reject_records_failed_ledger_disposition(env, mock_provider, monkeypatch, ledger_state):
+    """Rejecting a parked document closes its invocation in the archive ledger as failed (#114)."""
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    bins, parked = _park(env, mock_provider, monkeypatch)
+    doc_id = parked.doc_id
+    assert [e.payload["outcome"] for e in _doc_closed(doc_id)] == ["parked"]
+
+    state = resolve_review(doc_id, "reject", reviewer="bob")
+
+    assert state is not None and state.status == "failed"
+    closes = _doc_closed(doc_id)
+    assert [e.payload["outcome"] for e in closes] == ["parked", "failed"]
+    rejected = closes[-1].payload
+    assert rejected["doc_type"] == "correspondence"
+    assert "failure_reason" not in rejected  # a review decision, not a pipeline failure
+    assert get_ledger().verify().ok
+
+    manifest = load_manifest(bins, doc_id)
+    assert manifest is not None and manifest.status == "failed"
+    rec = catalog.get(doc_id)
+    assert rec is not None and rec.status == "failed"
+    entries = audit_log.entries(doc_id)
+    assert any(e.event == "review_resolved" for e in entries)
+    assert audit_log.verify_chain(entries).ok
+
+
+def test_reject_twice_does_not_duplicate_ledger_close(env, mock_provider, monkeypatch, ledger_state):
+    """A second reject finds no parked manifest and writes no second terminal ledger close."""
+    _bins, parked = _park(env, mock_provider, monkeypatch)
+    doc_id = parked.doc_id
+
+    assert resolve_review(doc_id, "reject", reviewer="bob") is not None
+    assert resolve_review(doc_id, "reject", reviewer="bob") is None
+
+    assert [e.payload["outcome"] for e in _doc_closed(doc_id)] == ["parked", "failed"]
+    reviews = [e for e in audit_log.entries(doc_id) if e.event == "review_resolved"]
+    assert len(reviews) == 1
+
+
+def test_reject_ledger_failure_never_changes_outcome(env, mock_provider, monkeypatch, ledger_state):
+    """A broken ledger write leaves the rejection, manifest and catalog intact (best effort)."""
+    from mailroom_reloaded.pipeline import run_ledger
+
+    bins, parked = _park(env, mock_provider, monkeypatch)
+
+    def broken(*_a, **_k):
+        raise RuntimeError("ledger exploded")
+
+    monkeypatch.setattr(run_ledger, "record_review_rejected", broken, raising=False)
+    state = resolve_review(parked.doc_id, "reject", reviewer="bob")
+
+    assert state is not None and state.status == "failed"
+    assert list(bins.failed.glob("*.txt"))
+    manifest = load_manifest(bins, parked.doc_id)
+    assert manifest is not None and manifest.status == "failed"
+    assert catalog.get(parked.doc_id).status == "failed"
+    assert audit_log.verify_chain(audit_log.entries(parked.doc_id)).ok
+
+
 # ---- findings 6 and 7: reconcile at startup ----
 
 
@@ -525,3 +609,133 @@ def test_review_approved_cleared_after_reextraction(env, mock_provider, monkeypa
     assert state.review_approved is False
     manifest = load_manifest(bins, parked.doc_id)
     assert manifest is not None and manifest.state["review_approved"] is False
+
+
+# ---- #111 / #112: crash windows around archive and claim ----
+
+
+def test_crash_between_archive_move_and_audit_is_recovered(
+    env, mock_provider, monkeypatch
+):
+    """#111: crash right after the archive rename, before any ``archived`` audit entry."""
+    from mailroom_reloaded.pipeline import archivist
+
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    real_move = archivist._move
+
+    def move_then_crash(src, dest):
+        real_move(src, dest)
+        raise RuntimeError("crash after os.replace")
+
+    monkeypatch.setattr(archivist, "_move", move_then_crash)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    monkeypatch.setattr(archivist, "_move", real_move)
+
+    doc_id = next(bins.manifests.glob("*.json")).stem
+    assert not any(e.event == "archived" for e in audit_log.entries(doc_id))
+    archived = list((bins.archive / "correspondence").glob("*.txt"))
+    assert len(archived) == 1
+
+    assert Watcher(bins, "w2").resume_processing() == 0
+
+    manifest = load_manifest(bins, doc_id)
+    assert manifest.status == "archived"
+    assert manifest.state["path"] == str(archived[0])
+    assert Path(f"{archived[0]}.report.json").is_file()
+    rec = catalog.get(doc_id)
+    assert rec is not None and rec.archive_path == str(archived[0])
+    entries = audit_log.entries(doc_id)
+    assert [e.event for e in entries].count("archived") == 1
+    assert audit_log.verify_chain(entries).ok
+
+    # a second startup is a no-op: no duplicate terminal records
+    Watcher(bins, "w3").resume_processing()
+    assert [e.event for e in audit_log.entries(doc_id)].count("archived") == 1
+
+
+def test_crash_after_sidecar_before_move_resumes_and_archives_once(
+    env, mock_provider, monkeypatch
+):
+    """#111: crash after the write-ahead entry but before the rename keeps the source."""
+    from mailroom_reloaded.pipeline import archivist
+
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    real_move = archivist._move
+
+    def crash(src, dest):
+        raise RuntimeError("crash before os.replace")
+
+    monkeypatch.setattr(archivist, "_move", crash)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    monkeypatch.setattr(archivist, "_move", real_move)
+
+    doc_id = next(bins.manifests.glob("*.json")).stem
+    assert Watcher(bins, "w2").resume_processing() == 1
+    assert load_manifest(bins, doc_id).status == "archived"
+    assert len(list((bins.archive / "correspondence").glob("*.txt"))) == 1
+    assert audit_log.verify_chain(audit_log.entries(doc_id)).ok
+
+
+def test_orphaned_claim_without_manifest_is_recovered(
+    env, mock_provider, monkeypatch
+):
+    """#112: crash after the watcher claim, before the first manifest checkpoint."""
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    claimed = bins.claim(path, "dead-worker")
+    assert claimed is not None and not list(bins.manifests.glob("*.json"))
+
+    young = Watcher(bins, "w2")
+    assert young.resume_processing() == 0  # inside the grace window: assumed live
+    assert claimed.exists()
+
+    watcher = Watcher(bins, "w2")
+    watcher.orphan_grace_s = 0.0
+    assert watcher.resume_processing() == 1
+    assert not claimed.exists()
+    doc_id = next(bins.manifests.glob("*.json")).stem
+    assert load_manifest(bins, doc_id).status == "archived"
+    assert audit_log.verify_chain(audit_log.entries(doc_id)).ok
+    assert watcher.resume_processing() == 0  # idempotent: nothing left to recover
+
+
+def test_flow_does_not_reclaim_an_already_claimed_file(env, mock_provider, monkeypatch):
+    """#112: the flow keeps the watcher's claim path instead of renaming it again."""
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    claimed = bins.claim(path, "w1")
+    seen: list[str] = []
+    real_save = flow_mod.save_manifest
+
+    def spy(b, m):
+        seen.append(str(m.state.get("path")))
+        return real_save(b, m)
+
+    monkeypatch.setattr(flow_mod, "save_manifest", spy)
+    flow_mod.run_document(claimed, worker_id="w1")
+    assert seen[0] == str(claimed)
+
+
+def test_orphan_with_live_manifest_owner_is_not_run_twice(
+    env, mock_provider, monkeypatch
+):
+    """#112: a duplicate copy never re-runs a document a manifest already owns."""
+    _patch_handoff(monkeypatch)
+    _reply(mock_provider, CORR_SUBCLASS)
+    bins, path = _write_inbox(env)
+    twin = bins.inbox / "twin.txt"
+    twin.write_bytes(path.read_bytes())
+
+    def boom(*_a, **_k):
+        raise RuntimeError("crash mid-document")
+
+    monkeypatch.setattr(flow_mod, "_extract", boom)
+    with pytest.raises(RuntimeError):
+        flow_mod.run_document(path, worker_id="w1")
+    twin_claimed = bins.claim(twin, "w9")
+
+    monkeypatch.setattr(flow_mod, "_extract", _fake_extract(confidence=1.0))
+    watcher = Watcher(bins, "w2")
+    watcher.orphan_grace_s = 0.0
+    assert watcher.resume_processing() == 1  # only the manifest-owned original
+    assert twin_claimed.exists()

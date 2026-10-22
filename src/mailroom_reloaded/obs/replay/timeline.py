@@ -225,7 +225,7 @@ def timeline_from_spans(
     generations: list[Generation] = []
     events: list[ReplayEvent] = []
     scores: list[ReplayScore] = []
-    roots: dict[str, dict[str, Any]] = {}
+    root_attempts: dict[str, list[dict[str, Any]]] = {}
     judge: dict[str, dict[str, Any]] = {}
     review_causes_attr: dict[str, list[str]] = {}
     instrumentor_children: list[dict[str, Any]] = []
@@ -241,7 +241,7 @@ def timeline_from_spans(
         is_node = name.startswith(_NODE_PREFIX)
 
         if name == _ROOT_NAME:
-            roots.setdefault(doc, row)
+            root_attempts.setdefault(doc, []).append(row)
             env = _str(a.get(A.ENVIRONMENT)) or env
         elif is_node:
             node = str(a.get(A.NODE) or name[len(_NODE_PREFIX) :])
@@ -361,7 +361,14 @@ def timeline_from_spans(
         scores_by_doc.setdefault(sc.doc_id, {})[sc.name] = sc.value
 
     entities = _entities(
-        roots, segments, generations, scores_by_doc, judge, review_causes_attr, rel
+        root_attempts,
+        running,
+        segments,
+        generations,
+        scores_by_doc,
+        judge,
+        review_causes_attr,
+        rel,
     )
     session = Session(
         id=f"{kind}:{key}",
@@ -452,8 +459,29 @@ def _generation(row: dict[str, Any], doc: str, t0: float, t1: float) -> Generati
     )
 
 
+def _latest_root(attempts: list[dict[str, Any]], running: set[str]) -> dict[str, Any]:
+    """The root attempt that sets a document's terminal state.
+
+    Selection policy (a total order, so the result never depends on input order):
+    a root still running (no end recorded) counts only when no root has finished;
+    among the candidates the latest end time wins, then the later start, then the
+    greater span id. A parked attempt followed by a resumed, archived attempt therefore
+    reports the archive, while the parked attempt's spans and events stay in the timeline.
+    """
+    return max(
+        attempts,
+        key=lambda r: (
+            r["span_id"] not in running,
+            r["end_ns"],
+            r["start_ns"],
+            r["span_id"],
+        ),
+    )
+
+
 def _entities(
-    roots: dict[str, dict[str, Any]],
+    root_attempts: dict[str, list[dict[str, Any]]],
+    running: set[str],
     segments: list[Segment],
     generations: list[Generation],
     scores_by_doc: dict[str, dict[str, Any]],
@@ -462,7 +490,7 @@ def _entities(
     rel: Any,
 ) -> list[Entity]:
     docs: dict[str, None] = {}
-    for d in [*roots, *(s.doc_id for s in segments), *(g.doc_id for g in generations)]:
+    for d in [*root_attempts, *(s.doc_id for s in segments), *(g.doc_id for g in generations)]:
         docs.setdefault(d)
     span_bounds: dict[str, tuple[float, float]] = {}
     for s in segments:
@@ -474,12 +502,16 @@ def _entities(
 
     out: list[Entity] = []
     for doc in docs:
-        root = roots.get(doc)
+        attempts = root_attempts.get(doc, [])
+        root = _latest_root(attempts, running) if attempts else None
         a: dict[str, Any] = root["attrs"] if root else {}
         sc = scores_by_doc.get(doc, {})
-        if root:
-            t_start = rel(root["start_ns"])
-            t_end: float | None = rel(max(root["end_ns"], root["start_ns"]))
+        if attempts:
+            # aggregate bounds span every root attempt of the document
+            t_start = rel(min(r["start_ns"] for r in attempts))
+            t_end: float | None = rel(
+                max(max(r["end_ns"], r["start_ns"]) for r in attempts)
+            )
         else:
             t_start, t_end = span_bounds.get(doc, (0.0, 0.0))
         gens = gen_by_doc.get(doc, [])
@@ -751,6 +783,41 @@ def build_timeline(
         owned.close()  # a store this call opened is never left to the garbage collector
 
 
+_TERMINAL_AUDIT = frozenset({"parked", "archived", "review_resolved", "node_failed"})
+
+
+def _apply_review_rejections(tl: Timeline, engine: Any) -> None:
+    """Show a rejected park as ``failed`` (#114).
+
+    A rejection runs no pipeline node, so no span records it and the document's last
+    root still says ``parked``. For each such entity the audit chain decides: the
+    document is failed when its latest terminal event is a ``review_resolved`` reject
+    (a later park/archive means it was reprocessed and the spans win). Best effort: an
+    unreadable audit log leaves the span status as it was.
+    """
+    parked = [e for e in tl.entities if e.final_status == "parked"]
+    if not parked:
+        return
+    try:
+        from mailroom_reloaded.storage import audit_log
+
+        for ent in parked:
+            terminal = [
+                x
+                for x in audit_log.entries(ent.doc_id, engine=engine)
+                if x.event in _TERMINAL_AUDIT
+            ]
+            last = terminal[-1] if terminal else None
+            if (
+                last is not None
+                and last.event == "review_resolved"
+                and last.payload.get("action") == "reject"
+            ):
+                ent.final_status = "failed"
+    except Exception:  # noqa: BLE001 - the audit log is a refinement, never required for a replay
+        return
+
+
 def _build(
     session_id: str,
     kind: str,
@@ -780,6 +847,8 @@ def _build(
     if tl is not None and truncated:
         # the store silently cuts a read at the cap: say so, before any window is applied
         tl.session.window.complete = False
+    if tl is not None:
+        _apply_review_rejections(tl, engine)
     if tl is None:
         from mailroom_reloaded.obs.replay.audit_source import timeline_from_audit
 
