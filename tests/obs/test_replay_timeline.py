@@ -612,3 +612,226 @@ def test_read_at_cap_is_incomplete(tmp_path, monkeypatch) -> None:
         assert whole is not None and whole.session.window.complete is True
     finally:
         store.close()
+
+
+# ------------------------------------------------------------------ root attempts (#113)
+PARKED_ROOT = "00000000000000a1"
+ARCHIVED_ROOT = "00000000000000b1"
+_PARKED_NODES = ("00000000000000a2", "00000000000000a3")
+_ARCHIVED_NODES = ("00000000000000b2", "00000000000000b3", "00000000000000b4")
+
+
+def _attempt_node(doc, trace, parent, node, station, t0, t1, span_id):
+    return F.row(
+        f"mailroom.node.{node}",
+        t0,
+        t1,
+        doc=doc,
+        trace=trace,
+        parent=parent,
+        kind="AGENT",
+        station=station,
+        attrs={"mailroom.node": node, "mailroom.attempt": 1},
+        span_id=span_id,
+    )
+
+
+def _resumed_rows(doc: str = "doc-r") -> list[dict]:
+    """One document: a parked attempt (0-5s), then a resumed attempt archived (6-12s)."""
+    p_tr, a_tr = "p" * 32, "q" * 32
+    parked_root = F.row(
+        "mailroom.document",
+        0,
+        5,
+        doc=doc,
+        trace=p_tr,
+        kind="CHAIN",
+        span_id=PARKED_ROOT,
+        attrs={
+            "mailroom.filename": f"{doc}.pdf",
+            "mailroom.status": "parked",
+            "mailroom.stage": "review",
+        },
+        events=[F.ev("parked", 4.5, reason="needs review")],
+    )
+    archived_root = F.row(
+        "mailroom.document",
+        6,
+        12,
+        doc=doc,
+        trace=a_tr,
+        kind="CHAIN",
+        span_id=ARCHIVED_ROOT,
+        attrs={
+            "mailroom.filename": f"{doc}.pdf",
+            "mailroom.status": "archived",
+            "mailroom.stage": "archive",
+        },
+    )
+    return [
+        parked_root,
+        _attempt_node(doc, p_tr, PARKED_ROOT, "sort", "sorter", 1, 3, _PARKED_NODES[0]),
+        _attempt_node(doc, p_tr, PARKED_ROOT, "human_review", "review", 3, 5, _PARKED_NODES[1]),
+        archived_root,
+        _attempt_node(doc, a_tr, ARCHIVED_ROOT, "sort", "sorter", 6.5, 8.5, _ARCHIVED_NODES[0]),
+        _attempt_node(doc, a_tr, ARCHIVED_ROOT, "extract", "specialist", 8.5, 11, _ARCHIVED_NODES[1]),
+        _attempt_node(
+            doc, a_tr, ARCHIVED_ROOT, "report_catalog_archive", "archive", 11, 12, _ARCHIVED_NODES[2]
+        ),
+    ]  # fmt: skip
+
+
+def _entity(out: Timeline, doc: str):
+    return next(e for e in out.entities if e.doc_id == doc)
+
+
+def test_resumed_document_reports_latest_completed_attempt() -> None:
+    out = timeline_from_spans(_resumed_rows(), "run", F.RUN)
+    assert out is not None
+    ent = _entity(out, "doc-r")
+    assert ent.final_status == "archived" and ent.final_stage == "archive"
+    assert ent.trace_id == "q" * 32
+    assert ent.filename == "doc-r.pdf"
+
+
+def test_resumed_document_keeps_both_attempts_visible() -> None:
+    out = timeline_from_spans(_resumed_rows(), "run", F.RUN)
+    assert out is not None
+    span_ids = {s.span_id for s in _segs(out, "doc-r")}
+    assert set(_PARKED_NODES) <= span_ids and set(_ARCHIVED_NODES) <= span_ids
+    assert any(
+        e.kind == "parked" and e.doc_id == "doc-r" and e.payload == {"reason": "needs review"}
+        for e in out.events
+    )
+    # aggregate bounds span both attempts: first start (parked) to last end (archived)
+    ent = _entity(out, "doc-r")
+    assert ent.t_start == 0.0 and ent.t_end == 12.0
+    assert ent.totals.duration_s == 12.0
+
+
+def test_root_selection_is_independent_of_input_order() -> None:
+    rows = _resumed_rows()
+    forward = timeline_from_spans(rows, "run", F.RUN)
+    backward = timeline_from_spans(list(reversed(rows)), "run", F.RUN)
+    assert forward is not None and backward is not None
+    assert [e.model_dump() for e in forward.entities] == [
+        e.model_dump() for e in backward.entities
+    ]
+    assert _entity(backward, "doc-r").final_status == "archived"
+
+
+def test_equal_end_time_tie_breaks_on_greater_span_id() -> None:
+    # policy: latest end wins; equal ends fall to the later start, then the greater span id
+    doc = "doc-t"
+    lo = F.row("mailroom.document", 0, 5, doc=doc, trace="x" * 32, span_id="00000000000000c1",
+               attrs={"mailroom.status": "archived", "mailroom.stage": "archive"})  # fmt: skip
+    hi = F.row("mailroom.document", 0, 5, doc=doc, trace="y" * 32, span_id="00000000000000c2",
+               attrs={"mailroom.status": "parked", "mailroom.stage": "review"})  # fmt: skip
+    for rows in ([lo, hi], [hi, lo]):
+        out = timeline_from_spans(rows, "run", F.RUN)
+        assert out is not None
+        ent = _entity(out, doc)
+        assert ent.final_status == "parked" and ent.trace_id == "y" * 32
+
+
+def test_running_root_does_not_outrank_a_finished_attempt() -> None:
+    rows = _resumed_rows()
+    running = next(r for r in rows if r["span_id"] == ARCHIVED_ROOT)
+    running["end_ns"] = None  # resumed attempt still in flight
+    out = timeline_from_spans(rows, "run", F.RUN)
+    assert out is not None
+    assert _entity(out, "doc-r").final_status == "parked"
+
+
+# ---------------------------------------------- review rejection overlay (#114)
+def _parked_only_rows(doc: str = "doc-j") -> list:
+    tr = "r" * 32
+    return [
+        F.row(
+            "mailroom.document", 0, 5, doc=doc, trace=tr, kind="CHAIN", span_id=PARKED_ROOT,
+            attrs={
+                "mailroom.filename": f"{doc}.pdf",
+                "mailroom.status": "parked",
+                "mailroom.stage": "review",
+            },
+        ),
+    ]  # fmt: skip
+
+
+def _audit_engine(tmp_path: Path, doc: str, events: list[tuple[str, str, dict]]):
+    from mailroom_reloaded.storage import audit_log
+    from mailroom_reloaded.storage.db import init_db
+
+    eng = init_db(tmp_path / "mailroom.db")
+    for node, event, payload in events:
+        audit_log.append(doc, node, event, payload, engine=eng)
+    return eng
+
+
+def test_span_backed_rejected_park_is_failed(tmp_path: Path) -> None:
+    eng = _audit_engine(
+        tmp_path,
+        "doc-j",
+        [("human_review", "parked", {}), ("review", "review_resolved", {"action": "reject"})],
+    )
+    try:
+        store = _store(tmp_path, _parked_only_rows())
+        out = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert out is not None
+        assert _entity(out, "doc-j").final_status == "failed"
+    finally:
+        eng.dispose()
+
+
+def test_reprocessed_after_reject_keeps_span_status(tmp_path: Path) -> None:
+    eng = _audit_engine(
+        tmp_path,
+        "doc-j",
+        [
+            ("review", "review_resolved", {"action": "reject"}),
+            ("human_review", "parked", {}),
+        ],
+    )
+    try:
+        store = _store(tmp_path, _parked_only_rows())
+        out = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert out is not None
+        assert _entity(out, "doc-j").final_status == "parked"
+    finally:
+        eng.dispose()
+
+
+@pytest.mark.parametrize("initially_rejected", [False, True])
+def test_warm_span_cache_tracks_review_disposition(
+    tmp_path: Path, monkeypatch, initially_rejected: bool
+) -> None:
+    from mailroom_reloaded.storage import audit_log
+
+    eng = _audit_engine(tmp_path, "doc-j", [("human_review", "parked", {})])
+    store = _store(tmp_path, _parked_only_rows())
+    try:
+        if initially_rejected:
+            audit_log.append("doc-j", "review", "review_resolved", {"action": "reject"}, engine=eng)
+        first = build_timeline("doc:doc-j", store=store, engine=eng)
+        initial_status = "failed" if initially_rejected else "parked"
+        assert first is not None and _entity(first, "doc-j").final_status == initial_status
+        token = store.change_token()
+
+        def unexpected_read(*args, **kwargs):
+            pytest.fail("unchanged spans should reuse the cached timeline")
+
+        monkeypatch.setattr(tlmod, "_read_rows", unexpected_read)
+        audit_log.append("doc-j", "review", "review_resolved", {"action": "reject"}, engine=eng)
+        rejected = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert rejected is not None and _entity(rejected, "doc-j").final_status == "failed"
+        assert _entity(first, "doc-j").final_status == initial_status
+
+        audit_log.append("doc-j", "human_review", "parked", {"reason": "reprocessed"}, engine=eng)
+        reprocessed = build_timeline("doc:doc-j", store=store, engine=eng)
+        assert reprocessed is not None
+        assert _entity(reprocessed, "doc-j").final_status == "parked"
+        assert _entity(rejected, "doc-j").final_status == "failed"
+        assert store.change_token() == token
+    finally:
+        store.close()
+        eng.dispose()

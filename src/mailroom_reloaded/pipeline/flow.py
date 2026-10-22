@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import json
 import time
 from pathlib import Path
 from typing import Any, ClassVar
@@ -720,7 +721,13 @@ class MailroomFlow(Flow[MailroomState]):
         self._tracer = trace.get_tracer("mailroom.pipeline")
 
         src = Path(path)
-        claimed = self._bins.claim(src, worker_id)
+        # A file already under processing/ was claimed by the watcher (or a recovery
+        # sweep); renaming it again would only add a second crash window before the
+        # first manifest checkpoint.
+        if self._bins.is_claimed(src):
+            claimed = None
+        else:
+            claimed = self._bins.claim(src, worker_id)
         work = claimed if claimed is not None else src
         if not work.exists():
             raise FileNotFoundError(f"document not found: {path}")
@@ -1031,21 +1038,47 @@ def reconcile_catalog(bins: Bins, manifest: Manifest) -> bool:
 def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     """Finish a document that was archived but crashed before its manifest snapshot.
 
-    ``archive_document`` moves the file and appends the ``archived`` audit entry
-    before ``_record_node`` checkpoints the manifest. When the audit log holds that
-    entry and the archived file exists, mark manifest + state ``archived`` and
-    upsert the catalog (a failed upsert is left pending). Returns whether the
-    manifest was reconciled.
+    ``archive_document`` appends a write-ahead ``archiving`` audit entry, moves the
+    file, then appends ``archived``, all before ``_record_node`` checkpoints the
+    manifest. When the audit log holds ``archived`` (or a trailing ``archiving``
+    whose destination now exists, i.e. a crash between the move and ``archived``),
+    verify the file digest and the report sidecar before marking manifest + state
+    ``archived`` and upserting the catalog (a failed upsert is left pending).
+    Missing or invalid evidence is left untouched for operator repair; no report
+    is reconstructed from an earlier checkpoint. Returns whether the manifest
+    was reconciled.
     """
-    archived = [
-        e for e in audit_log.entries(manifest.doc_id) if e.event == "archived"
+    events = [
+        e
+        for e in audit_log.entries(manifest.doc_id)
+        if e.event in {"archiving", "archived"}
     ]
-    if not archived:
+    if not events:
         return False
-    payload = archived[-1].payload
+    last = events[-1]
+    payload = last.payload
     archive_path = payload.get("path")
-    if not archive_path or not Path(archive_path).is_file():
+    if not archive_path:
         return False
+    try:
+        if not Path(archive_path).is_file():
+            return False
+        if _sha256_file(Path(archive_path)) != payload.get("file_sha256"):
+            logger.warning("archive_recovery_digest_mismatch", doc_id=manifest.doc_id)
+            return False
+        report = json.loads(Path(payload["sidecar"]).read_text(encoding="utf-8"))
+        if (
+            not isinstance(report, dict)
+            or report.get("doc_id") != manifest.doc_id
+            or report.get("status") != "archived"
+        ):
+            logger.warning("archive_recovery_report_invalid", doc_id=manifest.doc_id)
+            return False
+    except (OSError, ValueError, TypeError, KeyError):
+        logger.warning("archive_recovery_evidence_unreadable", doc_id=manifest.doc_id)
+        return False
+    if last.event == "archiving":
+        audit_log.append(manifest.doc_id, "archive", "archived", payload)
     state = dict(manifest.state or {})
     state["status"] = "archived"
     state["path"] = str(archive_path)

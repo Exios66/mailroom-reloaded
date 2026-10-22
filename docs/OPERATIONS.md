@@ -27,6 +27,20 @@ uv run mailroom serve --watch                              # API + embedded watc
 - On startup `resume_processing` re-runs every manifest still in status
   `processing` from its next unfinished node; audit entries are deduped so the
   chain gains no duplicates (`watcher.py:121-149`, `storage/audit_log.py:41-45`).
+  Startup (and a 60 s sweep while draining) also re-runs claimed files under
+  `processing/` that no manifest owns, once they are older than 30 s
+  (`Watcher._recover_orphans`); a document moved to `archive/` but not yet
+  recorded `archived` is finished from its `archiving` audit entry
+  (`flow.reconcile_archived`).
+
+Archive reconciliation does not certify a file merely because it exists. Its
+bytes must match the recorded archive SHA-256, and the recorded report sidecar
+must be a readable JSON object with the same `doc_id` and `status: archived`.
+A missing/corrupt sidecar or mismatched file is
+left unreconciled without a new `archived` record. Restore the original bytes
+and sidecar from trusted operator evidence before retrying startup; do not edit
+the audit chain or invent a report to make recovery pass. This check validates
+sidecar availability/shape, not a cryptographic hash of its contents.
 
 Deployment shapes:
 
@@ -51,12 +65,17 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/review/<doc_id>/resolve" \
 | --- | --- | --- |
 | `approve` | Re-runs from `extract` with the existing classification (no sorter call). | `review.py:80-101` |
 | `correct` | Re-runs from `extract` with a corrected `doc_type` / `doc_subclass` override. | `review.py:61-66`, `review.py:80-101` |
-| `reject` | Moves the file to `failed/` and sets status `failed`. | `review.py:68-78` |
+| `reject` | Moves the file to `failed/`, sets status `failed`, and closes the document's archive-ledger invocation as `failed` (best effort; `review.py` `_record_rejection`, issue #114). | `review.py:68-78` |
 
 Every disposition appends a hash-chained `review_resolved` audit entry
 (`review.py:76`, `review.py:93`). The endpoint returns 404 when no parked
 manifest matches (`api/app.py:230-233`). The source path is recovered from the
 manifest state or the `review/` bin filename (`review.py:104-119`).
+
+Successful approval/correction completes its resumed flow before recording the
+review decision. Audit-backed replay therefore treats only a rejection as a
+terminal review event: a later approval/correction note must not overwrite the
+already-archived outcome, while a subsequent park still takes precedence.
 
 ## Audit verification
 
@@ -269,7 +288,7 @@ itself dies. Each text ends with `Ref P-…`; the same facts as `mailroom.pager/
 | BERT missing / error / oversize / flag off | Fail-open to a `FULL` sort (`ingest/bert.py:44-111`, `ingest/bert.py:138-149`). |
 | Transient endpoint errors (429, 5xx, timeout, cold 503) | `llm/retry.py` exponential backoff; Modal cold start backs off in minutes; transport retries do **not** consume the confidence retry budget (`llm/retry.py:1-9`, `llm/retry.py:58-106`). |
 | Upload too large / unsupported type | HTTP 413 / 400 from `POST /v1/documents` (`api/app.py:142-154`). |
-| Watcher crash mid-document | `resume_processing` restarts from the manifest's last completed node (`watcher.py:121-149`). |
+| Watcher crash mid-document | `resume_processing` restarts from the manifest's last completed node; a crash between claim and the first manifest checkpoint, or between the archive rename and the `archived` audit entry, is recovered by `_recover_orphans` / `reconcile_archived` (`watcher.py`, `pipeline/flow.py`). |
 | Catalog write fails | Logged and ignored — the catalog is best-effort; the manifest and archive remain authoritative (`pipeline/flow.py:255-256`). |
 | Eval document raises | Recorded as an error row; the run continues (`eval/runner.py:404-411`). |
 | OTLP collector unreachable (e.g. no Docker) | Spans are still recorded in the local store (`<base_dir>/traces.db`) and replayed; the batch OTLP exporter drops the failed shipments and never raises into the pipeline (`obs/tracing.py`). `GET /ready` reports `collector` `down` (endpoint set, nothing listening) or `unconfigured` (no endpoint), so the loss is visible rather than silent. |

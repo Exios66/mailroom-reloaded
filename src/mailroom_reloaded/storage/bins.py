@@ -67,6 +67,21 @@ class Bins:
         """Return the manifests directory, creating it and its parents if needed."""
         return self._dir("manifests")
 
+    def is_claimed(self, path: Path) -> bool:
+        """Whether ``path`` already lives under ``processing/<worker>/``."""
+        try:
+            Path(path).resolve().relative_to((self.base / "processing").resolve())
+        except ValueError:
+            return False
+        return True
+
+    def processing_files(self) -> list[Path]:
+        """Every regular file under ``processing/<worker>/`` (all workers), sorted."""
+        root = self.base / "processing"
+        if not root.is_dir():
+            return []
+        return sorted(p for p in root.glob("*/*") if p.is_file())
+
     def claim(self, path: Path, worker_id: str) -> Path | None:
         """Atomically move ``path`` into processing/<worker_id>/ and return the new path.
 

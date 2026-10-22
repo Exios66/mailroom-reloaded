@@ -1,8 +1,10 @@
 """Deterministic archivist (ported from ``agents/archivist.py``).
 
-``archive_document`` moves the working file into ``archive/<doc_type>/``, writes
-a ``<name>.report.json`` sidecar next to it and appends the hash-chained audit
-entry ``archived`` carrying the archived file's sha256.
+``archive_document`` writes a ``<name>.report.json`` sidecar, appends the
+write-ahead audit entry ``archiving`` (destination, sidecar, sha256), moves the
+working file into ``archive/<doc_type>/`` and appends the hash-chained audit entry
+``archived``. The ``archiving`` intent is durable before the move, so a crash at any
+point leaves ``flow.reconcile_archived`` enough to locate and finish the document.
 """
 
 from __future__ import annotations
@@ -51,6 +53,11 @@ class ArchiveResult:
     sidecar_path: Path
 
 
+def _move(src: Path, dest: Path) -> None:
+    """Atomic rename into the archive; the single seam crash tests interrupt."""
+    os.replace(src, dest)
+
+
 def archive_document(bins: Bins, manifest: Manifest, state) -> ArchiveResult:
     """Move ``state.path`` into ``archive/<doc_type>/`` and record the sha256."""
     src = Path(state.path)
@@ -58,23 +65,22 @@ def archive_document(bins: Bins, manifest: Manifest, state) -> ArchiveResult:
     dest_dir = bins.archive / doc_type
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{uuid.uuid4().hex}_{src.name}"
-    os.replace(src, dest)
-    state.path = str(dest)
-
-    file_sha256 = _sha256(dest)
-    report = getattr(state, "report", None) or {}
     sidecar = dest.with_name(f"{dest.name}.report.json")
+    file_sha256 = _sha256(src)
+    report = getattr(state, "report", None) or {}
     sidecar.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-
-    audit_log.append(
-        state.doc_id,
-        "archive",
-        "archived",
-        {
-            "file_sha256": file_sha256,
-            "path": str(dest),
-            "sidecar": str(sidecar),
-            "doc_type": doc_type,
-        },
-    )
+    payload = {
+        "file_sha256": file_sha256,
+        "path": str(dest),
+        "sidecar": str(sidecar),
+        "doc_type": doc_type,
+    }
+    audit_log.append(state.doc_id, "archive", "archiving", payload)
+    try:
+        _move(src, dest)
+    except OSError:
+        sidecar.unlink(missing_ok=True)
+        raise
+    state.path = str(dest)
+    audit_log.append(state.doc_id, "archive", "archived", payload)
     return ArchiveResult(path=dest, file_sha256=file_sha256, sidecar_path=sidecar)

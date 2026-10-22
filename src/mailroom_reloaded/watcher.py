@@ -34,7 +34,7 @@ from mailroom_reloaded.obs.run_context import ensure_run_scope, live_run_id
 from mailroom_reloaded.pipeline import flow as _flow
 from mailroom_reloaded.pipeline import run_ledger as _run_ledger
 from mailroom_reloaded.schemas.manifest import Manifest
-from mailroom_reloaded.storage.bins import Bins
+from mailroom_reloaded.storage.bins import Bins, doc_id_for, load_manifest
 
 __all__ = ["Watcher", "WatcherLockHeld"]
 
@@ -51,6 +51,10 @@ class WatcherLockHeld(RuntimeError):
 
 #: Upload staging files older than this are abandoned by a crashed upload.
 STAGING_STALE_AFTER_S = 3600
+#: a claimed file younger than this is assumed live (``rename`` refreshes ctime), not orphaned
+ORPHAN_GRACE_S = 30.0
+#: minimum spacing between orphan sweeps in the drain loop
+ORPHAN_SWEEP_INTERVAL_S = 60.0
 
 
 def _is_processable(path: Path) -> bool:
@@ -131,6 +135,9 @@ class Watcher:
         self.ready = threading.Event()
         self._inflight = 0
         self._inflight_lock = threading.Lock()
+        self.orphan_grace_s = ORPHAN_GRACE_S
+        self._active: set[str] = set()
+        self._last_orphan_sweep = 0.0
 
     def _bump_inflight(self, delta: int) -> None:
         """Adjust the in-flight count and publish it, atomically."""
@@ -165,6 +172,7 @@ class Watcher:
         no duplicate entries.
         """
         count = 0
+        handled: set[str] = set()
         self._close_stale_ledger_runs()
         self._sweep_stale_staging()
         for manifest_path in sorted(self.bins.manifests.glob("*.json")):
@@ -179,6 +187,8 @@ class Watcher:
             if manifest.status != "processing":
                 continue
             path = self._manifest_file(manifest)
+            if path is not None:
+                handled.add(str(path))
             if path is None:
                 logger.warning("resume_source_missing", doc_id=manifest.doc_id)
                 try:
@@ -196,9 +206,48 @@ class Watcher:
                 continue
             count += 1
             logger.info("resumed_processing_manifest", doc_id=manifest.doc_id)
+        count += self._recover_orphans(handled)
         self.resumed += count
         self._startup_done = True
         return count
+
+    def _recover_orphans(self, handled: set[str] | None = None) -> int:
+        """Run claimed files that never reached a manifest checkpoint; return the count.
+
+        A crash after the watcher's ``claim`` and before the flow's first manifest
+        save leaves a file under ``processing/`` that no manifest names, so the
+        manifest scan cannot see it. Files younger than ``orphan_grace_s``, files
+        this watcher is running, and ones a live manifest already owns are skipped.
+        """
+        self._last_orphan_sweep = time.monotonic()
+        handled = handled or set()
+        recovered = 0
+        for path in self.bins.processing_files():
+            key = str(path)
+            if not _is_processable(path) or key in handled or key in self._active:
+                continue
+            try:
+                if time.time() - path.stat().st_ctime < self.orphan_grace_s:
+                    continue
+                owner = load_manifest(self.bins, doc_id_for(path))
+            except Exception:  # one bad file must not stop startup
+                logger.warning("orphan_inspect_failed", path=key, exc_info=True)
+                continue
+            if owner is not None and owner.status == "processing":
+                current = self._manifest_file(owner)
+                if current is not None:
+                    logger.warning(
+                        "orphan_duplicate_skipped", path=key, doc_id=owner.doc_id
+                    )
+                    continue
+            try:
+                _flow.run_document(path, worker_id=self.worker_id)
+            except Exception:
+                logger.exception("orphan_recovery_failed", path=key)
+                continue
+            recovered += 1
+            logger.info("recovered_orphan_claim", path=key)
+        return recovered
 
     @staticmethod
     def _close_stale_ledger_runs() -> None:
@@ -225,6 +274,11 @@ class Watcher:
         """Process the inbox once; return the number of documents claimed."""
         if not self._startup_done and self._lock is not None:
             self.resume_processing()
+        if (
+            self._lock is not None
+            and time.monotonic() - self._last_orphan_sweep >= ORPHAN_SWEEP_INTERVAL_S
+        ):
+            self.resumed += self._recover_orphans()
         files = [f for f in sorted(self.bins.inbox.iterdir()) if _is_processable(f)]
         with ensure_run_scope():
             M.queue_depth.set(len(files), {"bin": "inbox"})
@@ -248,6 +302,7 @@ class Watcher:
             logger.debug("claim_lost", file=str(path), worker_id=self.worker_id)
             return False
         self._bump_inflight(1)
+        self._active.add(str(claimed))
         try:
             _flow.run_document(claimed, worker_id=self.worker_id)
             return True
@@ -255,6 +310,7 @@ class Watcher:
             logger.exception("watcher_document_crashed", file=str(claimed))
             return True
         finally:
+            self._active.discard(str(claimed))
             self._bump_inflight(-1)
 
     # ------------------------------------------------------------- loop

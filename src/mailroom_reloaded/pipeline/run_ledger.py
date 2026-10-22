@@ -47,6 +47,7 @@ __all__ = [
     "record_cell",
     "record_document",
     "record_reconciled",
+    "record_review_rejected",
     "snapshot",
 ]
 
@@ -453,6 +454,32 @@ def record_reconciled(
         ledger.append("doc_closed", run_id, doc_id=doc_id, payload=payload)
     except Exception:
         logger.warning("ledger_record_reconciled_failed", exc_info=True)
+
+
+def record_review_rejected(
+    ledger: Ledger,
+    run_id: str,
+    doc_id: str,
+    doc_type: str | None = None,
+    route_trail: list[str] | tuple[str, ...] = (),
+) -> None:
+    """``doc_closed`` for a parked document an operator rejected (terminal ``failed``).
+
+    The rejection runs no pipeline node, so this invocation spends nothing and carries
+    no failure reason: the decision itself is the reason.
+    """
+    try:
+        payload = {
+            "invocation": _next_invocation(ledger, run_id, doc_id),
+            "outcome": "failed",
+            "doc_type": doc_type,
+            "audit_head": _audit_head(doc_id),
+            "usage_complete": True,
+            "route_trail": list(route_trail),
+        }
+        ledger.append("doc_closed", run_id, doc_id=doc_id, payload=payload)
+    except Exception:
+        logger.warning("ledger_record_review_rejected_failed", exc_info=True)
 
 
 def record_cell(

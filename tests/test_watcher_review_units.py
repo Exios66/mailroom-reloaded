@@ -297,6 +297,47 @@ def test_drainer_does_not_recover_live_workers(bins, monkeypatch):
         watcher._release_lock(lock)
 
 
+@pytest.mark.parametrize("source", ["same", "other", "missing", None])
+def test_drain_orphan_sweep_respects_manifest_source(bins, monkeypatch, source):
+    path = bins.inbox / "letter.txt"
+    path.write_text("synthetic letter")
+    claimed = bins.claim(path, "worker")
+    assert claimed is not None
+    if source is not None:
+        current = claimed if source == "same" else bins.processing("reviewer") / "letter.txt"
+        if source == "other":
+            current.write_bytes(claimed.read_bytes())
+        save_manifest(
+            bins,
+            Manifest(
+                doc_id=watcher.doc_id_for(claimed),
+                filename=path.name,
+                content_sha256=hashlib.sha256(claimed.read_bytes()).hexdigest(),
+                status="processing",
+                state={"path": str(current)},
+            ),
+        )
+    instance = watcher.Watcher(bins, "drainer")
+    instance._startup_done = True  # exercise the periodic sweep after startup
+    instance.orphan_grace_s = 0.0
+    run = Mock()
+    monkeypatch.setattr(watcher._flow, "run_document", run)
+    lock = watcher._acquire_watcher_lock(bins.base / watcher.WATCHER_LOCK_NAME)
+    assert lock is not None
+    instance._lock = lock
+    try:
+        assert instance.drain_once() == 0
+        if source in {"same", "other"}:
+            run.assert_not_called()
+            assert instance.resumed == 0
+        else:
+            run.assert_called_once_with(claimed, worker_id="drainer")
+            assert instance.resumed == 1
+    finally:
+        instance._lock = None
+        watcher._release_lock(lock)
+
+
 @pytest.mark.parametrize("reviewer", ["../../escape", r"..\..\escape", "/", "..", "", "alice"])
 def test_reviewer_cannot_escape_processing_directory(bins, parked, monkeypatch, reviewer):
     from pathlib import Path
