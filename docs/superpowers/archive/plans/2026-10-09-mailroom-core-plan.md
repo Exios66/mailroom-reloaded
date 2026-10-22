@@ -445,6 +445,16 @@ _Status 2026-10-10: every branch below was verified (merged into `origin/main`, 
 
 ### Phase 6: full-pipeline TUI, Docker, Modal and Phoenix/Grafana wiring
 
+> **2026-10-22 reentry (#64):** B1–B4 implementation in `feat/tui-p6b1-b4`
+> is pending gates, adversarial review, browser evidence and merge, not shipped
+> on `main`. Keep the sub-plan's B1–B4 boxes unticked until the criterion → PR →
+> merged SHA mapping exists. Planned screenshots use the separate
+> `docs/demo/p6b1-4/manifest.json`; gate output belongs in the
+> [reentry evidence/status record](../../../evidence/2026-10-22-reentry/README.md).
+> #65 remains a separate per-command series with control default-off. This note
+> updates historical tracking only; `docs/superpowers/plans/v1.md` remains the
+> active plan, and no release is being cut.
+
 Detailed in the sub-plan [`2026-10-10-pipeline-tui-wiring.md`](2026-10-10-pipeline-tui-wiring.md) (draft, awaiting owner review; decisions D14 to D18 live there). Sequence: P6-A foundations (plugin boundary, `/ready`), P6-B operator commands, P6-C Phoenix/Grafana wiring (incl. R-05), P6-D Docker (healthchecks, R-04 smoke), P6-E Modal (R-06/R-07, status and cost surface), P6-F end-to-end browser checks and demo screenshots. **Status 2026-10-10:** B11 `inbox` is shipped (#78). P6-A (A1-A4: plugin boundary, `tui/lib/` helpers, `api/routes/`, `GET /ready`) merged (#95); the SHA mapping goes on #63 at merge. The Docker images, compose stack and sandbox container are **verified on a real host** (#91, R-04; evidence `docs/evidence/2026-10-10-docker-verification/`; issues #81-#84 closed). Tracking issues: #63 (P6-A), #64 (B1-B4), #65 (B5-B10), #66 (C1-C5, R-05), #67 (D1-D6, R-04), #68 (E1-E6, R-07), #69 (F1-F4). R-07 and the live Grafana/Modal checks still need owner credentials and stay unticked until evidenced under `docs/evidence/`.
 
 ---

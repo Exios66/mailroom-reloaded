@@ -44,6 +44,15 @@ Each command is read-only unless marked (control).
 - [ ] **B2 `ready`** (`health --all` alias) renders the `/ready` table with colour-coded status and latency; `watch ready` re-polls.
 - [ ] **B3 `config`** shows non-secret effective settings (`GET /v1/config`): provider, model, base URL host, public URLs, retention, feature flags. Secrets are shown as `set`/`unset` only.
 - [ ] **B4 `replay export <session> [--out file]`** wires `GET /v1/replay/sessions/{id}/export` (browser download). Mirrors CLI `mailroom replay export`.
+
+> **2026-10-22 reentry (#64):** B1–B4 implementation is complete in the shared
+> `feat/tui-p6b1-b4` checkout, pending gates, adversarial review, browser evidence
+> and merge; the boxes remain unticked. Planned command captures use
+> `docs/demo/p6b1-4/manifest.json`, preserving the old release gallery. See the
+> [reentry evidence/status record](../../../evidence/2026-10-22-reentry/README.md).
+> Closure requires criterion → evidence → PR → merged SHA mapping; use `Refs #64`,
+> not `Closes #64`. This historical plan is not reactivated.
+
 - [ ] **B5 `queue`/`review queue`**: list items awaiting review with transcript view (`review show <id>` renders the conversation, verdict, rubric scores); `resolve` already exists for decisions.
 - [ ] **B6 `ingest` (control)**: `ingest upload` (exists as `upload`), `ingest folder <path>` (server-side path inside the configured intake dir only), `ingest gmail poll` (`POST /v1/intake/gmail/poll`). Result is streamed into the existing `watch` view.
 - [ ] **B7 `watcher start|stop|status` (control)** against `/v1/watcher` (5). Shows the watcher mode (in-process vs `split-watcher` container) and refuses start when split.

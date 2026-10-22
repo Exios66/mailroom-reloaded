@@ -1,0 +1,14 @@
+ok   help lists commands
+ok   links.png (71609 bytes)
+ok   links table
+ok   ready.png (80971 bytes)
+ok   ready components, colours and latencies
+ok   health --all alias
+ok   watch ready re-polls and Ctrl+C cancels further requests
+ok   config.png (146939 bytes)
+ok   config renders set/unset secret markers without authentication
+ok   replay-export.png (48141 bytes)
+ok   replay export downloaded proof.json (18269 bytes), identical to API export
+ok   no pageerrors
+wrote 4 images + manifest.json to docs/demo/p6b1-4
+all command checks passed

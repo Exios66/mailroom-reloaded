@@ -1,0 +1,478 @@
+TAP version 13
+# Subtest: config has help and no command-to-command import
+ok 1 - config has help and no command-to-command import
+  ---
+  duration_ms: 1.637708
+  type: 'test'
+  ...
+# Subtest: config renders dotted settings using the session token
+ok 2 - config renders dotted settings using the session token
+  ---
+  duration_ms: 20.386791
+  type: 'test'
+  ...
+# Subtest: secret scalars, arrays and nested objects never reach rendered output
+ok 3 - secret scalars, arrays and nested objects never reach rendered output
+  ---
+  duration_ms: 0.637583
+  type: 'test'
+  ...
+# Subtest: config output is text-only, bounded, and rejects malformed payloads
+ok 4 - config output is text-only, bounded, and rejects malformed payloads
+  ---
+  duration_ms: 1.208667
+  type: 'test'
+  ...
+# Subtest: config 401 gives auth hint (no token) without exposing error bodies
+ok 5 - config 401 gives auth hint (no token) without exposing error bodies
+  ---
+  duration_ms: 0.452625
+  type: 'test'
+  ...
+# Subtest: config 401 gives auth hint (wrong-token) without exposing error bodies
+ok 6 - config 401 gives auth hint (wrong-token) without exposing error bodies
+  ---
+  duration_ms: 0.439584
+  type: 'test'
+  ...
+# Subtest: config handles backend-down, invalid responses, bad arguments and cancellation
+ok 7 - config handles backend-down, invalid responses, bad arguments and cancellation
+  ---
+  duration_ms: 0.971583
+  type: 'test'
+  ...
+# Subtest: links is registered with a man page
+ok 8 - links is registered with a man page
+  ---
+  duration_ms: 0.803042
+  type: 'test'
+  ...
+# Subtest: links prints the validated /links table and reads GET /links
+ok 9 - links prints the validated /links table and reads GET /links
+  ---
+  duration_ms: 1.626208
+  type: 'test'
+  ...
+# Subtest: links marks unset and invalid URLs without showing the invalid value
+ok 10 - links marks unset and invalid URLs without showing the invalid value
+  ---
+  duration_ms: 1.479042
+  type: 'test'
+  ...
+# Subtest: links with a 401 prints the run-auth hint and does not throw
+ok 11 - links with a 401 prints the run-auth hint and does not throw
+  ---
+  duration_ms: 0.780417
+  type: 'test'
+  ...
+# Subtest: links with a 403 or 404 prints the matching hint
+ok 12 - links with a 403 or 404 prints the matching hint
+  ---
+  duration_ms: 1.027167
+  type: 'test'
+  ...
+# Subtest: links with the api offline prints the unreachable message without throwing
+ok 13 - links with the api offline prints the unreachable message without throwing
+  ---
+  duration_ms: 0.621542
+  type: 'test'
+  ...
+# Subtest: links prints nothing when the command was aborted
+ok 14 - links prints nothing when the command was aborted
+  ---
+  duration_ms: 0.408708
+  type: 'test'
+  ...
+# Subtest: links survives malformed payloads
+ok 15 - links survives malformed payloads
+  ---
+  duration_ms: 1.845334
+  type: 'test'
+  ...
+# Subtest: links prints hostile values only as text
+ok 16 - links prints hostile values only as text
+  ---
+  duration_ms: 0.696666
+  type: 'test'
+  ...
+# Subtest: linkRows never throws and marks valid URLs as plain
+ok 17 - linkRows never throws and marks valid URLs as plain
+  ---
+  duration_ms: 0.485417
+  type: 'test'
+  ...
+# Subtest: links open phoenix opens the validated URL with noopener and noreferrer
+ok 18 - links open phoenix opens the validated URL with noopener and noreferrer
+  ---
+  duration_ms: 0.203375
+  type: 'test'
+  ...
+# Subtest: links open grafana never opens a javascript: or non-http URL
+ok 19 - links open grafana never opens a javascript: or non-http URL
+  ---
+  duration_ms: 0.098917
+  type: 'test'
+  ...
+# Subtest: links open prometheus prints a dim line when the payload has no prometheus URL
+ok 20 - links open prometheus prints a dim line when the payload has no prometheus URL
+  ---
+  duration_ms: 0.083833
+  type: 'test'
+  ...
+# Subtest: links open prometheus opens a payload URL when one is published
+ok 21 - links open prometheus opens a payload URL when one is published
+  ---
+  duration_ms: 0.081708
+  type: 'test'
+  ...
+# Subtest: links open with an unset phoenix URL is not configured and opens nothing
+ok 22 - links open with an unset phoenix URL is not configured and opens nothing
+  ---
+  duration_ms: 0.076792
+  type: 'test'
+  ...
+# Subtest: links open reports a throwing opener without throwing
+ok 23 - links open reports a throwing opener without throwing
+  ---
+  duration_ms: 0.089625
+  type: 'test'
+  ...
+# Subtest: links open with a 401 or offline api prints the hint and opens nothing
+ok 24 - links open with a 401 or offline api prints the hint and opens nothing
+  ---
+  duration_ms: 0.144375
+  type: 'test'
+  ...
+# Subtest: links rejects unknown targets and extra arguments before any request
+ok 25 - links rejects unknown targets and extra arguments before any request
+  ---
+  duration_ms: 0.187666
+  type: 'test'
+  ...
+# Subtest: links open never puts a hostile value in a line
+ok 26 - links open never puts a hostile value in a line
+  ---
+  duration_ms: 0.073875
+  type: 'test'
+  ...
+# Subtest: links reports a missing browser opener rather than claiming success
+ok 27 - links reports a missing browser opener rather than claiming success
+  ---
+  duration_ms: 0.717291
+  type: 'test'
+  ...
+# Subtest: links forwards session auth but never prints the token
+ok 28 - links forwards session auth but never prints the token
+  ---
+  duration_ms: 0.1315
+  type: 'test'
+  ...
+# Subtest: links cancellation suppresses a late response and never opens a tab
+ok 29 - links cancellation suppresses a late response and never opens a tab
+  ---
+  duration_ms: 1.051292
+  type: 'test'
+  ...
+# Subtest: links table renders hostile project content using textContent only
+ok 30 - links table renders hostile project content using textContent only
+  ---
+  duration_ms: 0.465167
+  type: 'test'
+  ...
+# Subtest: ready is registered with a man page
+ok 31 - ready is registered with a man page
+  ---
+  duration_ms: 0.840958
+  type: 'test'
+  ...
+# Subtest: readyClass maps the four statuses and gives unknown words no class
+ok 32 - readyClass maps the four statuses and gives unknown words no class
+  ---
+  duration_ms: 0.204209
+  type: 'test'
+  ...
+# Subtest: ready renders a degraded component table after an abort-aware 2050ms response
+ok 33 - ready renders a degraded component table after an abort-aware 2050ms response
+  ---
+  duration_ms: 2053.091333
+  type: 'test'
+  ...
+# Subtest: ready renders the components table with colour classes and latency
+ok 34 - ready renders the components table with colour classes and latency
+  ---
+  duration_ms: 0.871375
+  type: 'test'
+  ...
+# Subtest: ready with an ok aggregate and no detail says how to get the rows
+ok 35 - ready with an ok aggregate and no detail says how to get the rows
+  ---
+  duration_ms: 0.57625
+  type: 'test'
+  ...
+# Subtest: ready with a token that was not accepted says the detail is hidden
+ok 36 - ready with a token that was not accepted says the detail is hidden
+  ---
+  duration_ms: 0.5295
+  type: 'test'
+  ...
+# Subtest: ready shows the rows on a 503 down response
+ok 37 - ready shows the rows on a 503 down response
+  ---
+  duration_ms: 0.467084
+  type: 'test'
+  ...
+# Subtest: ready with a 503 that has no JSON body prints the status
+ok 38 - ready with a 503 that has no JSON body prints the status
+  ---
+  duration_ms: 0.387917
+  type: 'test'
+  ...
+# Subtest: ready with a 401 prints the run-auth hint
+ok 39 - ready with a 401 prints the run-auth hint
+  ---
+  duration_ms: 0.48525
+  type: 'test'
+  ...
+# Subtest: ready with a 403 or 404 prints the matching message
+ok 40 - ready with a 403 or 404 prints the matching message
+  ---
+  duration_ms: 1.154875
+  type: 'test'
+  ...
+# Subtest: ready with the backend offline prints a message and does not throw
+ok 41 - ready with the backend offline prints a message and does not throw
+  ---
+  duration_ms: 0.247167
+  type: 'test'
+  ...
+# Subtest: ready prints nothing when the command was aborted
+ok 42 - ready prints nothing when the command was aborted
+  ---
+  duration_ms: 0.277625
+  type: 'test'
+  ...
+# Subtest: readyView and ready survive malformed payloads
+ok 43 - readyView and ready survive malformed payloads
+  ---
+  duration_ms: 0.658917
+  type: 'test'
+  ...
+# Subtest: ready prints hostile component values only as text
+ok 44 - ready prints hostile component values only as text
+  ---
+  duration_ms: 0.13725
+  type: 'test'
+  ...
+# Subtest: ready rejects arguments and bad flags before any request
+ok 45 - ready rejects arguments and bad flags before any request
+  ---
+  duration_ms: 0.301125
+  type: 'test'
+  ...
+# Subtest: ready --watch re-polls, prints only changes and stops on abort
+ok 46 - ready --watch re-polls, prints only changes and stops on abort
+  ---
+  duration_ms: 5.208209
+  type: 'test'
+  ...
+# Subtest: ready --watch prints one error line per distinct failure and keeps polling
+ok 47 - ready --watch prints one error line per distinct failure and keeps polling
+  ---
+  duration_ms: 1.276084
+  type: 'test'
+  ...
+# Subtest: ready --watch never throws on hostile payloads
+ok 48 - ready --watch never throws on hostile payloads
+  ---
+  duration_ms: 0.854542
+  type: 'test'
+  ...
+# Subtest: ready --watch does nothing after an abort before the first tick
+ok 49 - ready --watch does nothing after an abort before the first tick
+  ---
+  duration_ms: 0.165334
+  type: 'test'
+  ...
+# Subtest: main registers links, ready and config without module failures
+ok 50 - main registers links, ready and config without module failures
+  ---
+  duration_ms: 1.019166
+  type: 'test'
+  ...
+# Subtest: health --all renders readiness while plain health preserves its original handler
+ok 51 - health --all renders readiness while plain health preserves its original handler
+  ---
+  duration_ms: 0.301041
+  type: 'test'
+  ...
+# Subtest: readiness aliases reject invalid arguments before requesting
+ok 52 - readiness aliases reject invalid arguments before requesting
+  ---
+  duration_ms: 0.23025
+  type: 'test'
+  ...
+# Subtest: watch ready re-polls and cancels while plain watch keeps its handler
+ok 53 - watch ready re-polls and cancels while plain watch keeps its handler
+  ---
+  duration_ms: 2.462
+  type: 'test'
+  ...
+# Subtest: readiness watch aborts an in-flight request with no late output
+ok 54 - readiness watch aborts an in-flight request with no late output
+  ---
+  duration_ms: 2.324458
+  type: 'test'
+  ...
+# Subtest: ready cancellation ignores a successful late response
+ok 55 - ready cancellation ignores a successful late response
+  ---
+  duration_ms: 0.308917
+  type: 'test'
+  ...
+# Subtest: ready forwards auth and renders hostile component names as DOM text without tokens
+ok 56 - ready forwards auth and renders hostile component names as DOM text without tokens
+  ---
+  duration_ms: 0.391916
+  type: 'test'
+  ...
+# Subtest: replay command does not import other command modules
+ok 57 - replay command does not import other command modules
+  ---
+  duration_ms: 1.041625
+  type: 'test'
+  ...
+# Subtest: browser download records the exact API bytes, including whitespace and Unicode
+ok 58 - browser download records the exact API bytes, including whitespace and Unicode
+  ---
+  duration_ms: 16.007041
+  type: 'test'
+  ...
+# Subtest: bare run ids and --out choose a local download filename, never a server path
+ok 59 - bare run ids and --out choose a local download filename, never a server path
+  ---
+  duration_ms: 0.551791
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export
+ok 60 - invalid export never fetches: replay export
+  ---
+  duration_ms: 0.1085
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export ../secret
+ok 61 - invalid export never fetches: replay export ../secret
+  ---
+  duration_ms: 0.164958
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export run:..
+ok 62 - invalid export never fetches: replay export run:..
+  ---
+  duration_ms: 0.079791
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 extra
+ok 63 - invalid export never fetches: replay export r1 extra
+  ---
+  duration_ms: 0.200333
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out
+ok 64 - invalid export never fetches: replay export r1 --out
+  ---
+  duration_ms: 0.071834
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=../secret
+ok 65 - invalid export never fetches: replay export r1 --out=../secret
+  ---
+  duration_ms: 0.298166
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=/tmp/file
+ok 66 - invalid export never fetches: replay export r1 --out=/tmp/file
+  ---
+  duration_ms: 0.440167
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=
+ok 67 - invalid export never fetches: replay export r1 --out=
+  ---
+  duration_ms: 0.082334
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out="<img>.json"
+ok 68 - invalid export never fetches: replay export r1 --out="<img>.json"
+  ---
+  duration_ms: 0.051042
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --follow
+ok 69 - invalid export never fetches: replay export r1 --follow
+  ---
+  duration_ms: 0.109458
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 401 without downloads or response-body leakage
+ok 70 - export handles HTTP 401 without downloads or response-body leakage
+  ---
+  duration_ms: 0.46225
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 403 without downloads or response-body leakage
+ok 71 - export handles HTTP 403 without downloads or response-body leakage
+  ---
+  duration_ms: 0.1945
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 404 without downloads or response-body leakage
+ok 72 - export handles HTTP 404 without downloads or response-body leakage
+  ---
+  duration_ms: 0.360959
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 410 without downloads or response-body leakage
+ok 73 - export handles HTTP 410 without downloads or response-body leakage
+  ---
+  duration_ms: 1.236
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 500 without downloads or response-body leakage
+ok 74 - export handles HTTP 500 without downloads or response-body leakage
+  ---
+  duration_ms: 0.34625
+  type: 'test'
+  ...
+# Subtest: offline and cancellation do not cause downloads
+ok 75 - offline and cancellation do not cause downloads
+  ---
+  duration_ms: 0.626083
+  type: 'test'
+  ...
+# Subtest: failed browser click cleans resources and reports a safe error
+ok 76 - failed browser click cleans resources and reports a safe error
+  ---
+  duration_ms: 0.898958
+  type: 'test'
+  ...
+# Subtest: blob HTTP client rejects cross-origin path tricks before sending the token
+ok 77 - blob HTTP client rejects cross-origin path tricks before sending the token
+  ---
+  duration_ms: 1.105166
+  type: 'test'
+  ...
+# Subtest: blob body timeout is classified and the caller abort is preserved
+ok 78 - blob body timeout is classified and the caller abort is preserved
+  ---
+  duration_ms: 6.461625
+  type: 'test'
+  ...
+1..78
+# tests 78
+# suites 0
+# pass 78
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2142.402167
