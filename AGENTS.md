@@ -126,7 +126,7 @@ ingest ─▶ bert_primary ─▶ sort ─▶ gate_classify ─┬─▶ extract
 | `src/mailroom_reloaded/pipeline/` | `state.py`, `flow.py` (`MailroomFlow`), `guards.py`, `report.py`, `archivist.py`. |
 | `src/mailroom_reloaded/prompts/` | Frozen prompts: `frozen_v1/`, `sand37/`, sorter/judge/boss/arbiter, `loader.py`, `lineage.json`. |
 | `src/mailroom_reloaded/schemas/` | Extraction response schemas, manifest, audit, ledger models. |
-| `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` 852b052 subset (`PARITY.md`); lint-excluded. |
+| `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` v0.22.0 subset (`PARITY.md`); lint-excluded. |
 | `src/mailroom_reloaded/storage/` | Bins, SQLite DB/catalog/audit, ledger, span store, retention, anchor. |
 | `src/mailroom_reloaded/config/` | `taxonomy.yaml` — classes, field types, bands, agents, maps. |
 | `scripts/` | Dev/smoke helpers and JEV harvest tools (see §5). |

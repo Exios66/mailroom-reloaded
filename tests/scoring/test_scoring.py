@@ -100,7 +100,7 @@ def test_subclass_vocab_returns_copy_and_unknown_is_empty():
     assert subclass_vocab("nope") == []
 
 
-# Behaviour that arrived with the re-vendor to llm-dojo-scoring 8c7b7f1
+# Behaviour that arrived with the re-vendor to llm-dojo-scoring 8c7b7f1 (carried unchanged into v0.22.0)
 # (scoring/PARITY.md). Each test fails on the v0.21.0 vendored copy.
 
 

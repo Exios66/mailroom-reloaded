@@ -1,12 +1,12 @@
 # Parity record: vendored llm-dojo-scoring subset
 
 - Upstream: github.com/Exios66/llm-dojo-scoring
-- Commit: `852b05274a97d2b1a5f5ba1d31991055083e60bc` (branch `claude/cool-wozniak-o044u4`)
-- Tag: none yet. **Interim:** this pin becomes `v0.22.0` once the dojo tags its release; re-pin then and update this file and the references listed under "Pins" below.
-- Intermediate pin: `8c7b7f1` (`8c7b7f1c9c3b18a7036ee58addcfaa35d816177d`). `8c7b7f1..852b052` changes none of the eleven vendored modules (verified with `git diff`); the new upstream commits add the importable eval-environment prompt lineage (`prompts/lineage.py`, `prompts/eval_environment_lineage.json`), which is not vendored. The `parity` extra installs it, and the dojo's package-data now ships `prompts/*.json`.
-- Previous pin: `v0.21.0` (`6a3053ccc32b4f3290a979ac75265affa77a6503`).
+- Tag: `v0.22.0`
+- Commit: `a2862cec3c7688a62e4d7fa4ba329a53d26c9c23`
+- Interim pins (superseded): `8c7b7f1` (`8c7b7f1c9c3b18a7036ee58addcfaa35d816177d`) and `852b052` (`852b05274a97d2b1a5f5ba1d31991055083e60bc`, branch `claude/cool-wozniak-o044u4`). `852b052..v0.22.0` (4 upstream commits: CHANGELOG, README, docs/PROMPTS.md, `__init__` version, `prompts/catalog.yaml`, `pyproject.toml`, `tests/test_consumer_compat.py`) changes none of the eleven vendored modules (verified 2026-10-22 by sha256 of every upstream file at the tag against the table below). The release adds the importable eval-environment prompt lineage, which is not vendored; the `parity` extra installs it.
+- Previous release pin: `v0.21.0` (`6a3053ccc32b4f3290a979ac75265affa77a6503`).
 
-Modules are copied from `llm_dojo_scoring/` at the pinned commit. Sha256 columns: upstream file, vendored file.
+Modules are copied from `llm_dojo_scoring/` at the tag. Sha256 columns: upstream file, vendored file.
 
 Re-vendor procedure (no script; the repo has none): for each module in the table, copy `llm_dojo_scoring/<module>.py` from the pinned commit verbatim, then apply only the edits listed in the `change` column. `diff` each vendored file against its upstream file; only those edits may show.
 
@@ -39,7 +39,7 @@ Parity test: `tests/scoring/test_parity.py` (needs the `parity` extra; skipped o
 
 ## Pins
 
-Every place that records the vendored pin, all at `852b052` (or the interim commit above):
+Every place that records the vendored pin, all at `v0.22.0`:
 
 - `pyproject.toml` `[project.optional-dependencies] parity` and the `[tool.ruff]` comment.
 - `uv.lock` `llm-dojo-scoring` source (regenerated with `uv lock --upgrade-package llm-dojo-scoring`, not hand-edited).

@@ -1726,8 +1726,8 @@ wheels = [
 
 [[package]]
 name = "llm-dojo-scoring"
-version = "0.21.0"
-source = { git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=852b05274a97d2b1a5f5ba1d31991055083e60bc#852b05274a97d2b1a5f5ba1d31991055083e60bc" }
+version = "0.22.0"
+source = { git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=v0.22.0#a2862cec3c7688a62e4d7fa4ba329a53d26c9c23" }
 dependencies = [
     { name = "jellyfish" },
     { name = "matplotlib" },
@@ -1892,7 +1892,7 @@ requires-dist = [
     { name = "google-auth-oauthlib", marker = "extra == 'gmail'" },
     { name = "httpx" },
     { name = "jellyfish" },
-    { name = "llm-dojo-scoring", marker = "extra == 'parity'", git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=852b05274a97d2b1a5f5ba1d31991055083e60bc" },
+    { name = "llm-dojo-scoring", marker = "extra == 'parity'", git = "https://github.com/Exios66/llm-dojo-scoring.git?rev=v0.22.0" },
     { name = "mailroom-ml", extras = ["serve"], marker = "extra == 'bert'", git = "https://github.com/LLM-Mailroom-Services/mailroom-ml.git" },
     { name = "matplotlib", marker = "extra == 'eval'" },
     { name = "modal", marker = "extra == 'deploy'", specifier = "==1.5.5" },
