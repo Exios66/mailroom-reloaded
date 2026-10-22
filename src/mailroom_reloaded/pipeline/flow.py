@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import json
 import time
 from pathlib import Path
 from typing import Any, ClassVar
@@ -1040,10 +1041,12 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     ``archive_document`` appends a write-ahead ``archiving`` audit entry, moves the
     file, then appends ``archived``, all before ``_record_node`` checkpoints the
     manifest. When the audit log holds ``archived`` (or a trailing ``archiving``
-    whose destination now exists, i.e. a crash between the move and ``archived``) and
-    the archived file exists, mark manifest + state ``archived`` and upsert the
-    catalog (a failed upsert is left pending). Returns whether the manifest was
-    reconciled.
+    whose destination now exists, i.e. a crash between the move and ``archived``),
+    verify the file digest and the report sidecar before marking manifest + state
+    ``archived`` and upserting the catalog (a failed upsert is left pending).
+    Missing or invalid evidence is left untouched for operator repair; no report
+    is reconstructed from an earlier checkpoint. Returns whether the manifest
+    was reconciled.
     """
     events = [
         e
@@ -1055,7 +1058,24 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     last = events[-1]
     payload = last.payload
     archive_path = payload.get("path")
-    if not archive_path or not Path(archive_path).is_file():
+    if not archive_path:
+        return False
+    try:
+        if not Path(archive_path).is_file():
+            return False
+        if _sha256_file(Path(archive_path)) != payload.get("file_sha256"):
+            logger.warning("archive_recovery_digest_mismatch", doc_id=manifest.doc_id)
+            return False
+        report = json.loads(Path(payload["sidecar"]).read_text(encoding="utf-8"))
+        if (
+            not isinstance(report, dict)
+            or report.get("doc_id") != manifest.doc_id
+            or report.get("status") != "archived"
+        ):
+            logger.warning("archive_recovery_report_invalid", doc_id=manifest.doc_id)
+            return False
+    except (OSError, ValueError, TypeError, KeyError):
+        logger.warning("archive_recovery_evidence_unreadable", doc_id=manifest.doc_id)
         return False
     if last.event == "archiving":
         audit_log.append(manifest.doc_id, "archive", "archived", payload)

@@ -433,11 +433,21 @@ def _run_and_get(env, mock_provider, monkeypatch):
     return _write_inbox(env)
 
 
+@pytest.mark.parametrize("legacy", [False, True])
 def test_crash_between_archive_and_snapshot_is_reconciled(
-    env, mock_provider, monkeypatch
+    env, mock_provider, monkeypatch, legacy
 ):
     """Finding 6: archived audit entry + archived file but manifest still processing."""
     bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    real_append = audit_log.append
+
+    def append_without_intent(doc_id, node, event, payload):
+        if event != "archiving":
+            return real_append(doc_id, node, event, payload)
+        return None
+
+    if legacy:
+        monkeypatch.setattr(audit_log, "append", append_without_intent)
 
     def boom(self, node_name, elapsed):
         if node_name == "report_catalog_archive":
@@ -466,6 +476,7 @@ def test_crash_between_archive_and_snapshot_is_reconciled(
     rec = catalog.get(doc_id)
     assert rec is not None and rec.archive_path == str(archived[0])
     assert audit_log.verify_chain(audit_log.entries(doc_id)).ok
+    assert any(entry.event == "archiving" for entry in audit_log.entries(doc_id)) is not legacy
 
 
 def test_missing_source_without_archive_is_left_and_warned(env, caplog):
@@ -540,8 +551,10 @@ def test_reject_updates_catalog_to_failed(env, mock_provider, monkeypatch):
     assert catalog.list(status="parked") == []
 
 
-def test_approve_updates_catalog_to_archived(env, mock_provider, monkeypatch):
-    """Resolving a parked document by correction archives the catalog row."""
+@pytest.mark.parametrize("action", ["approve", "correct"])
+def test_approve_updates_catalog_to_archived(env, mock_provider, monkeypatch, action):
+    """Real review ordering preserves the archived catalog and audit replay status."""
+    from mailroom_reloaded.obs.replay.audit_source import timeline_from_audit
     from mailroom_reloaded.storage import catalog
 
     _bins, parked = _park(env, mock_provider, monkeypatch)
@@ -554,12 +567,18 @@ def test_approve_updates_catalog_to_archived(env, mock_provider, monkeypatch):
 
     monkeypatch.setattr(flow_mod, "_extract", fake_extract)
     resolve_review(
-        parked.doc_id, "correct", doc_type="insurance_claim", doc_subclass="fnol"
+        parked.doc_id, action, doc_type="insurance_claim", doc_subclass="fnol"
     )
 
     rec = catalog.get(parked.doc_id)
     assert rec is not None and rec.status == "archived"
     assert catalog.list(status="parked") == []
+    entries = audit_log.entries(parked.doc_id)
+    assert entries[-1].event == "review_resolved"
+    assert any(entry.event == "archived" for entry in entries[:-1])
+    timeline = timeline_from_audit("doc", parked.doc_id)
+    assert timeline is not None
+    assert timeline.entities[0].final_status == "archived"
 
 
 def test_flow_crash_during_resolve_reopens_parked_and_retry_succeeds(
@@ -652,6 +671,85 @@ def test_crash_between_archive_move_and_audit_is_recovered(
     # a second startup is a no-op: no duplicate terminal records
     Watcher(bins, "w3").resume_processing()
     assert [e.event for e in audit_log.entries(doc_id)].count("archived") == 1
+
+
+@pytest.mark.parametrize("checkpoint", ["archiving", "archived"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "file_mismatch", "missing_sidecar", "invalid_json", "invalid_shape",
+        "wrong_doc", "wrong_report_status",
+    ],
+)
+def test_archive_recovery_requires_intact_evidence(
+    env, mock_provider, monkeypatch, ledger_state, checkpoint, damage
+):
+    """Invalid archive evidence requires operator repair, without changing durable state."""
+    from mailroom_reloaded.pipeline import archivist
+    from mailroom_reloaded.storage.ledger import get_ledger
+
+    bins, path = _run_and_get(env, mock_provider, monkeypatch)
+    real_append = audit_log.append
+
+    def crash_at_checkpoint(doc_id, node, event, payload):
+        if node == "archive" and event == "archived":
+            if checkpoint == "archived":
+                real_append(doc_id, node, event, payload)
+            raise RuntimeError("crash after archive move")
+        return real_append(doc_id, node, event, payload)
+
+    monkeypatch.setattr(archivist.audit_log, "append", crash_at_checkpoint)
+    with pytest.raises(RuntimeError, match="crash after archive move"):
+        flow_mod.run_document(path, worker_id="w1")
+    monkeypatch.setattr(audit_log, "append", real_append)
+
+    doc_id = next(bins.manifests.glob("*.json")).stem
+    archive_event = next(
+        entry for entry in reversed(audit_log.entries(doc_id))
+        if entry.event == checkpoint
+    )
+    destination = Path(archive_event.payload["path"])
+    sidecar = Path(archive_event.payload["sidecar"])
+    if damage == "file_mismatch":
+        destination.write_bytes(b"unrelated document")
+    elif damage == "missing_sidecar":
+        sidecar.unlink()
+    elif damage == "invalid_json":
+        sidecar.write_text("{torn", encoding="utf-8")
+    elif damage == "invalid_shape":
+        sidecar.write_text("[]", encoding="utf-8")
+    else:
+        report = json.loads(sidecar.read_text())
+        if damage == "wrong_report_status":
+            report["status"] = "processing"
+        else:
+            report["doc_id"] = "another-document"
+        sidecar.write_text(json.dumps(report), encoding="utf-8")
+
+    manifest_path = bins.manifests / f"{doc_id}.json"
+    before_manifest = manifest_path.read_bytes()
+    before_audit = audit_log.entries(doc_id)
+    before_catalog = catalog.get(doc_id)
+    before_file = destination.read_bytes()
+    before_sidecar = sidecar.read_bytes() if sidecar.exists() else None
+    ledger = get_ledger()
+    assert ledger.flush()
+    before_ledger = ledger.entries(doc_id=doc_id, limit=100)
+
+    for _attempt in range(2):
+        manifest = load_manifest(bins, doc_id)
+        before_state = manifest.model_dump(mode="json")
+        assert flow_mod.reconcile_archived(bins, manifest) is False
+        assert manifest.model_dump(mode="json") == before_state
+        assert manifest_path.read_bytes() == before_manifest
+        assert audit_log.entries(doc_id) == before_audit
+        assert catalog.get(doc_id) == before_catalog
+        assert destination.read_bytes() == before_file
+        assert (sidecar.read_bytes() if sidecar.exists() else None) == before_sidecar
+        assert ledger.flush()
+        assert ledger.entries(doc_id=doc_id, limit=100) == before_ledger
+    assert audit_log.verify_chain(audit_log.entries(doc_id)).ok
+    assert ledger.verify().ok
 
 
 def test_crash_after_sidecar_before_move_resumes_and_archives_once(

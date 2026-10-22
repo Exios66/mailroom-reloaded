@@ -330,7 +330,9 @@ def timeline_from_audit(
             continue
         seen_docs[r.doc_id] = None
         p = _payload(r.payload)
-        if r.event in {"parked", "archived", "review_resolved", "node_failed"}:
+        if r.event in {"parked", "archived", "node_failed"} or (
+            r.event == "review_resolved" and p.get("action") == "reject"
+        ):
             # Rows follow audit sequence; wall-clock timestamps can move backwards.
             last_terminal[r.doc_id] = (r.event, p)
         if r.event in ("completed", "node_failed"):

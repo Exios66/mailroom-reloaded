@@ -360,7 +360,7 @@ def test_rejected_parked_document_is_failed(engine) -> None:
     [
         (("human_review", "parked", {}), "parked"),
         (("archive", "archived", {}), "archived"),
-        (("review", "review_resolved", {"action": "approve"}), "processing"),
+        (("review", "review_resolved", {"action": "approve"}), "failed"),
     ],
 )
 @pytest.mark.parametrize("at", [3.0, 8.0])
@@ -379,6 +379,33 @@ def test_later_terminal_event_supersedes_rejection(engine, terminal, status, at)
     tl = timeline_from_audit("doc", "drej", engine=engine)
     assert tl is not None
     assert tl.entities[0].final_status == status
+
+
+@pytest.mark.parametrize("action", ["approve", "correct"])
+@pytest.mark.parametrize(
+    ("terminal", "status"),
+    [
+        (("archive", "archived", {}), "archived"),
+        (("human_review", "parked", {}), "parked"),
+        (("review", "review_resolved", {"action": "reject"}), "failed"),
+    ],
+)
+def test_review_resolution_preserves_resumed_terminal(engine, action, terminal, status):
+    """review.py appends approve/correct only after the resumed flow returns."""
+    _chain(
+        engine,
+        "dreview",
+        [
+            ("ingest", "completed", {"elapsed_s": 1.0}, 1.0),
+            ("human_review", "parked", {}, 2.0),
+            (*terminal, 3.0),
+            ("review", "review_resolved", {"action": action}, 4.0),
+        ],
+    )
+    timeline = timeline_from_audit("doc", "dreview", engine=engine)
+    assert timeline is not None
+    assert timeline.entities[0].final_status == status
+    assert timeline.events[-1].payload["action"] == action
 
 
 def test_last_attempt_failed_stays_failed(engine) -> None:

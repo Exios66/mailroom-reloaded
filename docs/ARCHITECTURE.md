@@ -124,7 +124,8 @@ block is descriptive only; `Bins` hardcodes these names (`storage/bins.py:10`,
   `_guard_node` (`pipeline/flow.py:291-292`). Two crash windows have their own
   recovery: `archive_document` writes an `archiving` audit entry before the
   rename so `reconcile_archived` can finish a document moved but not yet
-  `archived`; and `Watcher._recover_orphans` runs files left under `processing/`
+  `archived`, after verifying the destination against the recorded SHA-256 and
+  requiring a readable JSON-object report sidecar; and `Watcher._recover_orphans` runs files left under `processing/`
   that no manifest names (a crash between claim and the first checkpoint).
 
 The `split-watcher` Docker profile exists because `watcher.lock` (an exclusive

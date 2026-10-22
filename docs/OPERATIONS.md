@@ -33,6 +33,15 @@ uv run mailroom serve --watch                              # API + embedded watc
   recorded `archived` is finished from its `archiving` audit entry
   (`flow.reconcile_archived`).
 
+Archive reconciliation does not certify a file merely because it exists. Its
+bytes must match the recorded archive SHA-256, and the recorded report sidecar
+must be a readable JSON object with the same `doc_id` and `status: archived`.
+A missing/corrupt sidecar or mismatched file is
+left unreconciled without a new `archived` record. Restore the original bytes
+and sidecar from trusted operator evidence before retrying startup; do not edit
+the audit chain or invent a report to make recovery pass. This check validates
+sidecar availability/shape, not a cryptographic hash of its contents.
+
 Deployment shapes:
 
 - **Embedded** (`MAILROOM_EMBED_WATCHER=1`) — the API lifespan starts a daemon
@@ -62,6 +71,11 @@ Every disposition appends a hash-chained `review_resolved` audit entry
 (`review.py:76`, `review.py:93`). The endpoint returns 404 when no parked
 manifest matches (`api/app.py:230-233`). The source path is recovered from the
 manifest state or the `review/` bin filename (`review.py:104-119`).
+
+Successful approval/correction completes its resumed flow before recording the
+review decision. Audit-backed replay therefore treats only a rejection as a
+terminal review event: a later approval/correction note must not overwrite the
+already-archived outcome, while a subsequent park still takes precedence.
 
 ## Audit verification
 
