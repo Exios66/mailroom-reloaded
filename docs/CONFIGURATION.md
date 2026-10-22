@@ -11,6 +11,30 @@ effect, and the source that reads it.
 taxonomy or a model map you must restart the process: `load_taxonomy` and
 `get_settings` are `lru_cache`d (`settings.py:107-110`, `settings.py:138-140`).
 
+## Read-only summary: `GET /v1/config`
+
+`src/mailroom_reloaded/api/routes/config.py` exposes an allow-listed JSON summary
+(`schema_version: 1`, `service`, `version`) for operator inspection. The TUI
+`config` command renders it as dotted key/value rows. This route cannot change
+settings and returns `Cache-Control: no-store`. Like other `/v1` routes, it
+requires the configured bearer token; missing or incorrect tokens return 401.
+
+Sections cover API token presence and upload limit; provider and Jev settings;
+taxonomy classes, BERT enablement and confidence thresholds; storage/anchor;
+tracing and retention; public links; embedded watcher state; pager configuration;
+and run GPU cost rate. Secret-typed values (tokens, API keys, passwords, anchor
+DSN/key, webhook secret and OTLP endpoints) are only `set` or `unset` markers,
+never values, lengths or hashes. Provider/Jev base URLs are reduced to
+`scheme://host[:port]`, dropping userinfo, path and query. Public link settings
+remain public URLs, not secret slots: do not put credentials in them.
+
+This is not a complete runtime inventory: the bind host is not reported, and
+filesystem paths report presence only. Watcher state covers only the embedded watcher, not a standalone worker's
+concurrency. Pager fields describe configuration, not sender eligibility or
+delivery success. A taxonomy/Jev section that cannot load reports
+`status: unavailable` and the exception type, not its message. No provider call
+or configuration write is made by this summary.
+
 ## Environment variables
 
 ### Core

@@ -45,16 +45,68 @@ API-token field + `refresh` on the right. The HTML and its assets stay public wh
 | `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
 | `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
 | `replay` | `replay [--limit N] \| replay <run_id\|session id> [--at SECONDS] [--speed N] [--follow]` | Lists replayable sessions, or opens the character-grid replay viewer for one. |
+| `replay export` | `replay export <session> [--out file]` | Downloads a full `replay/v1` JSON timeline; `--out` names the browser download, not a server file. |
 | `cards` | `cards <run_id>` | Shows a run's cards. |
-| `health` | `health` | Checks the API. |
+| `links` | `links [open phoenix\|grafana\|prometheus]` | Shows public observability URLs from `/links`, or opens a configured HTTP(S) target in a new tab. |
+| `ready` | `ready [--watch [--interval N]]` | Shows `/ready` aggregate and component status/latency; optionally polls every 1–60 seconds (default 5). |
+| `config` | `config` | Shows the read-only `/v1/config` summary as dotted keys; secret settings are `set`/`unset`. |
+| `health` | `health [--all]` | Checks `/health`; `--all` shows the same readiness table as `ready`. |
 | `upload` | `upload` | Opens a file picker and queues the file. |
-| `watch` | `watch [--interval 3]` | Follows status changes; stops on Ctrl+C or when the tab is hidden. |
+| `watch` | `watch [ready] [--interval N]` | Follows document status (default 3 seconds), or readiness with `watch ready` (default 5 seconds); Ctrl+C stops. |
 | `auth` | `auth <token> \| --clear` | Sets or clears the API token. |
 
 Sources: `src/mailroom_reloaded/api/tui/commands/shell.js`,
-`commands/pipeline.js`, `commands/ledger.js` and `commands/replay.js` (with `replay/`) (each command carries its man page). Keys: Tab ghost
+`commands/pipeline.js`, `commands/ledger.js`, `commands/replay.js` (with `replay/`),
+`commands/links.js`, `commands/ready.js` and `commands/config.js`
+(each command carries its man page). Keys: Tab ghost
 completion, Up/Down history, Ctrl+L clear, Ctrl+C stop `watch`, any key skips
 the boot animation.
+
+### Operator summaries: `links`, `ready`, `config`
+
+- `links` prints `public_url`, `phoenix_url`, `grafana_url` and `phoenix_project`
+  from public `GET /links`. `links open phoenix`, `links open grafana` and
+  `links open prometheus` accept only validated HTTP(S) URLs and request a new
+  tab with `noopener,noreferrer`. Missing targets print `not configured`;
+  invalid URLs are not opened. Prometheus opens only if the server publishes
+  `prometheus_url`; the current `/links` response does not publish it.
+- `ready` (also `health --all`) reads public `GET /ready`. Component rows include
+  status and latency;
+  `ok` is green, `degraded` amber, `down` red and `unconfigured` dim. An HTTP 503
+  body is still rendered. When component details are hidden, the command prints
+  an `auth <token>` hint rather than inventing rows. `ready --watch --interval 3`
+  or `watch ready --interval 3` polls every three seconds; it prints again only
+  when statuses change (not latency alone), deduplicates repeated poll errors,
+  and stops on Ctrl+C. Readiness requests have a three-second client deadline,
+  allowing the server's two-second probe budget to return degraded component rows.
+- `config` reads `GET /v1/config`, requiring `auth <token>` when the API has a
+  token configured. Nested settings appear as dotted key/value rows; secret-looking
+  keys accept only the exact markers `set` or `unset`, otherwise showing
+  `withheld`. This is an inspection command, not a settings editor. See
+  [Configuration](CONFIGURATION.md#read-only-summary-get-v1config) for the route's
+  allow-list and limitations.
+
+### `replay export`
+
+`replay export run:showcase-judge-arbiter --out showcase.replay.json` downloads
+`GET /v1/replay/sessions/{id}/export` without opening the viewer. A bare run ID
+is normalized to `run:<id>`; `run:`, `session:` and `doc:` session IDs are
+accepted. With no `--out`, the normalized session ID has non-filename characters
+replaced by `_` and gets the suffix `.replay.json` (for example,
+`run:demo` becomes `run_demo.replay.json`).
+
+`--out` is a filename only: 1–200 ASCII characters, beginning with a letter or
+digit, followed by letters, digits, `.`, `_` or `-`. Paths and extra export flags
+are rejected. The browser decides where to save it; the command does not write
+to the API server's filesystem. Authentication uses the session bearer token,
+not a token in a URL. Failed requests print an error rather than downloading an
+error response, and no download is triggered after Ctrl+C aborts the request.
+
+The API export and `mailroom replay export <session> --out file` use the same
+full `replay/v1` timeline builder; the CLI's `--out` is a local filesystem path,
+unlike the browser command. This describes the implementation, not a claim of a
+fresh CLI/browser byte-comparison run. The timeline is the replay payload, not
+an export of document text or raw prompts/completions.
 
 ### `replay` viewer
 
@@ -220,6 +272,12 @@ restart (`down`, `up`) after editing them.
   (viewport 1200x800, dark theme, under 400 KB each); `scripts/demo_seed_eval_runs.py` gives `/ui` a run to link;
   `scripts/demo_release_notes.py --sha <commit>` prints Markdown embedding them for PR bodies and release notes.
   Regenerate them when the UI changes; the rules and exact commands are in `docs/demo/README.md`.
+- For #64 B1–B4 command evidence, use `docs/demo/p6b1-4/manifest.json` and PNGs
+  in that directory; preserve `docs/demo/manifest.json` and
+  its older release gallery. Capture one PNG per command (1200x800, dark theme,
+  at most 400 KB), recording command, source commit, SHA-256 and byte size in the
+  separate manifest. This is the screenshot-location decision, not evidence that
+  new captures or browser checks have run.
 - The latest recorded run of the checks and of the manual checklist below, with environment and known gaps, is
   [`docs/evidence/2026-10-10-tui-live-check/`](evidence/2026-10-10-tui-live-check/README.md).
 
@@ -238,7 +296,7 @@ restart (`down`, `up`) after editing them.
 ## Modules and the plugin boundary
 
 `tui/plugins.js` is the one way a module adds to the terminal. `main.js` keeps a
-`MODULES` list (`pipeline`, `ledger`, `replay`, `shell`) and
+`MODULES` list (`pipeline`, `ledger`, `replay`, `shell`, `links`, `ready`, `config`) and
 `registerAll` registers each through `createModuleHost(registry)`:
 
 ```js
@@ -314,14 +372,16 @@ reports `ok | degraded | down | unconfigured` with `latency_ms`:
 - The status code and aggregate are public like `/health`. `components` is
   returned only when no token is configured or the request carries the bearer
   token. `Cache-Control: no-store`.
-- No TUI command reads it yet; `ready` (B2) lands with #64.
+- The TUI `ready` command reads it, including the HTTP 503 response body; see
+  the operator summaries above.
 
 Tests: `tests/api/test_ready_route.py`.
 
 ## Non-goals
 
 `mail` compose (the app has no send path), `sound`, a corpus command, Gmail
-intake commands, any change to the `/v1` API, and promoting the kit's proposed
+intake commands, control endpoints beyond the existing review/retention operations,
+and promoting the kit's proposed
 light scheme beyond a selectable theme.
 
 ## File map

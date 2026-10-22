@@ -2,13 +2,13 @@
 // Reads GET /v1/replay/*; the ledger panel lazily reads GET /v1/ledger and /v1/ledger/verify.
 // Every printed value goes through ctx.out / the grid (text only).
 
-import { fail, flagText, parseIntFlag, text, validRunId } from './pipeline.js';
 import { SPEEDS, createClock } from '../replay/clock.js';
 import { createModel } from '../replay/model.js';
 import { listPanels } from '../replay/panels.js';
 import { createFollowReader } from '../replay/live.js';
 import { fmtTime, helpRows, renderFrame } from '../replay/grid.js';
 import { externalUrls, loadLinks } from '../lib/links.js';
+import { errorHint, httpFor } from '../lib/http.js';
 
 const PREFIXES = new Set(['run', 'session', 'doc', 'window']);
 const TAIL_RE = /^[A-Za-z0-9._:-]+$/;
@@ -17,6 +17,38 @@ const TICK_MS = 100;
 const STEP_S = 5;
 const STEP_BIG_S = 30;
 const NUM_RE = /^\d+(\.\d+)?$/;
+
+function validRunId(id) {
+  return typeof id === 'string' && id !== '' && id !== '.' && id !== '..' && /^[A-Za-z0-9._-]+$/.test(id);
+}
+
+function text(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value); } catch { return String(value); }
+  }
+  return String(value);
+}
+
+function flagText(flags, name) {
+  return typeof flags[name] === 'string' ? flags[name] : undefined;
+}
+
+function parseIntFlag(flags, name, min, max) {
+  if (flags[name] === undefined) return { value: undefined };
+  const raw = flags[name];
+  const value = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isInteger(value) && value >= min && value <= max
+    ? { value } : { error: `--${name} must be a whole number from ${min} to ${max}` };
+}
+
+function fail(ctx, command, error) {
+  if (error && error.kind === 'aborted') return undefined;
+  if (error && error.kind === 'offline') return ctx.out.line(`${command}: api unreachable — mailroom closed`, 'error');
+  if (error && error.kind === 'unauthorized') return ctx.out.line(`${command}: 401 — type 'auth <token>'`, 'error');
+  if (error && error.kind === 'http') return ctx.out.line(`${command}: ${error.message}`, 'error');
+  throw error;
+}
 
 // Follow-live buffer bounds (Task 11): the last 2 h / 5,000 items per list.
 export const LIVE_MAX_ITEMS = 5000;
@@ -82,9 +114,13 @@ const manPages = {
 
 SYNOPSIS
     replay [--limit N]
+    replay export <session> [--out file]
     replay <run_id|session id> [--at SECONDS] [--speed N] [--follow]
 
 DESCRIPTION
+    'replay export <session> [--out file]' downloads the server's safe replay/v1
+    JSON export, not document content. --out is a browser download filename,
+    not a server path. A configured API token requires 'auth <token>'.
     Bare 'replay' lists recent sessions from GET /v1/replay/sessions: id, docs,
     start, duration, source and whether retention pruned the data (--limit 1-100).
     'replay <id>' reads GET /v1/replay/sessions/<id>/timeline and opens a
@@ -516,13 +552,50 @@ async function openViewer(ctx, arg, flags) {
   return undefined;
 }
 
-export function registerReplay(registry) {
+export function downloadReplay(blob, filename, doc = globalThis.document, urls = globalThis.URL) {
+  const anchor = doc.createElement('a');
+  const url = urls.createObjectURL(blob);
+  try {
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.hidden = true;
+    doc.body.appendChild(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+    urls.revokeObjectURL(url);
+  }
+}
+
+async function exportSession(ctx, args, flags, deps) {
+  const id = normalizeSessionId(args[1]);
+  const filename = flags.out === undefined ? `${(id || '').replace(/[^A-Za-z0-9._-]/g, '_')}.replay.json` : flags.out;
+  if (args.length !== 2 || !id || Object.keys(flags).some((key) => key !== 'out')
+      || typeof filename !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/.test(filename)) {
+    return ctx.out.line('replay: usage: replay export <session> [--out file] (filename only)', 'error');
+  }
+  try {
+    const blob = await httpFor(ctx, { fetchImpl: deps.fetchImpl ?? ctx.fetch }).getBlob(
+      `/v1/replay/sessions/${encodeURIComponent(id)}/export`, { timeoutMs: 30000 },
+    );
+    if (ctx.signal().aborted) return undefined;
+    downloadReplay(blob, filename, deps.document ?? ctx.document, deps.urlApi);
+    ctx.out.line(`downloaded ${filename}`, 'success');
+  } catch (err) {
+    if (err && err.kind === 'aborted') return undefined;
+    ctx.out.line(`replay export: ${err && err.kind ? errorHint(err) : 'download failed'}`, 'error');
+  }
+  return undefined;
+}
+
+export function registerReplay(registry, deps = {}) {
   registry.register({
     name: 'replay',
     summary: 'replay a pipeline run on a timeline',
-    usage: 'replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N] [--follow]',
+    usage: 'replay [--limit N] | replay <run_id|session id> [--at SECONDS] [--speed N] [--follow] | replay export <session> [--out file]',
     man: manPages.replay,
     async run(ctx, args, flags) {
+      if (args[0] === 'export') return exportSession(ctx, args, flags, deps);
       if (args.length === 0) {
         const extra = Object.keys(flags).filter((k) => k !== 'limit');
         if (extra.length) return ctx.out.line(USAGE, 'error');
