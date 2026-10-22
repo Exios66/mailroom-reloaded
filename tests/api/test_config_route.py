@@ -8,23 +8,27 @@ from fastapi.testclient import TestClient
 
 from mailroom_reloaded.settings import get_settings
 
-TOKEN = "tok-CONFIG-7f3a9c2e"
+# Build recognizable test-only sentinels instead of credential-shaped source literals.
+TEST_MARKER = "config-test-only"
+TOKEN = f"{TEST_MARKER}-token"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 #: Distinctive secret values. None may appear anywhere in a /v1/config response body.
 SECRETS = {
     "MAILROOM_API_TOKEN": TOKEN,
-    "OPENROUTER_API_KEY": "sk-or-LEAK-91bd04",
-    "VLLM_API_KEY": "vllm-LEAK-2c7e11",
-    "MAILROOM_JEV_API_KEY": "jev-LEAK-6a0d88",
-    "MAILROOM_ANCHOR_KEY": "anchor-LEAK-e3f5a1",
-    "MAILROOM_ANCHOR_URL": "postgresql://dbuser:pw-LEAK-55ee@db.leak-host.example:5432/ledger",
-    "MAILROOM_SMTP_PASSWORD": "smtp-LEAK-4d9b70",
-    "TWILIO_AUTH_TOKEN": "twilio-LEAK-0be2c3",
-    "MAILROOM_PAGER_WEBHOOK_SECRET": "hook-LEAK-8f21ad",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector-LEAK-19cd.example:4318",
+    "OPENROUTER_API_KEY": f"{TEST_MARKER}-openrouter-key",
+    "VLLM_API_KEY": f"{TEST_MARKER}-vllm-key",
+    "MAILROOM_JEV_API_KEY": f"{TEST_MARKER}-jev-key",
+    "MAILROOM_ANCHOR_KEY": f"{TEST_MARKER}-anchor-key",
+    "MAILROOM_ANCHOR_URL": f"postgresql://dbuser:{TEST_MARKER}-anchor@db.example/private",
+    "MAILROOM_SMTP_PASSWORD": f"{TEST_MARKER}-smtp-password",
+    "TWILIO_AUTH_TOKEN": f"{TEST_MARKER}-twilio-token",
+    "MAILROOM_PAGER_WEBHOOK_SECRET": f"{TEST_MARKER}-webhook-secret",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": f"https://collector.example/{TEST_MARKER}/v1/traces",
     # A base URL with userinfo: only scheme://host survives, so the password must not.
-    "OPENROUTER_BASE_URL": "https://u-LEAK:pw-LEAK-c0ffee@openrouter.example/api/v1",
+    "OPENROUTER_BASE_URL": (
+        f"https://{TEST_MARKER}-user:{TEST_MARKER}-password@openrouter.example/hidden?api_key={TEST_MARKER}"
+    ),
 }
 
 
@@ -123,7 +127,7 @@ def test_no_secret_value_appears_in_the_response(client, monkeypatch):
     for name, value in SECRETS.items():
         assert value not in text, f"{name} leaked into /v1/config"
     # The fragments a partial leak (prefix, host with password, DSN) would show are absent too.
-    for fragment in ("LEAK", "pw-", "dbuser", "u-LEAK", "91bd04", "7f3a9c2e"):
+    for fragment in (TEST_MARKER, "dbuser"):
         assert fragment not in text
     body = json.loads(text)
     assert body["provider"]["openrouter_api_key"] == "set"
