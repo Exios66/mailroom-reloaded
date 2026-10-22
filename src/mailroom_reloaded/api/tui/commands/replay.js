@@ -34,6 +34,7 @@ function flagText(flags, name) {
   return typeof flags[name] === 'string' ? flags[name] : undefined;
 }
 
+/** Return {value} for an optional digit-only flag within inclusive bounds, or {error}. */
 function parseIntFlag(flags, name, min, max) {
   if (flags[name] === undefined) return { value: undefined };
   const raw = flags[name];
@@ -42,6 +43,7 @@ function parseIntFlag(flags, name, min, max) {
     ? { value } : { error: `--${name} must be a whole number from ${min} to ${max}` };
 }
 
+/** Suppress aborts, print offline/auth/HTTP failures, and rethrow all other errors unchanged. */
 function fail(ctx, command, error) {
   if (error && error.kind === 'aborted') return undefined;
   if (error && error.kind === 'offline') return ctx.out.line(`${command}: api unreachable — mailroom closed`, 'error');
@@ -552,6 +554,11 @@ async function openViewer(ctx, arg, flags) {
   return undefined;
 }
 
+/**
+ * Trigger a browser download of the blob's bytes using the supplied, already validated filename.
+ * Attempt to remove the temporary anchor and revoke its object URL after the click attempt.
+ * Browser API errors propagate; `doc` and `urls` can supply DOM and object-URL APIs.
+ */
 export function downloadReplay(blob, filename, doc = globalThis.document, urls = globalThis.URL) {
   const anchor = doc.createElement('a');
   const url = urls.createObjectURL(blob);
@@ -567,6 +574,12 @@ export function downloadReplay(blob, filename, doc = globalThis.document, urls =
   }
 }
 
+/**
+ * Download the session in args[1] as the API's unchanged export bytes, with a 30-second timeout.
+ * Bare IDs mean run:<id>. flags.out is a browser filename (1–200 ASCII letters, digits, dots,
+ * underscores or hyphens, starting with a letter or digit); the default uses a sanitized ID.
+ * Invalid input and request/download failures print hints; aborts return silently.
+ */
 async function exportSession(ctx, args, flags, deps) {
   const id = normalizeSessionId(args[1]);
   const filename = flags.out === undefined ? `${(id || '').replace(/[^A-Za-z0-9._-]/g, '_')}.replay.json` : flags.out;
@@ -588,6 +601,10 @@ async function exportSession(ctx, args, flags, deps) {
   return undefined;
 }
 
+/**
+ * Register replay listing, viewing and export. deps supplies optional fetchImpl, document and
+ * urlApi overrides for export downloads; the viewer and listing use the command context.
+ */
 export function registerReplay(registry, deps = {}) {
   registry.register({
     name: 'replay',

@@ -39,6 +39,7 @@ export function readyClass(status) {
   return typeof status === 'string' && Object.hasOwn(STATUS_CLASS, status) ? STATUS_CLASS[status] : '';
 }
 
+/** Normalize a component for display; finite latency_ms is rounded to tenths of a millisecond. */
 function componentRow(c) {
   const x = c && typeof c === 'object' && !Array.isArray(c) ? c : {};
   const latency = Number.isFinite(x.latency_ms) ? `${Math.round(x.latency_ms * 10) / 10} ms` : '—';
@@ -46,8 +47,9 @@ function componentRow(c) {
 }
 
 /**
- * The parts of a /ready body the command shows: the aggregate status and the component rows,
- * or null when the body carries none (anonymous or wrong token). Never throws.
+ * Return the displayed parts of a /ready JSON body: {status, components}.
+ * A missing or non-string status becomes null; missing or non-array components become null
+ * (as when details are hidden). An empty component array stays empty.
  */
 export function readyView(res) {
   const r = res && typeof res === 'object' && !Array.isArray(res) ? res : {};
@@ -55,11 +57,15 @@ export function readyView(res) {
   return { status: typeof r.status === 'string' ? r.status : null, components };
 }
 
-/** A string that changes only when a status changes (latency is excluded so it does not re-print). */
+/** Key for aggregate status and ordered component names/statuses; excludes latency and color. */
 function viewKey(view) {
   return JSON.stringify([view.status, view.components?.map((component) => [component.name, component.status])]);
 }
 
+/**
+ * Read /ready with the supplied abort signal and a three-second timeout.
+ * Resolve to {res} for success or an object body on HTTP 503; other failures resolve to {err}.
+ */
 async function fetchReady(ctx, deps, signal) {
   try {
     const body = await httpFor(ctx, { fetchImpl: deps.fetchImpl }).get('/ready', undefined, { signal, timeoutMs: READY_TIMEOUT_MS });
@@ -109,7 +115,11 @@ async function readOnce(ctx, deps) {
   return printView(ctx, readyView(res), hasToken(ctx));
 }
 
-/** Re-poll until Ctrl+C. The returned promise settles when the command's signal aborts. */
+/**
+ * Poll readiness until the command's signal aborts, then resolve after stopping the poller.
+ * `seconds` is the delay after each poll; hidden tabs pause polling. Print when the view key
+ * or error kind/status changes, and continue polling after request failures.
+ */
 function watchReady(ctx, deps, seconds) {
   const signal = ctx.signal();
   let last = null;
@@ -156,7 +166,10 @@ function watchReady(ctx, deps, seconds) {
   });
 }
 
-/** Register `ready`. `deps` is injectable for tests: fetchImpl, timers and doc (for the poller). */
+/**
+ * Register `ready`. `deps` is injectable for tests: fetchImpl, timers and doc (for the poller).
+ * Wrap existing health/watch commands to add `health --all` and `watch ready` aliases.
+ */
 export function registerReady(registry, deps = {}) {
   const spec = {
     name: 'ready',

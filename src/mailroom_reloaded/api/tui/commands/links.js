@@ -72,6 +72,12 @@ async function showLinks(ctx, deps) {
   return undefined;
 }
 
+/**
+ * Open a validated phoenix, grafana or prometheus target from /links in a new tab.
+ * Request and opener failures print hints; aborted requests return silently and late
+ * successful replies are ignored after cancellation.
+ * Missing or invalid URLs print a status without invoking the opener.
+ */
 async function openLink(ctx, deps, target) {
   let body;
   try {

@@ -40,9 +40,11 @@ export function displayValue(key, value) {
 }
 
 /**
- * Flatten a /v1/config payload into [key, value] rows. Returns {rows, total, invalid}: `total`
- * counts every leaf, `rows` keeps the first MAX_ROWS, and `invalid` is true when the payload is
- * not an object. Never throws on odd payloads.
+ * Flatten a /v1/config JSON payload into [key, value] rows. Returns {rows, total, invalid}:
+ * `rows` keeps the first MAX_ROWS; `total` counts rows before that cap, including collapsed
+ * scalar arrays and withheld secret subtrees. `invalid` is true for null, arrays or scalars.
+ * Keys are capped at 120 characters and values at 500, with an ellipsis for truncated values.
+ * Values deeper than six levels become a marker; secret-looking keys are withheld first.
  */
 export function configRows(payload) {
   if (!isPlainObject(payload)) return { rows: [], total: 0, invalid: true };
@@ -88,6 +90,7 @@ DESCRIPTION
     token when one is configured ('auth <token>').`,
 };
 
+/** Register the read-only config command; deps.fetchImpl can supply its fetch implementation. */
 export function registerConfig(registry, deps = {}) {
   registry.register({
     name: 'config',

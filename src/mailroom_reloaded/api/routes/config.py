@@ -39,7 +39,11 @@ router = APIRouter(prefix="/v1")
 
 
 def _gate(request: Request) -> None:
-    """The ``/v1`` bearer gate. Looked up lazily: ``app.py`` imports this module at load time."""
+    """The ``/v1`` bearer gate. Looked up lazily: ``app.py`` imports this module at load time.
+
+    Raise HTTP 401 when a configured token is missing or incorrect; allow requests
+    when no token is configured. Settings validation errors propagate.
+    """
     from mailroom_reloaded.api.app import require_token
 
     require_token(request)
@@ -50,7 +54,7 @@ def _env(name: str) -> str:
 
 
 def _set_unset(value: object) -> str:
-    """The only way a secret-typed setting is reported."""
+    """Report secret presence as ``set``, or ``unset`` for None or blank string representations."""
     return "set" if value is not None and str(value).strip() != "" else "unset"
 
 
@@ -66,7 +70,11 @@ def _enum(value: str, allowed: tuple[str, ...]) -> str:
 
 
 def _host_only(url: object) -> str | None:
-    """``scheme://host[:port]`` of a base URL; any userinfo, path or query is dropped."""
+    """Return an HTTP(S) base URL's scheme and host, plus a nonzero port if supplied.
+
+    Drop userinfo, path, query and fragment. Return None for non-strings or blank
+    strings, and ``invalid`` for parse errors, unsupported schemes or missing hosts.
+    """
     if not isinstance(url, str) or not url.strip():
         return None
     try:
@@ -91,6 +99,10 @@ def _guarded(section: Callable[[], dict[str, Any]]) -> dict[str, Any]:
 
 
 def _taxonomy() -> dict[str, Any]:
+    """Summarize sorted document classes, BERT enablement and global confidence thresholds.
+
+    Taxonomy read, parse, key and validation errors propagate to the section guard.
+    """
     tax = load_taxonomy()
     thresholds = tax.confidence_for(None)
     return {
@@ -107,6 +119,10 @@ def _taxonomy() -> dict[str, Any]:
 
 
 def _jev() -> dict[str, Any]:
+    """Summarize resolved Jev settings with host-only URLs and key-presence markers.
+
+    Configuration errors propagate to the section guard.
+    """
     cfg = jev_config()
     return {
         "status": "ok",
@@ -119,6 +135,7 @@ def _jev() -> dict[str, Any]:
 
 
 def _watcher(request: Request) -> dict[str, Any]:
+    """Report embedded-watcher opt-in and thread liveness from the request's app state."""
     # Lazy: app.py imports this module at load time. The embedded watcher's concurrency is
     # fixed in app.py and the standalone one is a CLI flag, so neither is reported here.
     from mailroom_reloaded.api.app import _embed_watcher_enabled
@@ -131,6 +148,7 @@ def _watcher(request: Request) -> dict[str, Any]:
 
 
 def _pager() -> dict[str, Any]:
+    """Summarize pager transport, embed opt-in and credential-presence environment settings."""
     # The sender's on/off state lives in the pager settings file, which this route does not read.
     transport = _env("MAILROOM_PAGER_TRANSPORT").lower() or _PAGER_DEFAULT_TRANSPORT
     return {
@@ -143,7 +161,15 @@ def _pager() -> dict[str, Any]:
 
 
 def build_config(request: Request) -> dict[str, Any]:
-    """The allow-listed, secret-free settings summary (see the module docstring)."""
+    """The allow-listed, secret-free settings summary (see the module docstring).
+
+    Read settings, environment variables, taxonomy and the request's embedded-watcher
+    state without writing configuration or calling providers. Upload limits are in
+    bytes; the GPU cost rate is in USD per hour. Paths report presence only.
+
+    Jev and taxonomy failures become ``unavailable`` sections with exception type
+    names. Validation errors from loading the main settings propagate.
+    """
     from mailroom_reloaded.api.app import MAX_UPLOAD_BYTES
 
     s = get_settings()
@@ -193,5 +219,9 @@ def build_config(request: Request) -> dict[str, Any]:
 
 @router.get("/config", dependencies=[Depends(_gate)])
 def config_endpoint(request: Request) -> JSONResponse:
-    """Effective settings an operator needs; read-only and secret-free."""
+    """Return the read-only settings summary with ``Cache-Control: no-store``.
+
+    The route's dependency enforces the configured bearer token. Errors not converted
+    to section statuses by ``build_config`` propagate.
+    """
     return JSONResponse(build_config(request), headers={"Cache-Control": "no-store"})

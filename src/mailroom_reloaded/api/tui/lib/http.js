@@ -47,6 +47,14 @@ function query(q) {
 }
 
 /**
+ * Create GET/POST JSON helpers and a GET blob helper with per-call auth headers.
+ * Paths must start with a single slash and contain no backslash, tab, CR or LF; redirects fail.
+ * `base` is prepended to the path; timeoutMs is a millisecond budget (default 2000).
+ * Methods accept signal/timeoutMs overrides and resolve to the response body, or null for 204.
+ * HTTP, fetch, body-read, timeout and cancellation failures reject with HttpError; non-2xx
+ * errors retain any parsed JSON body. Auth-header callback and JSON serialization errors
+ * propagate unchanged.
+ *
  * @param {{fetchImpl?: typeof fetch, authHeaders?: () => Record<string, string>, base?: string,
  *   timeoutMs?: number}} [options]
  */
@@ -56,6 +64,12 @@ export function createHttp({
   base = '',
   timeoutMs = HTTP_TIMEOUT_MS,
 } = {}) {
+  /**
+   * Resolve to JSON (or a Blob when requested), or null for 204. Reject invalid paths with
+   * kind http; map 401/403/404 to unauthorized/forbidden/not_found and other non-2xx to http.
+   * Fetch failures become offline, timeout or aborted; successful-body read failures become
+   * parse, timeout or aborted. Unreadable non-2xx bodies become null on the HTTP error.
+   */
   async function request(method, path, { query: q, json, signal, timeoutMs: t = timeoutMs, blob = false } = {}) {
     if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\\r\n\t]/.test(path)) {
       throw new HttpError('path must be same-origin and start with /', { kind: 'http' });
@@ -116,6 +130,7 @@ export function createHttp({
     get(path, q, opts = {}) {
       return request('GET', path, { query: q, signal: opts.signal, timeoutMs: opts.timeoutMs });
     },
+    /** Fetch bytes as a Blob without parsing JSON; HTTP 204 resolves to null. */
     getBlob(path, opts = {}) {
       return request('GET', path, { ...opts, blob: true });
     },
