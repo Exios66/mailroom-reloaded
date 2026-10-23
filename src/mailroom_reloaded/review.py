@@ -151,6 +151,14 @@ def _resolve_claimed(
     reviewer: str,
     worker_id: str,
 ) -> MailroomState:
+    """Resolve an already claimed review file and return its resulting state.
+
+    Reject moves the file to ``failed/`` and persists failed state; catalog and
+    ledger updates are best effort. Approve/correct resumes extraction, with
+    corrections passed as classification overrides. Append ``review_resolved``
+    after rejection is saved or the resumed flow returns. File, manifest, audit,
+    and flow errors propagate to the caller's recovery handler.
+    """
     doc_id = manifest.doc_id
     if action == "reject":
         dest = bins.move(path, "failed")

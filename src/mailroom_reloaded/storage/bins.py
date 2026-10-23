@@ -68,7 +68,11 @@ class Bins:
         return self._dir("manifests")
 
     def is_claimed(self, path: Path) -> bool:
-        """Whether ``path`` already lives under ``processing/<worker>/``."""
+        """Return whether the resolved path is at or below ``processing/``.
+
+        This checks location, regardless of existence or worker ownership.
+        Filesystem errors during resolution propagate.
+        """
         try:
             Path(path).resolve().relative_to((self.base / "processing").resolve())
         except ValueError:

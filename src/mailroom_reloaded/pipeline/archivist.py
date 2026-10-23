@@ -59,7 +59,14 @@ def _move(src: Path, dest: Path) -> None:
 
 
 def archive_document(bins: Bins, manifest: Manifest, state) -> ArchiveResult:
-    """Move ``state.path`` into ``archive/<doc_type>/`` and record the sha256."""
+    """Archive ``state.path`` with its report sidecar and return paths and SHA-256.
+
+    Write the sidecar and an ``archiving`` audit entry before moving the file,
+    then update ``state.path`` and append ``archived``. The manifest is not updated.
+    Filesystem, report serialization, and audit errors propagate; a failure after
+    the move can leave the file archived. A move raising ``OSError`` triggers
+    sidecar removal before the error propagates.
+    """
     src = Path(state.path)
     doc_type = _safe_doc_type(state)
     dest_dir = bins.archive / doc_type

@@ -700,8 +700,9 @@ class MailroomFlow(Flow[MailroomState]):
         overrides: dict[str, Any] | None,
         eval_ctx: Any | None,
     ) -> None:
-        """Claim the file, load its manifest and restore state for this run.
+        """Reuse an existing processing path or claim the file, then restore state.
 
+        Load the manifest and save the configured state before running any node.
         Raise ``FileNotFoundError`` if the selected work path does not exist.
         Ignore invalid state within a loaded manifest; manifest validation and
         other I/O errors propagate.
@@ -1047,6 +1048,10 @@ def reconcile_archived(bins: Bins, manifest: Manifest) -> bool:
     Missing or invalid evidence is left untouched for operator repair; no report
     is reconstructed from an earlier checkpoint. Returns whether the manifest
     was reconciled.
+
+    The sidecar must be a JSON object with this document's ``doc_id`` and
+    ``status: archived``. Unreadable evidence returns ``False``; audit access
+    and manifest persistence errors propagate. Ledger recording is best effort.
     """
     events = [
         e

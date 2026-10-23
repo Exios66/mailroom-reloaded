@@ -165,11 +165,14 @@ class Watcher:
         return removed
 
     def resume_processing(self) -> int:
-        """Resume every manifest left ``processing`` by a crash; return the count.
+        """Recover processing manifests and orphaned claims after a crash.
 
         The flow reads the manifest's ``completed_nodes`` and restarts at the
-        first unfinished node, so no node is repeated and the audit chain gains
-        no duplicate entries.
+        first unfinished node. Missing sources are checked for completed archives;
+        pending catalog updates and abandoned upload staging files are also handled.
+        Return the number of flow calls that finished without raising, including
+        orphan recovery but excluding archive/catalog reconciliation, and add it
+        to ``self.resumed``. Unreadable manifests and flow failures are skipped.
         """
         count = 0
         handled: set[str] = set()
@@ -218,6 +221,9 @@ class Watcher:
         save leaves a file under ``processing/`` that no manifest names, so the
         manifest scan cannot see it. Files younger than ``orphan_grace_s``, files
         this watcher is running, and ones a live manifest already owns are skipped.
+        The grace period is in seconds since the file's ctime; ``handled`` contains
+        path strings to skip from the manifest scan. Stat, hashing, manifest loading,
+        and flow errors are skipped per file; only normal flow returns are counted.
         """
         self._last_orphan_sweep = time.monotonic()
         handled = handled or set()
@@ -271,7 +277,12 @@ class Watcher:
 
     # ------------------------------------------------------------- draining
     def drain_once(self) -> int:
-        """Process the inbox once; return the number of documents claimed."""
+        """Process the inbox once; return the number claimed, even if a flow fails.
+
+        While holding the watcher lock, run startup recovery once and sweep orphan
+        claims at most once every 60 seconds. Recovery counts update ``self.resumed``
+        separately from the returned inbox count.
+        """
         if not self._startup_done and self._lock is not None:
             self.resume_processing()
         if (

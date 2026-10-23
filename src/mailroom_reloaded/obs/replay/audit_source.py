@@ -307,6 +307,11 @@ def timeline_from_audit(
     document, ``window:`` is every document with an audit row in the window. A
     ``session:`` has no audit representation and yields ``None``. Times are seconds
     from the earliest segment start; ``session.t0_iso`` is that instant.
+
+    Park/archive/reject dispositions follow audit sequence rather than wall-clock
+    order; approve/correct notes do not replace them. An unrecovered node failure
+    takes precedence. Invalid timestamps are skipped and malformed payloads become
+    empty mappings; audit and catalog database errors propagate.
     """
     engine = engine or get_engine()
     doc_ids, truncated = _doc_ids(engine, kind, key)

@@ -175,7 +175,12 @@ def _is_llm(row: dict[str, Any]) -> bool:
 def timeline_from_spans(
     rows: list[dict[str, Any]], kind: str, key: str
 ) -> Timeline | None:
-    """The timeline of ``rows`` (span-store rows), or ``None`` when there are none."""
+    """The timeline of ``rows`` (span-store rows), or ``None`` when there are none.
+
+    Times are seconds from the earliest span start. Keep all attempts visible,
+    using the latest finished root for each document's final state, or the latest
+    running root when none has finished.
+    """
     if not rows:
         return None
     rows = sorted(rows, key=lambda r: (r["start_ns"], r["span_id"]))
@@ -490,6 +495,12 @@ def _entities(
     causes_attr: dict[str, list[str]],
     rel: Any,
 ) -> list[Entity]:
+    """Build document summaries ordered by start time, then document id.
+
+    Use the selected root's metadata but span all root attempts for time bounds;
+    without roots, use node segment bounds. ``running`` identifies unfinished
+    spans, and ``rel`` converts absolute nanoseconds to session-relative seconds.
+    """
     docs: dict[str, None] = {}
     for d in [*root_attempts, *(s.doc_id for s in segments), *(g.doc_id for g in generations)]:
         docs.setdefault(d)
@@ -795,7 +806,8 @@ def _apply_review_rejections(tl: Timeline, engine: Any) -> None:
     root still says ``parked``. For each such entity the audit chain decides: the
     document is failed when its latest terminal event is a ``review_resolved`` reject
     (a later park/archive means it was reprocessed and the spans win). Best effort: an
-    unreadable audit log leaves the span status as it was.
+    audit read error stops the overlay without failing replay; earlier entity
+    updates are retained. Updates mutate ``tl`` in place.
     """
     parked = [e for e in tl.entities if e.final_status == "parked"]
     if not parked:
@@ -829,6 +841,12 @@ def _build(
     store: Any,
     engine: Any,
 ) -> Timeline | None:
+    """Build a windowed timeline for a parsed session using the supplied store.
+
+    Fall back to audit data when no spans exist; return ``None`` if neither source
+    yields a timeline. Cache span results before applying review rejections, and
+    reapply those rejections to a fresh copy on cache hits.
+    """
     watermark: Any = None
     path = getattr(store, "path", None)
     if not (isinstance(path, Path) and not path.exists()):

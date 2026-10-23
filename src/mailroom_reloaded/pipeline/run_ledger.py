@@ -467,6 +467,7 @@ def record_review_rejected(
 
     The rejection runs no pipeline node, so this invocation spends nothing and carries
     no failure reason: the decision itself is the reason.
+    Recording errors are caught and do not change the rejection outcome.
     """
     try:
         payload = {
