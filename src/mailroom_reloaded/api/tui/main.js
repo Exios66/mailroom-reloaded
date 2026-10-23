@@ -6,6 +6,7 @@ import { boot } from './boot.js';
 import { createAmbient } from './ambient.js';
 import { registerPipeline } from './commands/pipeline.js';
 import { registerLedger } from './commands/ledger.js';
+import { registerReview } from './commands/review.js';
 import { registerReplay } from './commands/replay.js';
 import { registerShell } from './commands/shell.js';
 import { registerLinks } from './commands/links.js';
@@ -32,6 +33,7 @@ export const MODULES = [
   { id: 'links', commands: registerLinks },
   { id: 'ready', commands: registerReady },
   { id: 'config', commands: registerConfig },
+  { id: 'review', commands: registerReview },
 ];
 
 /**

@@ -40,7 +40,7 @@ API-token field + `refresh` on the right. The HTML and its assets stay public wh
 | `inspect` | `inspect <doc_id>` | Shows one document. |
 | `audit` | `audit <doc_id>` | Verifies the audit chain. |
 | `jev` | `jev` | Shows the Jev gate: provider, model, gate in use, calibration thresholds. |
-| `review` | `review` | Lists parked documents. |
+| `review` | `review [queue] \| review show <doc_id>` | Lists the first page of parked documents, or shows one document's transcript, route trail, verdict/grade findings and recorded rubric scores. |
 | `resolve` | `resolve <doc_id> <approve\|correct\|reject> [--type T] [--subclass S] [--reviewer R]` | Dispositions a parked document. |
 | `runs` | `runs [pin <run_id> \| unpin <run_id> \| keep [set <pinned\|all\|recent:N>]]` | Lists eval runs; `pin`/`unpin` protect a run's spans from pruning, `keep` shows the retention policy and `keep set` changes it. |
 | `ledger` | `ledger [--run ID] [--kind K] [--limit N] \| head \| verify [run_id]` | Lists archive ledger entries (newest first), shows the head, or re-verifies the hash chain. |
@@ -85,6 +85,19 @@ the boot animation.
   `withheld`. This is an inspection command, not a settings editor. See
   [Configuration](CONFIGURATION.md#read-only-summary-get-v1config) for the route's
   allow-list and limitations.
+
+### `review queue` and `review show`
+
+`review` (alias `review queue`) reads the existing `GET /v1/documents?status=parked`
+page, which is not the whole queue: the footer says so. `review show <doc_id>` reads
+`GET /v1/documents/{doc_id}` and prints the manifest transcript (`state.text`, capped
+at 12,000 characters / 200 lines), route trail, verdict and grade findings, and rubric
+scores. Everything goes through `ctx.out` as text (control and bidi characters are
+replaced). Absent data prints `absent`; scores are shown only when recorded and are
+never inferred. Disposition stays with `resolve`. No new route was needed; the
+response shapes are pinned by `schemas/review-queue.schema.json` and
+`schemas/review-document.schema.json` and checked by
+`tests/api/test_review_schema_contract.py`.
 
 ### `replay export`
 

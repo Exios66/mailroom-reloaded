@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **P6-B5 review queue and detail (#65)** (`api/tui/commands/review.js`, `schemas/review-{queue,document}.schema.json`, `tests/api/test_review_schema_contract.py`): `review queue` and `review show <doc_id>` over the existing token-gated `/v1/documents` routes (no new route): bounded, text-only transcript, route trail, verdict/grade field findings and recorded rubric scores; missing data prints `absent`. Tests `tests/tui/js/review-command.test.mjs` (19) and the schema contract tests (10). Ingest, watcher, eval, metrics and logs commands (B6–B10) follow in separate PRs.
 - **P6-B1–B4 operator commands (#64)** (`api/tui/commands/{links,ready,config,replay}.js`,
   `api/routes/config.py`): `links` and validated `links open` targets, coloured
   readiness rows with `health --all`, `ready --watch` and `watch ready`, and a
