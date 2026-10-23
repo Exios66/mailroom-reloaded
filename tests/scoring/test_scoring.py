@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from mailroom_reloaded.scoring import (
+    canonical_maud_class,
     fbeta,
     score_extraction,
     score_field,
@@ -97,3 +98,50 @@ def test_subclass_vocab_returns_copy_and_unknown_is_empty():
     assert "x" not in subclass_vocab("contract")
     assert subclass_vocab("court_opinion") == []
     assert subclass_vocab("nope") == []
+
+
+# Behaviour that arrived with the re-vendor to llm-dojo-scoring 8c7b7f1 (carried unchanged into v0.22.0)
+# (scoring/PARITY.md). Each test fails on the v0.21.0 vendored copy.
+
+
+def test_cms_claim_type_folds_onto_health_one_way():
+    # SAND-042: a CMS table token against GT "health" is a match; the reverse
+    # direction (health predicted against a CMS token) is still a mismatch.
+    fold = score_extraction(
+        "insurance_claim", {"claim_type": "name"},
+        {"claim_type": "pde"}, {"claim_type": "health"},
+    )
+    assert fold.field_scores["claim_type"] == 1.0
+    reverse = score_extraction(
+        "insurance_claim", {"claim_type": "name"},
+        {"claim_type": "health"}, {"claim_type": "pde"},
+    )
+    assert reverse.field_scores["claim_type"] < 1.0
+
+
+def test_expected_subclass_is_an_annotation_not_a_field():
+    result = score_extraction(
+        "contract", {"subject_matter": "name"},
+        {"subject_matter": "services"},
+        {"subject_matter": "services", "expected_subclass": "services"},
+    )
+    assert "expected_subclass" not in result.field_scores
+    assert result.overall_score == 1.0
+
+
+def test_maud_comparators_are_not_collapsed():
+    # "> 5 business days" must not fold onto "5 business days"; the spelled-out
+    # comparator is the same class.
+    q = "Agreement provides for matching rights in connection with COR"
+    assert canonical_maud_class(q, "> 5 business days") != canonical_maud_class(
+        q, "5 business days"
+    )
+    assert canonical_maud_class(q, "Greater than 5 business days") == canonical_maud_class(
+        q, "> 5 business days"
+    )
+
+
+def test_maud_multi_class_answers_are_order_insensitive():
+    q = "Fiduciary exception to COR covenant"
+    a, b = "inconsistent with fiduciary duties", "breach of fiduciary duties"
+    assert canonical_maud_class(q, f"{a}, {b}") == canonical_maud_class(q, f"{b}, {a}")

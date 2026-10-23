@@ -9,13 +9,15 @@ export class HttpError extends Error {
   /**
    * @param {string} message
    * @param {{kind: 'offline'|'timeout'|'unauthorized'|'forbidden'|'not_found'|'http'|'parse'|'aborted',
-   *   status?: number|null}} info
+   *   status?: number|null, body?: unknown}} info  `body` is the parsed JSON of a non-2xx
+   *   response when it had one (e.g. /ready answers 503 with its component table), else null.
    */
-  constructor(message, { kind, status = null } = {}) {
+  constructor(message, { kind, status = null, body = null } = {}) {
     super(message);
     this.name = 'HttpError';
     this.kind = kind;
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -45,6 +47,14 @@ function query(q) {
 }
 
 /**
+ * Create GET/POST JSON helpers and a GET blob helper with per-call auth headers.
+ * Paths must start with a single slash and contain no backslash, tab, CR or LF; redirects fail.
+ * `base` is prepended to the path; timeoutMs is a millisecond budget (default 2000).
+ * Methods accept signal/timeoutMs overrides and resolve to the response body, or null for 204.
+ * HTTP, fetch, body-read, timeout and cancellation failures reject with HttpError; non-2xx
+ * errors retain any parsed JSON body. Auth-header callback and JSON serialization errors
+ * propagate unchanged.
+ *
  * @param {{fetchImpl?: typeof fetch, authHeaders?: () => Record<string, string>, base?: string,
  *   timeoutMs?: number}} [options]
  */
@@ -54,8 +64,14 @@ export function createHttp({
   base = '',
   timeoutMs = HTTP_TIMEOUT_MS,
 } = {}) {
-  async function request(method, path, { query: q, json, signal, timeoutMs: t = timeoutMs } = {}) {
-    if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) {
+  /**
+   * Resolve to JSON (or a Blob when requested), or null for 204. Reject invalid paths with
+   * kind http; map 401/403/404 to unauthorized/forbidden/not_found and other non-2xx to http.
+   * Fetch failures become offline, timeout or aborted; successful-body read failures become
+   * parse, timeout or aborted. Unreadable non-2xx bodies become null on the HTTP error.
+   */
+  async function request(method, path, { query: q, json, signal, timeoutMs: t = timeoutMs, blob = false } = {}) {
+    if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\\r\n\t]/.test(path)) {
       throw new HttpError('path must be same-origin and start with /', { kind: 'http' });
     }
     const ctl = new AbortController();
@@ -70,7 +86,7 @@ export function createHttp({
       ctl.abort();
     }, t);
     const headers = { Accept: 'application/json', ...(authHeaders() || {}) };
-    const init = { method, headers, signal: ctl.signal };
+    const init = { method, headers, signal: ctl.signal, redirect: 'error' };
     if (json !== undefined) {
       headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(json);
@@ -86,12 +102,21 @@ export function createHttp({
       }
       if (!res.ok) {
         const kind = KIND_BY_STATUS[res.status] || 'http';
-        throw new HttpError(`http ${res.status}`, { kind, status: res.status });
+        let body = null;
+        try {
+          body = await res.json();
+        } catch {
+          body = null; // no JSON body: the status alone is the error
+        }
+        throw new HttpError(`http ${res.status}`, { kind, status: res.status, body });
       }
       if (res.status === 204) return null;
       try {
-        return await res.json();
+        const body = blob ? await res.blob() : await res.json();
+        if (signal && signal.aborted) throw new HttpError('aborted', { kind: 'aborted' });
+        return body;
       } catch {
+        if (signal && signal.aborted) throw new HttpError('aborted', { kind: 'aborted' });
         if (timedOut) throw new HttpError(`timed out after ${t} ms`, { kind: 'timeout' });
         throw new HttpError('response is not JSON', { kind: 'parse', status: res.status });
       }
@@ -104,6 +129,10 @@ export function createHttp({
   return {
     get(path, q, opts = {}) {
       return request('GET', path, { query: q, signal: opts.signal, timeoutMs: opts.timeoutMs });
+    },
+    /** Fetch bytes as a Blob without parsing JSON; HTTP 204 resolves to null. */
+    getBlob(path, opts = {}) {
+      return request('GET', path, { ...opts, blob: true });
     },
     post(path, body, opts = {}) {
       return request('POST', path, { json: body, signal: opts.signal, timeoutMs: opts.timeoutMs });
@@ -121,6 +150,7 @@ export function httpFor(ctx, options = {}) {
   const sig = () => (ctx && typeof ctx.signal === 'function' ? ctx.signal() : undefined);
   return {
     get: (path, q, opts = {}) => client.get(path, q, { signal: sig(), ...opts }),
+    getBlob: (path, opts = {}) => client.getBlob(path, { signal: sig(), ...opts }),
     post: (path, body, opts = {}) => client.post(path, body, { signal: sig(), ...opts }),
   };
 }

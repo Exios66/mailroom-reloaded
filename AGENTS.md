@@ -126,7 +126,7 @@ ingest ─▶ bert_primary ─▶ sort ─▶ gate_classify ─┬─▶ extract
 | `src/mailroom_reloaded/pipeline/` | `state.py`, `flow.py` (`MailroomFlow`), `guards.py`, `report.py`, `archivist.py`. |
 | `src/mailroom_reloaded/prompts/` | Frozen prompts: `frozen_v1/`, `sand37/`, sorter/judge/boss/arbiter, `loader.py`, `lineage.json`. |
 | `src/mailroom_reloaded/schemas/` | Extraction response schemas, manifest, audit, ledger models. |
-| `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` v0.21.0 subset (`PARITY.md`); lint-excluded. |
+| `src/mailroom_reloaded/scoring/` | Vendored `llm-dojo-scoring` v0.22.0 subset (`PARITY.md`); lint-excluded. |
 | `src/mailroom_reloaded/storage/` | Bins, SQLite DB/catalog/audit, ledger, span store, retention, anchor. |
 | `src/mailroom_reloaded/config/` | `taxonomy.yaml` — classes, field types, bands, agents, maps. |
 | `scripts/` | Dev/smoke helpers and JEV harvest tools (see §5). |
@@ -241,7 +241,7 @@ uv run pytest tests/test_dependency_fence.py -q
   runs `scripts/docker_smoke.sh` (builds images); deselected by default, `-m docker`
   selects it and it skips when the daemon or registry is unavailable.
 - **`parity` extra.** The scoring-parity test skips unless
-  `llm-dojo-scoring` v0.21.0 is installed (`uv sync --extra parity`).
+  the `llm-dojo-scoring` pin in `scoring/PARITY.md` is installed (`uv sync --extra parity`).
 - **Dependency fence.** No `langgraph`, `langchain*`, `langfuse`, `braintrust`
   or `litellm` under `src/` or in any dependency.
 - **Prompt lock.** `tests/test_prompts.py` verifies every vendored prompt's

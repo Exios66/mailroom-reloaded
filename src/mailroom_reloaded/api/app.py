@@ -58,6 +58,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from mailroom_reloaded import __version__
+from mailroom_reloaded.api.routes import config as config_routes
 from mailroom_reloaded.api.routes import ready as ready_routes
 from mailroom_reloaded.ingest.clerk import SUPPORTED_EXTENSIONS
 from mailroom_reloaded.intake import gmail as gmail_intake
@@ -1135,6 +1136,7 @@ def create_app() -> FastAPI:
     application.include_router(api)
     application.include_router(push_api)
     application.include_router(ready_routes.router)
+    application.include_router(config_routes.router)
 
     @application.get("/health")
     def health() -> dict:
