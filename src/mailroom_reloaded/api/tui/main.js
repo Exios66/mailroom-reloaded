@@ -6,8 +6,12 @@ import { boot } from './boot.js';
 import { createAmbient } from './ambient.js';
 import { registerPipeline } from './commands/pipeline.js';
 import { registerLedger } from './commands/ledger.js';
+import { registerReview } from './commands/review.js';
 import { registerReplay } from './commands/replay.js';
 import { registerShell } from './commands/shell.js';
+import { registerLinks } from './commands/links.js';
+import { registerReady } from './commands/ready.js';
+import { registerConfig } from './commands/config.js';
 import { createModuleHost } from './plugins.js';
 import { deepLinkCommand, deepLinkKind } from './deeplink.js';
 
@@ -26,6 +30,10 @@ export const MODULES = [
   { id: 'ledger', commands: registerLedger },
   { id: 'replay', commands: registerReplay },
   { id: 'shell', commands: registerShell },
+  { id: 'links', commands: registerLinks },
+  { id: 'ready', commands: registerReady },
+  { id: 'config', commands: registerConfig },
+  { id: 'review', commands: registerReview },
 ];
 
 /**

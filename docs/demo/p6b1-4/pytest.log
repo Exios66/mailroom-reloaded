@@ -1,0 +1,115 @@
+........................................................................ [  3%]
+........................................................................ [  7%]
+........................................................................ [ 11%]
+........................................................................ [ 15%]
+........................................................................ [ 19%]
+........................................................................ [ 23%]
+........................................................................ [ 27%]
+........................................................................ [ 31%]
+........................................................................ [ 35%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 46%]
+...........................s............................................ [ 50%]
+........................................................................ [ 54%]
+........................................................................ [ 58%]
+........................................................................ [ 62%]
+........................................................................ [ 66%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+.....................ss................................................. [ 78%]
+........................................................................ [ 81%]
+........................................................................ [ 85%]
+........................................................................ [ 89%]
+........................................................................ [ 93%]
+........................................................................ [ 97%]
+.............................................                            [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/agent/core.py:425: DeprecationWarning: function_calling_llm is deprecated and will be removed in a future release.
+    if self.function_calling_llm and not isinstance(
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/agent/core.py:433: DeprecationWarning: deprecated
+    if self.allow_code_execution:
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/agent/core.py:444: DeprecationWarning: deprecated
+    if self.reasoning and self.planning_config is None:
+
+tests/agents/test_crew_agents.py: 12 warnings
+tests/agents/test_usage_capture.py: 12 warnings
+tests/eval/test_conformance.py: 3 warnings
+tests/eval/test_dataset_runner.py: 3 warnings
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crew.py:650: DeprecationWarning: function_calling_llm is deprecated and will be removed in a future release.
+    if self.function_calling_llm and not isinstance(self.function_calling_llm, LLM):
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crews/utils.py:372: DeprecationWarning: function_calling_llm is deprecated and will be removed in a future release.
+    crew.function_calling_llm,
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crews/utils.py:87: DeprecationWarning: function_calling_llm is deprecated and will be removed in a future release.
+    if not agent.function_calling_llm:  # type: ignore[attr-defined]
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/agent/core.py:1300: DeprecationWarning: function_calling_llm is deprecated and will be removed in a future release.
+    function_calling_llm=self.function_calling_llm,
+
+tests/agents/test_crew_agents.py: 8 warnings
+tests/agents/test_usage_capture.py: 8 warnings
+tests/eval/test_conformance.py: 2 warnings
+tests/eval/test_dataset_runner.py: 2 warnings
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crew.py:1675: DeprecationWarning: deprecated
+    if hasattr(agent, "allow_code_execution") and getattr(
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crew.py:1682: DeprecationWarning: deprecated
+    and hasattr(agent, "multimodal")
+
+tests/agents/test_crew_agents.py: 4 warnings
+tests/agents/test_usage_capture.py: 4 warnings
+tests/eval/test_conformance.py: 1 warning
+tests/eval/test_dataset_runner.py: 1 warning
+  /Users/luciusjmorningstar/Downloads/mailroom-reloaded/.venv/lib/python3.11/site-packages/crewai/crew.py:1683: DeprecationWarning: deprecated
+    and getattr(agent, "multimodal", False)
+
+tests/ingest/test_ingest.py::test_scanned_pdf_uses_vision
+tests/ingest/test_ingest.py::test_scanned_pdf_uses_vision
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyPacked has no __module__ attribute
+
+tests/ingest/test_ingest.py::test_scanned_pdf_uses_vision
+tests/ingest/test_ingest.py::test_scanned_pdf_uses_vision
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type SwigPyObject has no __module__ attribute
+
+tests/ingest/test_ingest.py::test_scanned_pdf_uses_vision
+  <frozen importlib._bootstrap>:241: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1842 passed, 3 skipped, 3 deselected, 136 warnings in 78.80s (0:01:18)
+sys:1: DeprecationWarning: builtin type swigvarlink has no __module__ attribute

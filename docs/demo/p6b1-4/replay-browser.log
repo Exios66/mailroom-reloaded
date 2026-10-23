@@ -1,0 +1,12 @@
+ok   viewer opens as role=application
+ok   clock advances while playing
+ok   space pauses
+ok   arrow keys seek
+ok   digit jumps through the run
+ok   inspector panel opens
+ok   ledger panel settles on an entry list and a chain state
+ok   no stray elements inside the viewer
+ok   q ends the viewer
+ok   keyboard is handed back to the prompt
+ok   no page errors
+all checks passed

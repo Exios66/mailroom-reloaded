@@ -1,0 +1,57 @@
+{
+  "source_commit": "35626fca9dcc9bd7da31f3256010569df14b95f3",
+  "captured_at": "2026-10-22T19:03:01Z",
+  "tool": "node scripts/tui_commands_check.mjs",
+  "base_url": "http://127.0.0.1:8000",
+  "commands": [
+    "help",
+    "links",
+    "ready",
+    "health --all",
+    "watch ready --interval 1",
+    "Ctrl+C",
+    "config",
+    "replay export run:7e57d0c0ffee --out proof.json"
+  ],
+  "export": {
+    "session": "run:7e57d0c0ffee",
+    "api_path": "/v1/replay/sessions/run%3A7e57d0c0ffee/export",
+    "filename": "proof.json",
+    "sha256": "bf455674b44ae731823a930185c4e1a411d471d8eb3edb6d63de0f439b215646",
+    "size_bytes": 18269
+  },
+  "images": [
+    {
+      "file": "links.png",
+      "command": "links",
+      "captured_at": "2026-10-22T19:02:58Z",
+      "sha256": "5b7f30349973a70955d25462daad8b1ec919a97389c201e0ab6b76242cbd76c6",
+      "size_bytes": 71609,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "ready.png",
+      "command": "ready",
+      "captured_at": "2026-10-22T19:02:58Z",
+      "sha256": "30d7bb65f72829ce1a4937711f97cc08d5011ba0e4d6f2af89f2304d7b7e10ff",
+      "size_bytes": 80971,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "config.png",
+      "command": "config",
+      "captured_at": "2026-10-22T19:03:01Z",
+      "sha256": "cb4c075ae059a9d811093cdf6ce2f7b885304c73242bccffd5f230261f73298d",
+      "size_bytes": 146939,
+      "viewport": "1200x800"
+    },
+    {
+      "file": "replay-export.png",
+      "command": "replay export run:7e57d0c0ffee --out proof.json",
+      "captured_at": "2026-10-22T19:03:01Z",
+      "sha256": "47ded0359c3ccfeeae9864ac8a6c5993aefec83fa2683b143f69cc967e9e298d",
+      "size_bytes": 48141,
+      "viewport": "1200x800"
+    }
+  ]
+}

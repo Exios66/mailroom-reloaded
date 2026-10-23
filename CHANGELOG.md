@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **P6-B5 review queue and detail (#65)** (`api/tui/commands/review.js`, `schemas/review-{queue,document}.schema.json`, `tests/api/test_review_schema_contract.py`): `review queue` and `review show <doc_id>` over the existing token-gated `/v1/documents` routes (no new route): bounded, text-only transcript, route trail, verdict/grade field findings and recorded rubric scores; missing data prints `absent`. Tests `tests/tui/js/review-command.test.mjs` (19) and the schema contract tests (10). Ingest, watcher, eval, metrics and logs commands (B6–B10) follow in separate PRs.
+- **P6-B1–B4 operator commands (#64)** (`api/tui/commands/{links,ready,config,replay}.js`,
+  `api/routes/config.py`): `links` and validated `links open` targets, coloured
+  readiness rows with `health --all`, `ready --watch` and `watch ready`, and a
+  token-gated, read-only configuration
+  summary with secret-presence markers; `replay export <session> [--out file]`
+  downloads the existing `replay/v1` export with a browser-only filename.
+  `docs/TUI.md` and `docs/CONFIGURATION.md`
+  document these commands and the separate command screenshot manifest policy;
+  the existing release remains 0.4.2.
 - **Operator SMS pager host** (`obs/pager.py`): a ledger-backed snapshot (window outcomes, spend and latency from `doc_closed`, open `eval` runs with `total` from `run_opened`, queues from the bins, watcher liveness from `watcher.lock`), the default-off sender (60 s silent scans, 10-minute digests, one sender per data dir), `mailroom pager status|on|off|number|test|preview|log|mute|run`, the live-start prompt with `--pager/--no-pager` on `serve`/`watch`, the API lifespan sender (`MAILROOM_PAGER_EMBED=0` skips it) and `mailroom eval --page`.
 - **Operator SMS pager core, transport and provider health** (`obs/pager_core.py` — verbatim port of llm-mailroom's `pipeline/pager_core.py`, guarded by `test_core_is_verbatim_port`; `obs/sms.py`; `llm/health.py`): the default-off `pager:` taxonomy block, Twilio / email-gateway (`MAILROOM_SMTP_*`) / console transports, and passive per-provider LLM health recorded by `llm/tooling.chat_create` for each attempt (`modal:vllm`, `openrouter`) in `<base_dir>/provider_health.json`. Nothing sends until the pager host lands.
 - `/ui` accessibility (`api/ui/index.html`, `api/ui/ui.css`): a page `h1`, an `aria-label` on each table with `scope="col"` headers, and `aria-live="polite"` on the document-detail / cards / audit-result regions. The real gap was the clickable rows: each row's action is now a real `<button>` (`.linkish`) so the keyboard and screen readers can reach it, with the row keeping its mouse `onclick`.

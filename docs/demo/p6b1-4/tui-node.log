@@ -1,0 +1,2278 @@
+TAP version 13
+# Subtest: buildSkylinePath is closed, deterministic and bounded
+ok 1 - buildSkylinePath is closed, deterministic and bounded
+  ---
+  duration_ms: 1.845292
+  type: 'test'
+  ...
+# Subtest: createAmbient builds two skyline svgs and nine sparks
+ok 2 - createAmbient builds two skyline svgs and nine sparks
+  ---
+  duration_ms: 1.024917
+  type: 'test'
+  ...
+# Subtest: reduced motion spawns no sparks and no flash
+ok 3 - reduced motion spawns no sparks and no flash
+  ---
+  duration_ms: 0.380875
+  type: 'test'
+  ...
+# Subtest: setCrt and setSkyline toggle .off
+ok 4 - setCrt and setSkyline toggle .off
+  ---
+  duration_ms: 0.657292
+  type: 'test'
+  ...
+# Subtest: themes set data-theme/data-phosphor; amber clears phosphor; hc forces layers off
+ok 5 - themes set data-theme/data-phosphor; amber clears phosphor; hc forces layers off
+  ---
+  duration_ms: 0.397375
+  type: 'test'
+  ...
+# Subtest: saved theme is restored; throwing storage is tolerated
+ok 6 - saved theme is restored; throwing storage is tolerated
+  ---
+  duration_ms: 0.377667
+  type: 'test'
+  ...
+# Subtest: no bearer header until a token is set
+ok 7 - no bearer header until a token is set
+  ---
+  duration_ms: 3.324541
+  type: 'test'
+  ...
+# Subtest: token is stored in the injected storage only and never in the URL
+ok 8 - token is stored in the injected storage only and never in the URL
+  ---
+  duration_ms: 0.276375
+  type: 'test'
+  ...
+# Subtest: clearToken removes the stored key and the header
+ok 9 - clearToken removes the stored key and the header
+  ---
+  duration_ms: 0.115042
+  type: 'test'
+  ...
+# Subtest: a token already in storage is picked up on creation
+ok 10 - a token already in storage is picked up on creation
+  ---
+  duration_ms: 0.096541
+  type: 'test'
+  ...
+# Subtest: query params are encoded into the URL
+ok 11 - query params are encoded into the URL
+  ---
+  duration_ms: 0.239167
+  type: 'test'
+  ...
+# Subtest: network failure becomes an offline ApiError
+ok 12 - network failure becomes an offline ApiError
+  ---
+  duration_ms: 0.307875
+  type: 'test'
+  ...
+# Subtest: 401 becomes an unauthorized ApiError
+ok 13 - 401 becomes an unauthorized ApiError
+  ---
+  duration_ms: 0.172125
+  type: 'test'
+  ...
+# Subtest: other non-2xx surfaces the JSON detail as an http ApiError
+ok 14 - other non-2xx surfaces the JSON detail as an http ApiError
+  ---
+  duration_ms: 0.323583
+  type: 'test'
+  ...
+# Subtest: post sends a JSON body
+ok 15 - post sends a JSON body
+  ---
+  duration_ms: 0.768875
+  type: 'test'
+  ...
+# Subtest: upload posts multipart form data to /v1/documents
+ok 16 - upload posts multipart form data to /v1/documents
+  ---
+  duration_ms: 25.487375
+  type: 'test'
+  ...
+# Subtest: health reports ok on 200 and status on failure, offline as null
+ok 17 - health reports ok on 200 and status on failure, offline as null
+  ---
+  duration_ms: 0.219083
+  type: 'test'
+  ...
+# Subtest: base prefixes every request path
+ok 18 - base prefixes every request path
+  ---
+  duration_ms: 0.412833
+  type: 'test'
+  ...
+# Subtest: get/post/upload forward an abort signal and fetch is aborted
+ok 19 - get/post/upload forward an abort signal and fetch is aborted
+  ---
+  duration_ms: 0.635416
+  type: 'test'
+  ...
+# Subtest: requests time out instead of hanging
+ok 20 - requests time out instead of hanging
+  ---
+  duration_ms: 21.4725
+  type: 'test'
+  ...
+# Subtest: setToken rejects non printable ASCII tokens
+ok 21 - setToken rejects non printable ASCII tokens
+  ---
+  duration_ms: 0.534042
+  type: 'test'
+  ...
+# Subtest: 422 detail prints only loc and msg, not submitted input
+ok 22 - 422 detail prints only loc and msg, not submitted input
+  ---
+  duration_ms: 0.215875
+  type: 'test'
+  ...
+# Subtest: healthy api prints real checks with counts and the motd, state live
+ok 23 - healthy api prints real checks with counts and the motd, state live
+  ---
+  duration_ms: 1.430334
+  type: 'test'
+  ...
+# Subtest: boot uses the full banner unless compact is requested
+ok 24 - boot uses the full banner unless compact is requested
+  ---
+  duration_ms: 0.388041
+  type: 'test'
+  ...
+# Subtest: health down never prints ok, prints closed line and skips every other check
+ok 25 - health down never prints ok, prints closed line and skips every other check
+  ---
+  duration_ms: 0.278916
+  type: 'test'
+  ...
+# Subtest: health reporting a server error is also closed
+ok 26 - health reporting a server error is also closed
+  ---
+  duration_ms: 1.221417
+  type: 'test'
+  ...
+# Subtest: 401 on the auth check prints the exact token line and state locked
+ok 27 - 401 on the auth check prints the exact token line and state locked
+  ---
+  duration_ms: 4.552583
+  type: 'test'
+  ...
+# Subtest: offline on the auth check is closed, not locked, and never prints auth ok
+ok 28 - offline on the auth check is closed, not locked, and never prints auth ok
+  ---
+  duration_ms: 0.36475
+  type: 'test'
+  ...
+# Subtest: http error on the auth check is closed and prints the failure, not ok
+ok 29 - http error on the auth check is closed and prints the failure, not ok
+  ---
+  duration_ms: 0.819625
+  type: 'test'
+  ...
+# Subtest: a failing eval runs check is printed as failed and does not stop the boot
+ok 30 - a failing eval runs check is printed as failed and does not stop the boot
+  ---
+  duration_ms: 5.2815
+  type: 'test'
+  ...
+# Subtest: an aborted signal prints every line with no delays but still runs the checks
+ok 31 - an aborted signal prints every line with no delays but still runs the checks
+  ---
+  duration_ms: 0.573375
+  type: 'test'
+  ...
+# Subtest: reduced motion never delays, even without an abort
+ok 32 - reduced motion never delays, even without an abort
+  ---
+  duration_ms: 0.434792
+  type: 'test'
+  ...
+# Subtest: normal motion delays for the banner and between lines
+ok 33 - normal motion delays for the banner and between lines
+  ---
+  duration_ms: 0.351084
+  type: 'test'
+  ...
+# Subtest: the signal aborting mid-run stops later delays
+ok 34 - the signal aborting mid-run stops later delays
+  ---
+  duration_ms: 0.154041
+  type: 'test'
+  ...
+# Subtest: boot line reflects the real theme and crt state
+ok 35 - boot line reflects the real theme and crt state
+  ---
+  duration_ms: 0.101042
+  type: 'test'
+  ...
+# Subtest: catalog prints N+ when the page is full
+ok 36 - catalog prints N+ when the page is full
+  ---
+  duration_ms: 0.1665
+  type: 'test'
+  ...
+# Subtest: boot prints a jev status line, non-fatal on failure
+ok 37 - boot prints a jev status line, non-fatal on failure
+  ---
+  duration_ms: 0.267
+  type: 'test'
+  ...
+# Subtest: config has help and no command-to-command import
+ok 38 - config has help and no command-to-command import
+  ---
+  duration_ms: 0.845416
+  type: 'test'
+  ...
+# Subtest: config renders dotted settings using the session token
+ok 39 - config renders dotted settings using the session token
+  ---
+  duration_ms: 30.604542
+  type: 'test'
+  ...
+# Subtest: secret scalars, arrays and nested objects never reach rendered output
+ok 40 - secret scalars, arrays and nested objects never reach rendered output
+  ---
+  duration_ms: 0.64675
+  type: 'test'
+  ...
+# Subtest: config output is text-only, bounded, and rejects malformed payloads
+ok 41 - config output is text-only, bounded, and rejects malformed payloads
+  ---
+  duration_ms: 1.794042
+  type: 'test'
+  ...
+# Subtest: config 401 gives auth hint (no token) without exposing error bodies
+ok 42 - config 401 gives auth hint (no token) without exposing error bodies
+  ---
+  duration_ms: 0.523541
+  type: 'test'
+  ...
+# Subtest: config 401 gives auth hint (wrong-token) without exposing error bodies
+ok 43 - config 401 gives auth hint (wrong-token) without exposing error bodies
+  ---
+  duration_ms: 0.442458
+  type: 'test'
+  ...
+# Subtest: config handles backend-down, invalid responses, bad arguments and cancellation
+ok 44 - config handles backend-down, invalid responses, bad arguments and cancellation
+  ---
+  duration_ms: 0.911875
+  type: 'test'
+  ...
+# Subtest: valid replay fragments become a replay command
+ok 45 - valid replay fragments become a replay command
+  ---
+  duration_ms: 0.633708
+  type: 'test'
+  ...
+# Subtest: anything else is ignored
+ok 46 - anything else is ignored
+  ---
+  duration_ms: 1.75
+  type: 'test'
+  ...
+# Subtest: a flag-like id stays a positional run id, never a flag
+ok 47 - a flag-like id stays a positional run id, never a flag
+  ---
+  duration_ms: 0.614042
+  type: 'test'
+  ...
+# Subtest: isReplayLink flags any replay fragment, valid or not
+ok 48 - isReplayLink flags any replay fragment, valid or not
+  ---
+  duration_ms: 0.703833
+  type: 'test'
+  ...
+# Subtest: deepLinkKind names the command a fragment asks for, valid or not
+ok 49 - deepLinkKind names the command a fragment asks for, valid or not
+  ---
+  duration_ms: 0.107167
+  type: 'test'
+  ...
+# Subtest: parseLine splits on whitespace and groups quotes
+ok 50 - parseLine splits on whitespace and groups quotes
+  ---
+  duration_ms: 4.567709
+  type: 'test'
+  ...
+# Subtest: parseLine accepts single quotes and empty input
+ok 51 - parseLine accepts single quotes and empty input
+  ---
+  duration_ms: 0.132375
+  type: 'test'
+  ...
+# Subtest: parseLine reports unbalanced quotes
+ok 52 - parseLine reports unbalanced quotes
+  ---
+  duration_ms: 0.130584
+  type: 'test'
+  ...
+# Subtest: parseLine supports --k=v, --k v and bare --k
+ok 53 - parseLine supports --k=v, --k v and bare --k
+  ---
+  duration_ms: 0.098125
+  type: 'test'
+  ...
+# Subtest: history skips empties and consecutive duplicates and walks prev/next
+ok 54 - history skips empties and consecutive duplicates and walks prev/next
+  ---
+  duration_ms: 0.429583
+  type: 'test'
+  ...
+# Subtest: history is capped at max
+ok 55 - history is capped at max
+  ---
+  duration_ms: 0.134709
+  type: 'test'
+  ...
+# Subtest: registry completes a unique prefix with a ghost suffix
+ok 56 - registry completes a unique prefix with a ghost suffix
+  ---
+  duration_ms: 0.2365
+  type: 'test'
+  ...
+# Subtest: registry rejects duplicate names and unknown get returns undefined
+ok 57 - registry rejects duplicate names and unknown get returns undefined
+  ---
+  duration_ms: 0.150417
+  type: 'test'
+  ...
+# Subtest: dispatch prints the exact unknown-command message
+ok 58 - dispatch prints the exact unknown-command message
+  ---
+  duration_ms: 2.463833
+  type: 'test'
+  ...
+# Subtest: dispatch runs a command with args and flags
+ok 59 - dispatch runs a command with args and flags
+  ---
+  duration_ms: 0.496
+  type: 'test'
+  ...
+# Subtest: dispatch returns error and prints once when run throws
+ok 60 - dispatch returns error and prints once when run throws
+  ---
+  duration_ms: 0.197208
+  type: 'test'
+  ...
+# Subtest: dispatch of an empty line is ok and prints nothing
+ok 61 - dispatch of an empty line is ok and prints nothing
+  ---
+  duration_ms: 0.076125
+  type: 'test'
+  ...
+# Subtest: dispatch reports parse errors as error without running anything
+ok 62 - dispatch reports parse errors as error without running anything
+  ---
+  duration_ms: 0.052875
+  type: 'test'
+  ...
+# Subtest: ledger is registered with a man page
+ok 63 - ledger is registered with a man page
+  ---
+  duration_ms: 0.697042
+  type: 'test'
+  ...
+# Subtest: ledgerRow shortens ts and hash and omits the payload
+ok 64 - ledgerRow shortens ts and hash and omits the payload
+  ---
+  duration_ms: 0.509833
+  type: 'test'
+  ...
+# Subtest: ledger renders a table with query defaults
+ok 65 - ledger renders a table with query defaults
+  ---
+  duration_ms: 0.490958
+  type: 'test'
+  ...
+# Subtest: ledger passes --run, --kind and --limit
+ok 66 - ledger passes --run, --kind and --limit
+  ---
+  duration_ms: 0.261417
+  type: 'test'
+  ...
+# Subtest: ledger rejects bad limit, run and kind before any request
+ok 67 - ledger rejects bad limit, run and kind before any request
+  ---
+  duration_ms: 3.012
+  type: 'test'
+  ...
+# Subtest: ledger head prints kv and handles an empty ledger
+ok 68 - ledger head prints kv and handles an empty ledger
+  ---
+  duration_ms: 0.327583
+  type: 'test'
+  ...
+# Subtest: verifyLine covers ok, broken and merkle states
+ok 69 - verifyLine covers ok, broken and merkle states
+  ---
+  duration_ms: 0.246292
+  type: 'test'
+  ...
+# Subtest: ledger verify sends run_id and prints the lines
+ok 70 - ledger verify sends run_id and prints the lines
+  ---
+  duration_ms: 0.273625
+  type: 'test'
+  ...
+# Subtest: ledger verify broken is an error line
+ok 71 - ledger verify broken is an error line
+  ---
+  duration_ms: 0.362292
+  type: 'test'
+  ...
+# Subtest: api failures use the shared wording and abort is silent
+ok 72 - api failures use the shared wording and abort is silent
+  ---
+  duration_ms: 0.839083
+  type: 'test'
+  ...
+# Subtest: hostile response values stay plain text
+ok 73 - hostile response values stay plain text
+  ---
+  duration_ms: 0.233708
+  type: 'test'
+  ...
+# Subtest: verifyLine says "verify failed" (not "broken") for an unknown run
+ok 74 - verifyLine says "verify failed" (not "broken") for an unknown run
+  ---
+  duration_ms: 0.106292
+  type: 'test'
+  ...
+# Subtest: bytes uses binary units
+ok 75 - bytes uses binary units
+  ---
+  duration_ms: 0.457459
+  type: 'test'
+  ...
+# Subtest: durations scale from ms to days
+ok 76 - durations scale from ms to days
+  ---
+  duration_ms: 0.106708
+  type: 'test'
+  ...
+# Subtest: usd keeps small costs visible
+ok 77 - usd keeps small costs visible
+  ---
+  duration_ms: 0.125833
+  type: 'test'
+  ...
+# Subtest: non-finite or invalid input renders a dash and never throws
+ok 78 - non-finite or invalid input renders a dash and never throws
+  ---
+  duration_ms: 0.079334
+  type: 'test'
+  ...
+# Subtest: default timeout is 2 s
+ok 79 - default timeout is 2 s
+  ---
+  duration_ms: 0.819083
+  type: 'test'
+  ...
+# Subtest: sends the auth header and Accept, builds the query, returns JSON
+ok 80 - sends the auth header and Accept, builds the query, returns JSON
+  ---
+  duration_ms: 2.769084
+  type: 'test'
+  ...
+# Subtest: 401 maps to unauthorized with a run-auth hint
+ok 81 - 401 maps to unauthorized with a run-auth hint
+  ---
+  duration_ms: 0.45825
+  type: 'test'
+  ...
+# Subtest: status codes map to typed kinds
+ok 82 - status codes map to typed kinds
+  ---
+  duration_ms: 0.219
+  type: 'test'
+  ...
+# Subtest: a hung request times out as kind timeout
+ok 83 - a hung request times out as kind timeout
+  ---
+  duration_ms: 22.404333
+  type: 'test'
+  ...
+# Subtest: network failure is offline; caller abort is aborted
+ok 84 - network failure is offline; caller abort is aborted
+  ---
+  duration_ms: 0.8875
+  type: 'test'
+  ...
+# Subtest: non-JSON body is a parse error; 204 is null
+ok 85 - non-JSON body is a parse error; 204 is null
+  ---
+  duration_ms: 0.408708
+  type: 'test'
+  ...
+# Subtest: only same-origin absolute paths are allowed
+ok 86 - only same-origin absolute paths are allowed
+  ---
+  duration_ms: 0.269292
+  type: 'test'
+  ...
+# Subtest: post sends a JSON body
+ok 87 - post sends a JSON body
+  ---
+  duration_ms: 0.282208
+  type: 'test'
+  ...
+# Subtest: httpFor reads the token from ctx.api and the signal from ctx
+ok 88 - httpFor reads the token from ctx.api and the signal from ctx
+  ---
+  duration_ms: 0.56325
+  type: 'test'
+  ...
+# Subtest: errorHint covers every kind without throwing
+ok 89 - errorHint covers every kind without throwing
+  ---
+  duration_ms: 0.135417
+  type: 'test'
+  ...
+# Subtest: ticks immediately, then every interval, without overlap
+ok 90 - ticks immediately, then every interval, without overlap
+  ---
+  duration_ms: 0.810833
+  type: 'test'
+  ...
+# Subtest: a hidden tab skips ticks until visible again
+ok 91 - a hidden tab skips ticks until visible again
+  ---
+  duration_ms: 0.181625
+  type: 'test'
+  ...
+# Subtest: aborting the signal stops polling and aborts the in-flight tick
+ok 92 - aborting the signal stops polling and aborts the in-flight tick
+  ---
+  duration_ms: 1.287209
+  type: 'test'
+  ...
+# Subtest: errors go to onError and polling continues
+ok 93 - errors go to onError and polling continues
+  ---
+  duration_ms: 3.169541
+  type: 'test'
+  ...
+# Subtest: rejects a non-function and clamps a silly interval
+ok 94 - rejects a non-function and clamps a silly interval
+  ---
+  duration_ms: 1.183292
+  type: 'test'
+  ...
+# Subtest: renders a header, a rule and aligned rows
+ok 95 - renders a header, a rule and aligned rows
+  ---
+  duration_ms: 1.562167
+  type: 'test'
+  ...
+# Subtest: cells are clamped to max with an ellipsis
+ok 96 - cells are clamped to max with an ellipsis
+  ---
+  duration_ms: 0.185125
+  type: 'test'
+  ...
+# Subtest: control and bidi characters become spaces; missing values are dashes
+ok 97 - control and bidi characters become spaces; missing values are dashes
+  ---
+  duration_ms: 0.369209
+  type: 'test'
+  ...
+# Subtest: format is applied and a throwing format degrades to a dash
+ok 98 - format is applied and a throwing format degrades to a dash
+  ---
+  duration_ms: 1.160125
+  type: 'test'
+  ...
+# Subtest: no columns or junk rows render safely
+ok 99 - no columns or junk rows render safely
+  ---
+  duration_ms: 0.429292
+  type: 'test'
+  ...
+# Subtest: links is registered with a man page
+ok 100 - links is registered with a man page
+  ---
+  duration_ms: 0.845334
+  type: 'test'
+  ...
+# Subtest: links prints the validated /links table and reads GET /links
+ok 101 - links prints the validated /links table and reads GET /links
+  ---
+  duration_ms: 1.345042
+  type: 'test'
+  ...
+# Subtest: links marks unset and invalid URLs without showing the invalid value
+ok 102 - links marks unset and invalid URLs without showing the invalid value
+  ---
+  duration_ms: 1.539292
+  type: 'test'
+  ...
+# Subtest: links with a 401 prints the run-auth hint and does not throw
+ok 103 - links with a 401 prints the run-auth hint and does not throw
+  ---
+  duration_ms: 0.926708
+  type: 'test'
+  ...
+# Subtest: links with a 403 or 404 prints the matching hint
+ok 104 - links with a 403 or 404 prints the matching hint
+  ---
+  duration_ms: 1.433917
+  type: 'test'
+  ...
+# Subtest: links with the api offline prints the unreachable message without throwing
+ok 105 - links with the api offline prints the unreachable message without throwing
+  ---
+  duration_ms: 0.648208
+  type: 'test'
+  ...
+# Subtest: links prints nothing when the command was aborted
+ok 106 - links prints nothing when the command was aborted
+  ---
+  duration_ms: 0.485917
+  type: 'test'
+  ...
+# Subtest: links survives malformed payloads
+ok 107 - links survives malformed payloads
+  ---
+  duration_ms: 0.933416
+  type: 'test'
+  ...
+# Subtest: links prints hostile values only as text
+ok 108 - links prints hostile values only as text
+  ---
+  duration_ms: 0.254334
+  type: 'test'
+  ...
+# Subtest: linkRows never throws and marks valid URLs as plain
+ok 109 - linkRows never throws and marks valid URLs as plain
+  ---
+  duration_ms: 0.349084
+  type: 'test'
+  ...
+# Subtest: links open phoenix opens the validated URL with noopener and noreferrer
+ok 110 - links open phoenix opens the validated URL with noopener and noreferrer
+  ---
+  duration_ms: 0.186791
+  type: 'test'
+  ...
+# Subtest: links open grafana never opens a javascript: or non-http URL
+ok 111 - links open grafana never opens a javascript: or non-http URL
+  ---
+  duration_ms: 0.09475
+  type: 'test'
+  ...
+# Subtest: links open prometheus prints a dim line when the payload has no prometheus URL
+ok 112 - links open prometheus prints a dim line when the payload has no prometheus URL
+  ---
+  duration_ms: 0.084292
+  type: 'test'
+  ...
+# Subtest: links open prometheus opens a payload URL when one is published
+ok 113 - links open prometheus opens a payload URL when one is published
+  ---
+  duration_ms: 0.083292
+  type: 'test'
+  ...
+# Subtest: links open with an unset phoenix URL is not configured and opens nothing
+ok 114 - links open with an unset phoenix URL is not configured and opens nothing
+  ---
+  duration_ms: 0.078834
+  type: 'test'
+  ...
+# Subtest: links open reports a throwing opener without throwing
+ok 115 - links open reports a throwing opener without throwing
+  ---
+  duration_ms: 0.097375
+  type: 'test'
+  ...
+# Subtest: links open with a 401 or offline api prints the hint and opens nothing
+ok 116 - links open with a 401 or offline api prints the hint and opens nothing
+  ---
+  duration_ms: 0.153167
+  type: 'test'
+  ...
+# Subtest: links rejects unknown targets and extra arguments before any request
+ok 117 - links rejects unknown targets and extra arguments before any request
+  ---
+  duration_ms: 0.214208
+  type: 'test'
+  ...
+# Subtest: links open never puts a hostile value in a line
+ok 118 - links open never puts a hostile value in a line
+  ---
+  duration_ms: 1.052417
+  type: 'test'
+  ...
+# Subtest: links reports a missing browser opener rather than claiming success
+ok 119 - links reports a missing browser opener rather than claiming success
+  ---
+  duration_ms: 0.346333
+  type: 'test'
+  ...
+# Subtest: links forwards session auth but never prints the token
+ok 120 - links forwards session auth but never prints the token
+  ---
+  duration_ms: 0.294375
+  type: 'test'
+  ...
+# Subtest: links cancellation suppresses a late response and never opens a tab
+ok 121 - links cancellation suppresses a late response and never opens a tab
+  ---
+  duration_ms: 0.970666
+  type: 'test'
+  ...
+# Subtest: links table renders hostile project content using textContent only
+ok 122 - links table renders hostile project content using textContent only
+  ---
+  duration_ms: 0.896792
+  type: 'test'
+  ...
+# Subtest: httpBase accepts plain http(s) and trims trailing slashes
+ok 123 - httpBase accepts plain http(s) and trims trailing slashes
+  ---
+  duration_ms: 1.216125
+  type: 'test'
+  ...
+# Subtest: externalUrls builds the grafana run link only for run ids
+ok 124 - externalUrls builds the grafana run link only for run ids
+  ---
+  duration_ms: 0.523584
+  type: 'test'
+  ...
+# Subtest: loadLinks returns the body object or null and never throws
+ok 125 - loadLinks returns the body object or null and never throws
+  ---
+  duration_ms: 0.196334
+  type: 'test'
+  ...
+# Subtest: loadText returns the asset text
+ok 126 - loadText returns the asset text
+  ---
+  duration_ms: 0.958875
+  type: 'test'
+  ...
+# Subtest: loadText returns "" on a non-ok response (never throws)
+ok 127 - loadText returns "" on a non-ok response (never throws)
+  ---
+  duration_ms: 0.116458
+  type: 'test'
+  ...
+# Subtest: loadText returns "" when the fetch itself throws
+ok 128 - loadText returns "" when the fetch itself throws
+  ---
+  duration_ms: 0.109791
+  type: 'test'
+  ...
+# Subtest: registers every pipeline command with a man page
+ok 129 - registers every pipeline command with a man page
+  ---
+  duration_ms: 4.399209
+  type: 'test'
+  ...
+# Subtest: ls renders rows from the documents envelope and passes flags as query
+ok 130 - ls renders rows from the documents envelope and passes flags as query
+  ---
+  duration_ms: 1.033708
+  type: 'test'
+  ...
+# Subtest: ls keeps a hostile filename as plain text
+ok 131 - ls keeps a hostile filename as plain text
+  ---
+  duration_ms: 0.15625
+  type: 'test'
+  ...
+# Subtest: ls empty prints the exact empty-state line
+ok 132 - ls empty prints the exact empty-state line
+  ---
+  duration_ms: 0.126917
+  type: 'test'
+  ...
+# Subtest: ls rejects a bad --limit without a request
+ok 133 - ls rejects a bad --limit without a request
+  ---
+  duration_ms: 0.140791
+  type: 'test'
+  ...
+# Subtest: review asks for parked documents
+ok 134 - review asks for parked documents
+  ---
+  duration_ms: 0.10575
+  type: 'test'
+  ...
+# Subtest: inspect prints title, kv and stage lines in order
+ok 135 - inspect prints title, kv and stage lines in order
+  ---
+  duration_ms: 0.474708
+  type: 'test'
+  ...
+# Subtest: inspect copes with a document that has no report yet
+ok 136 - inspect copes with a document that has no report yet
+  ---
+  duration_ms: 0.162667
+  type: 'test'
+  ...
+# Subtest: audit prints count and chain ok
+ok 137 - audit prints count and chain ok
+  ---
+  duration_ms: 0.533875
+  type: 'test'
+  ...
+# Subtest: audit prints the broken seq
+ok 138 - audit prints the broken seq
+  ---
+  duration_ms: 0.47375
+  type: 'test'
+  ...
+# Subtest: resolve correct without --type makes no request
+ok 139 - resolve correct without --type makes no request
+  ---
+  duration_ms: 0.199542
+  type: 'test'
+  ...
+# Subtest: resolve posts the real body shape and echoes status and trail
+ok 140 - resolve posts the real body shape and echoes status and trail
+  ---
+  duration_ms: 0.10925
+  type: 'test'
+  ...
+# Subtest: resolve rejects an unknown action locally
+ok 141 - resolve rejects an unknown action locally
+  ---
+  duration_ms: 0.051375
+  type: 'test'
+  ...
+# Subtest: error messages are exact: offline, 401, 404
+ok 142 - error messages are exact: offline, 401, 404
+  ---
+  duration_ms: 0.297625
+  type: 'test'
+  ...
+# Subtest: other http errors show the server detail
+ok 143 - other http errors show the server detail
+  ---
+  duration_ms: 0.133042
+  type: 'test'
+  ...
+# Subtest: runs and cards render the real shapes
+ok 144 - runs and cards render the real shapes
+  ---
+  duration_ms: 0.21425
+  type: 'test'
+  ...
+# Subtest: runs empty is a plain message
+ok 145 - runs empty is a plain message
+  ---
+  duration_ms: 0.05
+  type: 'test'
+  ...
+# Subtest: health prints service and status
+ok 146 - health prints service and status
+  ---
+  duration_ms: 0.065334
+  type: 'test'
+  ...
+# Subtest: upload uses the injected picker and prints queued line
+ok 147 - upload uses the injected picker and prints queued line
+  ---
+  duration_ms: 0.112375
+  type: 'test'
+  ...
+# Subtest: upload with a cancelled picker does not call the api
+ok 148 - upload with a cancelled picker does not call the api
+  ---
+  duration_ms: 0.055458
+  type: 'test'
+  ...
+# Subtest: upload falls back to a DOM file input
+ok 149 - upload falls back to a DOM file input
+  ---
+  duration_ms: 1.341334
+  type: 'test'
+  ...
+# Subtest: upload offline and 401 messages
+ok 150 - upload offline and 401 messages
+  ---
+  duration_ms: 0.099959
+  type: 'test'
+  ...
+# Subtest: watch baselines, prints only changes, and stops on abort
+ok 151 - watch baselines, prints only changes, and stops on abort
+  ---
+  duration_ms: 0.234042
+  type: 'test'
+  ...
+# Subtest: watch stops when the tab is hidden
+ok 152 - watch stops when the tab is hidden
+  ---
+  duration_ms: 0.075125
+  type: 'test'
+  ...
+# Subtest: watch stops on an api error with the exact message
+ok 153 - watch stops on an api error with the exact message
+  ---
+  duration_ms: 0.074041
+  type: 'test'
+  ...
+# Subtest: watch rejects a bad interval
+ok 154 - watch rejects a bad interval
+  ---
+  duration_ms: 0.070208
+  type: 'test'
+  ...
+# Subtest: auth ok, rejected, clear, and never echoes the token
+ok 155 - auth ok, rejected, clear, and never echoes the token
+  ---
+  duration_ms: 0.275625
+  type: 'test'
+  ...
+# Subtest: statusClass ignores prototype keys
+ok 156 - statusClass ignores prototype keys
+  ---
+  duration_ms: 0.094417
+  type: 'test'
+  ...
+# Subtest: audit with no entries warns and never prints chain: ok
+ok 157 - audit with no entries warns and never prints chain: ok
+  ---
+  duration_ms: 0.055584
+  type: 'test'
+  ...
+# Subtest: empty, dot and dotdot ids are rejected before any request
+ok 158 - empty, dot and dotdot ids are rejected before any request
+  ---
+  duration_ms: 0.09275
+  type: 'test'
+  ...
+# Subtest: pipeline commands pass ctx.signal() to the api
+ok 159 - pipeline commands pass ctx.signal() to the api
+  ---
+  duration_ms: 0.081791
+  type: 'test'
+  ...
+# Subtest: auth rolls back the token on 401 and rejects bad tokens
+ok 160 - auth rolls back the token on 401 and rejects bad tokens
+  ---
+  duration_ms: 0.177708
+  type: 'test'
+  ...
+# Subtest: ls says showing first N when the page is full
+ok 161 - ls says showing first N when the page is full
+  ---
+  duration_ms: 0.07925
+  type: 'test'
+  ...
+# Subtest: watch warns once when the page is full and does not print after abort
+ok 162 - watch warns once when the page is full and does not print after abort
+  ---
+  duration_ms: 0.268625
+  type: 'test'
+  ...
+# Subtest: upload picker receives the signal and abort cancels the upload
+ok 163 - upload picker receives the signal and abort cancels the upload
+  ---
+  duration_ms: 0.094875
+  type: 'test'
+  ...
+# Subtest: jev prints kv with calibration and never an api key
+ok 164 - jev prints kv with calibration and never an api key
+  ---
+  duration_ms: 0.131125
+  type: 'test'
+  ...
+# Subtest: jev off prints the dim band-gate line
+ok 165 - jev off prints the dim band-gate line
+  ---
+  duration_ms: 0.058625
+  type: 'test'
+  ...
+# Subtest: jev uncalibrated skips thresholds; 401 handled
+ok 166 - jev uncalibrated skips thresholds; 401 handled
+  ---
+  duration_ms: 0.093958
+  type: 'test'
+  ...
+# Subtest: audit renders gate_decision entries distinctly and survives odd actions
+ok 167 - audit renders gate_decision entries distinctly and survives odd actions
+  ---
+  duration_ms: 0.188791
+  type: 'test'
+  ...
+# Subtest: inspect shows a gate line from audit, non-fatal on failure
+ok 168 - inspect shows a gate line from audit, non-fatal on failure
+  ---
+  duration_ms: 0.142792
+  type: 'test'
+  ...
+# Subtest: runs pin and unpin post a validated run id
+ok 169 - runs pin and unpin post a validated run id
+  ---
+  duration_ms: 0.167416
+  type: 'test'
+  ...
+# Subtest: runs pin rejects bad ids and bad arity before any request
+ok 170 - runs pin rejects bad ids and bad arity before any request
+  ---
+  duration_ms: 0.351792
+  type: 'test'
+  ...
+# Subtest: runs pin surfaces the server 400 detail, offline and 401 wording; abort is silent
+ok 171 - runs pin surfaces the server 400 detail, offline and 401 wording; abort is silent
+  ---
+  duration_ms: 0.18275
+  type: 'test'
+  ...
+# Subtest: runs keep shows policy, source, pinned and showcase as plain text
+ok 172 - runs keep shows policy, source, pinned and showcase as plain text
+  ---
+  duration_ms: 0.109666
+  type: 'test'
+  ...
+# Subtest: runs keep set posts a validated policy and shows server errors
+ok 173 - runs keep set posts a validated policy and shows server errors
+  ---
+  duration_ms: 0.242708
+  type: 'test'
+  ...
+# Subtest: bare runs does not touch the ledger endpoints
+ok 174 - bare runs does not touch the ledger endpoints
+  ---
+  duration_ms: 0.062291
+  type: 'test'
+  ...
+# Subtest: duplicate module id throws
+ok 175 - duplicate module id throws
+  ---
+  duration_ms: 1.248542
+  type: 'test'
+  ...
+# Subtest: reserved module id is rejected
+ok 176 - reserved module id is rejected
+  ---
+  duration_ms: 0.30125
+  type: 'test'
+  ...
+# Subtest: malformed module ids are rejected
+ok 177 - malformed module ids are rejected
+  ---
+  duration_ms: 0.24425
+  type: 'test'
+  ...
+# Subtest: a command clash rejects the whole module and registers none of it
+ok 178 - a command clash rejects the whole module and registers none of it
+  ---
+  duration_ms: 0.552166
+  type: 'test'
+  ...
+# Subtest: a command without a run function rejects the module
+ok 179 - a command without a run function rejects the module
+  ---
+  duration_ms: 0.534959
+  type: 'test'
+  ...
+# Subtest: panel row with markup is sanitised
+ok 180 - panel row with markup is sanitised
+  ---
+  duration_ms: 0.681834
+  type: 'test'
+  ...
+# Subtest: a throwing panel renderer yields no rows
+ok 181 - a throwing panel renderer yields no rows
+  ---
+  duration_ms: 0.110791
+  type: 'test'
+  ...
+# Subtest: module panels reach the replay panel registry, which still rejects its reserved ids
+ok 182 - module panels reach the replay panel registry, which still rejects its reserved ids
+  ---
+  duration_ms: 0.204458
+  type: 'test'
+  ...
+# Subtest: onInit throw does not stop registerAll
+ok 183 - onInit throw does not stop registerAll
+  ---
+  duration_ms: 0.64875
+  type: 'test'
+  ...
+# Subtest: register functions see the real registry for lazy lookups
+ok 184 - register functions see the real registry for lazy lookups
+  ---
+  duration_ms: 0.422208
+  type: 'test'
+  ...
+# Subtest: built-in modules register the same commands as before, each once
+ok 185 - built-in modules register the same commands as before, each once
+  ---
+  duration_ms: 0.419291
+  type: 'test'
+  ...
+# Subtest: a bad module in the list does not block the built-ins (boot survives)
+ok 186 - a bad module in the list does not block the built-ins (boot survives)
+  ---
+  duration_ms: 0.298917
+  type: 'test'
+  ...
+# Subtest: ready is registered with a man page
+ok 187 - ready is registered with a man page
+  ---
+  duration_ms: 0.778125
+  type: 'test'
+  ...
+# Subtest: readyClass maps the four statuses and gives unknown words no class
+ok 188 - readyClass maps the four statuses and gives unknown words no class
+  ---
+  duration_ms: 0.172667
+  type: 'test'
+  ...
+# Subtest: ready renders a degraded component table after an abort-aware 2050ms response
+ok 189 - ready renders a degraded component table after an abort-aware 2050ms response
+  ---
+  duration_ms: 2052.650166
+  type: 'test'
+  ...
+# Subtest: ready renders the components table with colour classes and latency
+ok 190 - ready renders the components table with colour classes and latency
+  ---
+  duration_ms: 0.517875
+  type: 'test'
+  ...
+# Subtest: ready with an ok aggregate and no detail says how to get the rows
+ok 191 - ready with an ok aggregate and no detail says how to get the rows
+  ---
+  duration_ms: 0.307667
+  type: 'test'
+  ...
+# Subtest: ready with a token that was not accepted says the detail is hidden
+ok 192 - ready with a token that was not accepted says the detail is hidden
+  ---
+  duration_ms: 0.295041
+  type: 'test'
+  ...
+# Subtest: ready shows the rows on a 503 down response
+ok 193 - ready shows the rows on a 503 down response
+  ---
+  duration_ms: 0.250875
+  type: 'test'
+  ...
+# Subtest: ready with a 503 that has no JSON body prints the status
+ok 194 - ready with a 503 that has no JSON body prints the status
+  ---
+  duration_ms: 0.25675
+  type: 'test'
+  ...
+# Subtest: ready with a 401 prints the run-auth hint
+ok 195 - ready with a 401 prints the run-auth hint
+  ---
+  duration_ms: 0.312917
+  type: 'test'
+  ...
+# Subtest: ready with a 403 or 404 prints the matching message
+ok 196 - ready with a 403 or 404 prints the matching message
+  ---
+  duration_ms: 0.707708
+  type: 'test'
+  ...
+# Subtest: ready with the backend offline prints a message and does not throw
+ok 197 - ready with the backend offline prints a message and does not throw
+  ---
+  duration_ms: 0.15625
+  type: 'test'
+  ...
+# Subtest: ready prints nothing when the command was aborted
+ok 198 - ready prints nothing when the command was aborted
+  ---
+  duration_ms: 0.173583
+  type: 'test'
+  ...
+# Subtest: readyView and ready survive malformed payloads
+ok 199 - readyView and ready survive malformed payloads
+  ---
+  duration_ms: 0.407792
+  type: 'test'
+  ...
+# Subtest: ready prints hostile component values only as text
+ok 200 - ready prints hostile component values only as text
+  ---
+  duration_ms: 0.088166
+  type: 'test'
+  ...
+# Subtest: ready rejects arguments and bad flags before any request
+ok 201 - ready rejects arguments and bad flags before any request
+  ---
+  duration_ms: 0.193667
+  type: 'test'
+  ...
+# Subtest: ready --watch re-polls, prints only changes and stops on abort
+ok 202 - ready --watch re-polls, prints only changes and stops on abort
+  ---
+  duration_ms: 3.101
+  type: 'test'
+  ...
+# Subtest: ready --watch prints one error line per distinct failure and keeps polling
+ok 203 - ready --watch prints one error line per distinct failure and keeps polling
+  ---
+  duration_ms: 1.224625
+  type: 'test'
+  ...
+# Subtest: ready --watch never throws on hostile payloads
+ok 204 - ready --watch never throws on hostile payloads
+  ---
+  duration_ms: 0.80875
+  type: 'test'
+  ...
+# Subtest: ready --watch does nothing after an abort before the first tick
+ok 205 - ready --watch does nothing after an abort before the first tick
+  ---
+  duration_ms: 0.113333
+  type: 'test'
+  ...
+# Subtest: main registers links, ready and config without module failures
+ok 206 - main registers links, ready and config without module failures
+  ---
+  duration_ms: 0.753208
+  type: 'test'
+  ...
+# Subtest: health --all renders readiness while plain health preserves its original handler
+ok 207 - health --all renders readiness while plain health preserves its original handler
+  ---
+  duration_ms: 0.196334
+  type: 'test'
+  ...
+# Subtest: readiness aliases reject invalid arguments before requesting
+ok 208 - readiness aliases reject invalid arguments before requesting
+  ---
+  duration_ms: 0.166375
+  type: 'test'
+  ...
+# Subtest: watch ready re-polls and cancels while plain watch keeps its handler
+ok 209 - watch ready re-polls and cancels while plain watch keeps its handler
+  ---
+  duration_ms: 1.277917
+  type: 'test'
+  ...
+# Subtest: readiness watch aborts an in-flight request with no late output
+ok 210 - readiness watch aborts an in-flight request with no late output
+  ---
+  duration_ms: 0.594167
+  type: 'test'
+  ...
+# Subtest: ready cancellation ignores a successful late response
+ok 211 - ready cancellation ignores a successful late response
+  ---
+  duration_ms: 0.156459
+  type: 'test'
+  ...
+# Subtest: ready forwards auth and renders hostile component names as DOM text without tokens
+ok 212 - ready forwards auth and renders hostile component names as DOM text without tokens
+  ---
+  duration_ms: 0.278625
+  type: 'test'
+  ...
+# Subtest: starts paused at zero
+ok 213 - starts paused at zero
+  ---
+  duration_ms: 4.516833
+  type: 'test'
+  ...
+# Subtest: play advances with caller time, pause freezes
+ok 214 - play advances with caller time, pause freezes
+  ---
+  duration_ms: 0.713083
+  type: 'test'
+  ...
+# Subtest: seek and step clamp and keep play state
+ok 215 - seek and step clamp and keep play state
+  ---
+  duration_ms: 0.515875
+  type: 'test'
+  ...
+# Subtest: NaN and non-finite inputs are ignored
+ok 216 - NaN and non-finite inputs are ignored
+  ---
+  duration_ms: 0.324333
+  type: 'test'
+  ...
+# Subtest: speed set, validation, faster and slower
+ok 217 - speed set, validation, faster and slower
+  ---
+  duration_ms: 0.344416
+  type: 'test'
+  ...
+# Subtest: setSpeed folds elapsed time at the old speed
+ok 218 - setSpeed folds elapsed time at the old speed
+  ---
+  duration_ms: 0.077
+  type: 'test'
+  ...
+# Subtest: reaching the end pauses, clamps and reports ended
+ok 219 - reaching the end pauses, clamps and reports ended
+  ---
+  duration_ms: 0.146875
+  type: 'test'
+  ...
+# Subtest: backwards time never moves t backwards
+ok 220 - backwards time never moves t backwards
+  ---
+  duration_ms: 0.062625
+  type: 'test'
+  ...
+# Subtest: setDuration grows the total without moving t and unblocks seek
+ok 221 - setDuration grows the total without moving t and unblocks seek
+  ---
+  duration_ms: 0.397792
+  type: 'test'
+  ...
+# Subtest: setDuration keeps a playing clock playing and lets it pass the old end
+ok 222 - setDuration keeps a playing clock playing and lets it pass the old end
+  ---
+  duration_ms: 0.383166
+  type: 'test'
+  ...
+# Subtest: setDuration shrink leaves t and clamps on the next seek
+ok 223 - setDuration shrink leaves t and clamps on the next seek
+  ---
+  duration_ms: 0.127541
+  type: 'test'
+  ...
+# Subtest: setDuration cleans bad input and fixed durations are unchanged
+ok 224 - setDuration cleans bad input and fixed durations are unchanged
+  ---
+  duration_ms: 0.072916
+  type: 'test'
+  ...
+# Subtest: bad durations become zero
+ok 225 - bad durations become zero
+  ---
+  duration_ms: 0.116125
+  type: 'test'
+  ...
+# Subtest: registered with man page
+ok 226 - registered with man page
+  ---
+  duration_ms: 0.829667
+  type: 'test'
+  ...
+# Subtest: normalizeSessionId
+ok 227 - normalizeSessionId
+  ---
+  duration_ms: 0.281083
+  type: 'test'
+  ...
+# Subtest: list renders a table
+ok 228 - list renders a table
+  ---
+  duration_ms: 1.010708
+  type: 'test'
+  ...
+# Subtest: empty list
+ok 229 - empty list
+  ---
+  duration_ms: 0.233875
+  type: 'test'
+  ...
+# Subtest: validation errors send no request
+ok 230 - validation errors send no request
+  ---
+  duration_ms: 1.119416
+  type: 'test'
+  ...
+# Subtest: 410, 404 and offline wording
+ok 231 - 410, 404 and offline wording
+  ---
+  duration_ms: 0.258666
+  type: 'test'
+  ...
+# Subtest: opens takeover, ticks, handles keys and quits
+ok 232 - opens takeover, ticks, handles keys and quits
+  ---
+  duration_ms: 17.552875
+  type: 'test'
+  ...
+# Subtest: ? opens the key list, any key closes it, and r restarts from zero
+ok 233 - ? opens the key list, any key closes it, and r restarts from zero
+  ---
+  duration_ms: 2.593083
+  type: 'test'
+  ...
+# Subtest: --at starts paused at t and --speed applies
+ok 234 - --at starts paused at t and --speed applies
+  ---
+  duration_ms: 1.269292
+  type: 'test'
+  ...
+# Subtest: ledger is fetched lazily, once, on l
+ok 235 - ledger is fetched lazily, once, on l
+  ---
+  duration_ms: 2.471042
+  type: 'test'
+  ...
+# Subtest: ledger failure shows unavailable without blocking
+ok 236 - ledger failure shows unavailable without blocking
+  ---
+  duration_ms: 1.368584
+  type: 'test'
+  ...
+# Subtest: abort releases the wait and clears the timer
+ok 237 - abort releases the wait and clears the timer
+  ---
+  duration_ms: 1.78625
+  type: 'test'
+  ...
+# Subtest: null takeover prints an error line
+ok 238 - null takeover prints an error line
+  ---
+  duration_ms: 0.711458
+  type: 'test'
+  ...
+# Subtest: reduced motion starts paused
+ok 239 - reduced motion starts paused
+  ---
+  duration_ms: 2.017041
+  type: 'test'
+  ...
+# Subtest: a draw failure releases the viewer and the timer
+ok 240 - a draw failure releases the viewer and the timer
+  ---
+  duration_ms: 3.578542
+  type: 'test'
+  ...
+# Subtest: a first-frame failure still releases the viewer
+ok 241 - a first-frame failure still releases the viewer
+  ---
+  duration_ms: 0.705416
+  type: 'test'
+  ...
+# Subtest: a ledger response arriving after close is ignored
+ok 242 - a ledger response arriving after close is ignored
+  ---
+  duration_ms: 2.696625
+  type: 'test'
+  ...
+# Subtest: ledger unavailable is retried on the next open
+ok 243 - ledger unavailable is retried on the next open
+  ---
+  duration_ms: 1.915125
+  type: 'test'
+  ...
+# Subtest: e seeks to the next event even with a huge event list
+ok 244 - e seeks to the next event even with a huge event list
+  ---
+  duration_ms: 235.636625
+  type: 'test'
+  ...
+# Subtest: the inspector shows the Phoenix and Grafana links for the run
+ok 245 - the inspector shows the Phoenix and Grafana links for the run
+  ---
+  duration_ms: 3.959333
+  type: 'test'
+  ...
+# Subtest: o and g open Phoenix and Grafana with the injected opener
+ok 246 - o and g open Phoenix and Grafana with the injected opener
+  ---
+  duration_ms: 1.378375
+  type: 'test'
+  ...
+# Subtest: o and g refuse non-http(s) or credential-bearing link config
+ok 247 - o and g refuse non-http(s) or credential-bearing link config
+  ---
+  duration_ms: 1.102125
+  type: 'test'
+  ...
+# Subtest: o and g are a no-op without an opener or link config
+ok 248 - o and g are a no-op without an opener or link config
+  ---
+  duration_ms: 1.576625
+  type: 'test'
+  ...
+# Subtest: a hostile run id stays literal text in the link line
+ok 249 - a hostile run id stays literal text in the link line
+  ---
+  duration_ms: 0.883
+  type: 'test'
+  ...
+# Subtest: the man page documents --follow and the f key
+ok 250 - the man page documents --follow and the f key
+  ---
+  duration_ms: 0.132333
+  type: 'test'
+  ...
+# Subtest: --follow grows the model and pins the clock to server now-2s, ignoring the client clock
+ok 251 - --follow grows the model and pins the clock to server now-2s, ignoring the client clock
+  ---
+  duration_ms: 3.719541
+  type: 'test'
+  ...
+# Subtest: --follow does not duplicate items the stream replays from the loaded timeline
+ok 252 - --follow does not duplicate items the stream replays from the loaded timeline
+  ---
+  duration_ms: 1.093916
+  type: 'test'
+  ...
+# Subtest: an error frame stops following instead of reconnecting
+ok 253 - an error frame stops following instead of reconnecting
+  ---
+  duration_ms: 0.568458
+  type: 'test'
+  ...
+# Subtest: --follow adds an entity that starts after the first snapshot and upserts its finish
+ok 254 - --follow adds an entity that starts after the first snapshot and upserts its finish
+  ---
+  duration_ms: 2.728458
+  type: 'test'
+  ...
+# Subtest: a row_cap error frame stops following and shows a notice
+ok 255 - a row_cap error frame stops following and shows a notice
+  ---
+  duration_ms: 1.492
+  type: 'test'
+  ...
+# Subtest: boundLiveTimeline caps each list at 5000 and drops items older than 2h
+ok 256 - boundLiveTimeline caps each list at 5000 and drops items older than 2h
+  ---
+  duration_ms: 7.011583
+  type: 'test'
+  ...
+# Subtest: a backward scrub leaves follow and f re-enters
+ok 257 - a backward scrub leaves follow and f re-enters
+  ---
+  duration_ms: 0.806791
+  type: 'test'
+  ...
+# Subtest: replay command does not import other command modules
+ok 258 - replay command does not import other command modules
+  ---
+  duration_ms: 1.0485
+  type: 'test'
+  ...
+# Subtest: browser download records the exact API bytes, including whitespace and Unicode
+ok 259 - browser download records the exact API bytes, including whitespace and Unicode
+  ---
+  duration_ms: 18.513667
+  type: 'test'
+  ...
+# Subtest: bare run ids and --out choose a local download filename, never a server path
+ok 260 - bare run ids and --out choose a local download filename, never a server path
+  ---
+  duration_ms: 0.6755
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export
+ok 261 - invalid export never fetches: replay export
+  ---
+  duration_ms: 0.129042
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export ../secret
+ok 262 - invalid export never fetches: replay export ../secret
+  ---
+  duration_ms: 0.325917
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export run:..
+ok 263 - invalid export never fetches: replay export run:..
+  ---
+  duration_ms: 0.111959
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 extra
+ok 264 - invalid export never fetches: replay export r1 extra
+  ---
+  duration_ms: 0.228458
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out
+ok 265 - invalid export never fetches: replay export r1 --out
+  ---
+  duration_ms: 0.088375
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=../secret
+ok 266 - invalid export never fetches: replay export r1 --out=../secret
+  ---
+  duration_ms: 0.313375
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=/tmp/file
+ok 267 - invalid export never fetches: replay export r1 --out=/tmp/file
+  ---
+  duration_ms: 0.446291
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out=
+ok 268 - invalid export never fetches: replay export r1 --out=
+  ---
+  duration_ms: 0.091625
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --out="<img>.json"
+ok 269 - invalid export never fetches: replay export r1 --out="<img>.json"
+  ---
+  duration_ms: 0.053208
+  type: 'test'
+  ...
+# Subtest: invalid export never fetches: replay export r1 --follow
+ok 270 - invalid export never fetches: replay export r1 --follow
+  ---
+  duration_ms: 0.114583
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 401 without downloads or response-body leakage
+ok 271 - export handles HTTP 401 without downloads or response-body leakage
+  ---
+  duration_ms: 0.57025
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 403 without downloads or response-body leakage
+ok 272 - export handles HTTP 403 without downloads or response-body leakage
+  ---
+  duration_ms: 0.201
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 404 without downloads or response-body leakage
+ok 273 - export handles HTTP 404 without downloads or response-body leakage
+  ---
+  duration_ms: 0.315584
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 410 without downloads or response-body leakage
+ok 274 - export handles HTTP 410 without downloads or response-body leakage
+  ---
+  duration_ms: 0.169125
+  type: 'test'
+  ...
+# Subtest: export handles HTTP 500 without downloads or response-body leakage
+ok 275 - export handles HTTP 500 without downloads or response-body leakage
+  ---
+  duration_ms: 3.119208
+  type: 'test'
+  ...
+# Subtest: offline and cancellation do not cause downloads
+ok 276 - offline and cancellation do not cause downloads
+  ---
+  duration_ms: 1.572333
+  type: 'test'
+  ...
+# Subtest: failed browser click cleans resources and reports a safe error
+ok 277 - failed browser click cleans resources and reports a safe error
+  ---
+  duration_ms: 1.102417
+  type: 'test'
+  ...
+# Subtest: blob HTTP client rejects cross-origin path tricks before sending the token
+ok 278 - blob HTTP client rejects cross-origin path tricks before sending the token
+  ---
+  duration_ms: 0.404625
+  type: 'test'
+  ...
+# Subtest: blob body timeout is classified and the caller abort is preserved
+ok 279 - blob body timeout is classified and the caller abort is preserved
+  ---
+  duration_ms: 9.430625
+  type: 'test'
+  ...
+# Subtest: helpers
+ok 280 - helpers
+  ---
+  duration_ms: 0.819041
+  type: 'test'
+  ...
+# Subtest: frame has header, track, scrub, metrics and footer within bounds
+ok 281 - frame has header, track, scrub, metrics and footer within bounds
+  ---
+  duration_ms: 2.972709
+  type: 'test'
+  ...
+# Subtest: the footer keeps q quit at every width and the full legend at 160
+ok 282 - the footer keeps q quit at every width and the full legend at 160
+  ---
+  duration_ms: 3.564583
+  type: 'test'
+  ...
+# Subtest: station colour tokens map to grid classes; an unknown token stays unstyled
+ok 283 - station colour tokens map to grid classes; an unknown token stays unstyled
+  ---
+  duration_ms: 0.360042
+  type: 'test'
+  ...
+# Subtest: phase headers group the track when the payload carries phases
+ok 284 - phase headers group the track when the payload carries phases
+  ---
+  duration_ms: 0.4265
+  type: 'test'
+  ...
+# Subtest: helpRows lists the keys and fits the grid
+ok 285 - helpRows lists the keys and fits the grid
+  ---
+  duration_ms: 0.247125
+  type: 'test'
+  ...
+# Subtest: markers: failed, finished, selection class
+ok 286 - markers: failed, finished, selection class
+  ---
+  duration_ms: 0.23225
+  type: 'test'
+  ...
+# Subtest: hostile and long strings stay literal and fit
+ok 287 - hostile and long strings stay literal and fit
+  ---
+  duration_ms: 3.001917
+  type: 'test'
+  ...
+# Subtest: empty and malformed input never throws
+ok 288 - empty and malformed input never throws
+  ---
+  duration_ms: 0.844042
+  type: 'test'
+  ...
+# Subtest: panel switch: inspector vs ledger vs none
+ok 289 - panel switch: inspector vs ledger vs none
+  ---
+  duration_ms: 3.454208
+  type: 'test'
+  ...
+# Subtest: output never exceeds the row budget; sizes are clamped
+ok 290 - output never exceeds the row budget; sizes are clamped
+  ---
+  duration_ms: 0.894084
+  type: 'test'
+  ...
+# Subtest: bidi overrides and zero-width characters are neutralised
+ok 291 - bidi overrides and zero-width characters are neutralised
+  ---
+  duration_ms: 0.084667
+  type: 'test'
+  ...
+# Subtest: non-primitive fields never throw and fmtTime is bounded
+ok 292 - non-primitive fields never throw and fmtTime is bounded
+  ---
+  duration_ms: 0.178916
+  type: 'test'
+  ...
+# Subtest: scrub bar marks an event at t=0 and asks for the full range
+ok 293 - scrub bar marks an event at t=0 and asks for the full range
+  ---
+  duration_ms: 0.125292
+  type: 'test'
+  ...
+# Subtest: inspector shows the selected document events and its latest generations
+ok 294 - inspector shows the selected document events and its latest generations
+  ---
+  duration_ms: 0.568667
+  type: 'test'
+  ...
+# Subtest: metrics count documents started by t, and first-pass waits for a finished document
+ok 295 - metrics count documents started by t, and first-pass waits for a finished document
+  ---
+  duration_ms: 1.102292
+  type: 'test'
+  ...
+# Subtest: inspector: outcome and in-flight calls show only from their end
+ok 296 - inspector: outcome and in-flight calls show only from their end
+  ---
+  duration_ms: 0.446875
+  type: 'test'
+  ...
+# Subtest: hostile strings in the inspector stay literal text, and wait for the finish
+ok 297 - hostile strings in the inspector stay literal text, and wait for the finish
+  ---
+  duration_ms: 0.430875
+  type: 'test'
+  ...
+# Subtest: the scrub bar shades station-phase sectors and marks their boundaries
+ok 298 - the scrub bar shades station-phase sectors and marks their boundaries
+  ---
+  duration_ms: 0.192209
+  type: 'test'
+  ...
+# Subtest: the inspector shows per-document elapsed, tokens and cost
+ok 299 - the inspector shows per-document elapsed, tokens and cost
+  ---
+  duration_ms: 0.216292
+  type: 'test'
+  ...
+# Subtest: parseSseFrame reads the event name and JSON data
+ok 300 - parseSseFrame reads the event name and JSON data
+  ---
+  duration_ms: 1.505542
+  type: 'test'
+  ...
+# Subtest: parses frames split across chunks, then stop() ends the reader
+ok 301 - parses frames split across chunks, then stop() ends the reader
+  ---
+  duration_ms: 3.51275
+  type: 'test'
+  ...
+# Subtest: reconnects with increasing backoff until stopped
+ok 302 - reconnects with increasing backoff until stopped
+  ---
+  duration_ms: 312.26875
+  type: 'test'
+  ...
+# Subtest: a non-ok response is retried, never thrown out of the loop
+ok 303 - a non-ok response is retried, never thrown out of the loop
+  ---
+  duration_ms: 40.120417
+  type: 'test'
+  ...
+# Subtest: an aborted caller signal stops the reader
+ok 304 - an aborted caller signal stops the reader
+  ---
+  duration_ms: 17.592916
+  type: 'test'
+  ...
+# Subtest: does not retry a client error (4xx) response
+ok 305 - does not retry a client error (4xx) response
+  ---
+  duration_ms: 40.751458
+  type: 'test'
+  ...
+# Subtest: doc lifecycle: waiting, at station, idle, finished
+ok 306 - doc lifecycle: waiting, at station, idle, finished
+  ---
+  duration_ms: 2.462792
+  type: 'test'
+  ...
+# Subtest: retry segments expose attempt and retry_kind
+ok 307 - retry segments expose attempt and retry_kind
+  ---
+  duration_ms: 0.251042
+  type: 'test'
+  ...
+# Subtest: running segment with t1 <= t0 stays current; half-open boundaries
+ok 308 - running segment with t1 <= t0 stays current; half-open boundaries
+  ---
+  duration_ms: 0.193541
+  type: 'test'
+  ...
+# Subtest: counts, done, failed, active
+ok 309 - counts, done, failed, active
+  ---
+  duration_ms: 0.127
+  type: 'test'
+  ...
+# Subtest: eventsBetween is (a, b] and eventsUpTo is newest-last with limit
+ok 310 - eventsBetween is (a, b] and eventsUpTo is newest-last with limit
+  ---
+  duration_ms: 0.914375
+  type: 'test'
+  ...
+# Subtest: scoresAt, generationsFor, docAt
+ok 311 - scoresAt, generationsFor, docAt
+  ---
+  duration_ms: 0.388125
+  type: 'test'
+  ...
+# Subtest: runningTotalsAt sums generations that have ended
+ok 312 - runningTotalsAt sums generations that have ended
+  ---
+  duration_ms: 0.168125
+  type: 'test'
+  ...
+# Subtest: duration is the max of session and latest segment or event
+ok 313 - duration is the max of session and latest segment or event
+  ---
+  duration_ms: 1.75775
+  type: 'test'
+  ...
+# Subtest: stations fall back to STATIONS, or use the timeline list
+ok 314 - stations fall back to STATIONS, or use the timeline list
+  ---
+  duration_ms: 0.42725
+  type: 'test'
+  ...
+# Subtest: empty and garbage timelines never throw
+ok 315 - empty and garbage timelines never throw
+  ---
+  duration_ms: 0.688833
+  type: 'test'
+  ...
+# Subtest: hostile strings pass through verbatim
+ok 316 - hostile strings pass through verbatim
+  ---
+  duration_ms: 0.18175
+  type: 'test'
+  ...
+# Subtest: input timeline is not mutated or reordered
+ok 317 - input timeline is not mutated or reordered
+  ---
+  duration_ms: 0.06925
+  type: 'test'
+  ...
+# Subtest: half-open segment end: a doc leaves a station exactly at t1
+ok 318 - half-open segment end: a doc leaves a station exactly at t1
+  ---
+  duration_ms: 0.070792
+  type: 'test'
+  ...
+# Subtest: eventsForDoc filters by doc and keeps the newest
+ok 319 - eventsForDoc filters by doc and keeps the newest
+  ---
+  duration_ms: 0.105833
+  type: 'test'
+  ...
+# Subtest: non-primitive doc ids do not throw
+ok 320 - non-primitive doc ids do not throw
+  ---
+  duration_ms: 0.17925
+  type: 'test'
+  ...
+# Subtest: outcome fields appear only at the end time; identity from the start
+ok 321 - outcome fields appear only at the end time; identity from the start
+  ---
+  duration_ms: 0.125458
+  type: 'test'
+  ...
+# Subtest: firstPassAt counts only documents finished by t, with the rollup rule
+ok 322 - firstPassAt counts only documents finished by t, with the rollup rule
+  ---
+  duration_ms: 0.226458
+  type: 'test'
+  ...
+# Subtest: firstPassAt ignores a score that arrives after the document finished
+ok 323 - firstPassAt ignores a score that arrives after the document finished
+  ---
+  duration_ms: 0.054875
+  type: 'test'
+  ...
+# Subtest: stationLatencyAt uses only segments that ended by t
+ok 324 - stationLatencyAt uses only segments that ended by t
+  ---
+  duration_ms: 0.198208
+  type: 'test'
+  ...
+# Subtest: phaseSpans groups stations by phase, in start order
+ok 325 - phaseSpans groups stations by phase, in start order
+  ---
+  duration_ms: 0.879958
+  type: 'test'
+  ...
+# Subtest: stateAt carries per-document elapsed, tokens and cost, gated on t
+ok 326 - stateAt carries per-document elapsed, tokens and cost, gated on t
+  ---
+  duration_ms: 0.148084
+  type: 'test'
+  ...
+# Subtest: registerPanel adds a panel, listPanels orders it, duplicates throw
+ok 327 - registerPanel adds a panel, listPanels orders it, duplicates throw
+  ---
+  duration_ms: 1.571292
+  type: 'test'
+  ...
+# Subtest: renderFrame resolves a registered id; unknown id yields no panel rows
+ok 328 - renderFrame resolves a registered id; unknown id yields no panel rows
+  ---
+  duration_ms: 1.183625
+  type: 'test'
+  ...
+# Subtest: every built-in panel renders on a minimal model and a hostile timeline
+ok 329 - every built-in panel renders on a minimal model and a hostile timeline
+  ---
+  duration_ms: 10.541625
+  type: 'test'
+  ...
+# Subtest: registerPanel rejects reserved ids and bad ids, and cleans the title
+ok 330 - registerPanel rejects reserved ids and bad ids, and cleans the title
+  ---
+  duration_ms: 0.408792
+  type: 'test'
+  ...
+# Subtest: custom panel rows are sanitised by the grid
+ok 331 - custom panel rows are sanitised by the grid
+  ---
+  duration_ms: 0.672834
+  type: 'test'
+  ...
+# Subtest: resetPanels restores exactly the built-in set
+ok 332 - resetPanels restores exactly the built-in set
+  ---
+  duration_ms: 0.255834
+  type: 'test'
+  ...
+# Subtest: truncate/clean semantics still neutralise control characters in a built-in row
+ok 333 - truncate/clean semantics still neutralise control characters in a built-in row
+  ---
+  duration_ms: 0.286042
+  type: 'test'
+  ...
+# Subtest: p cycles insight panels, starts from another panel, and never fetches the ledger
+ok 334 - p cycles insight panels, starts from another panel, and never fetches the ledger
+  ---
+  duration_ms: 9.661625
+  type: 'test'
+  ...
+# Subtest: metrics, tokens and latency panels show nothing from after the playhead
+ok 335 - metrics, tokens and latency panels show nothing from after the playhead
+  ---
+  duration_ms: 0.699958
+  type: 'test'
+  ...
+# Subtest: panels at mid-run use only ended segments and finished documents
+ok 336 - panels at mid-run use only ended segments and finished documents
+  ---
+  duration_ms: 0.634166
+  type: 'test'
+  ...
+# Subtest: after the run ends the panels show the full totals
+ok 337 - after the run ends the panels show the full totals
+  ---
+  duration_ms: 0.357708
+  type: 'test'
+  ...
+# Subtest: leaderboard ranks by progress and marks the selected document
+ok 338 - leaderboard ranks by progress and marks the selected document
+  ---
+  duration_ms: 0.306292
+  type: 'test'
+  ...
+# Subtest: ticker lists recent events with time, kind, station and doc
+ok 339 - ticker lists recent events with time, kind, station and doc
+  ---
+  duration_ms: 0.148417
+  type: 'test'
+  ...
+# Subtest: the leaderboard reports each document elapsed time and token spend
+ok 340 - the leaderboard reports each document elapsed time and token spend
+  ---
+  duration_ms: 0.31375
+  type: 'test'
+  ...
+# Subtest: help lists every registered command exactly once
+ok 341 - help lists every registered command exactly once
+  ---
+  duration_ms: 3.065333
+  type: 'test'
+  ...
+# Subtest: help <cmd> is man <cmd>; unknown man entry message is exact
+ok 342 - help <cmd> is man <cmd>; unknown man entry message is exact
+  ---
+  duration_ms: 0.304791
+  type: 'test'
+  ...
+# Subtest: theme bogus prints usage and does not change theme
+ok 343 - theme bogus prints usage and does not change theme
+  ---
+  duration_ms: 0.137583
+  type: 'test'
+  ...
+# Subtest: theme hc turns crt and skyline off
+ok 344 - theme hc turns crt and skyline off
+  ---
+  duration_ms: 0.152416
+  type: 'test'
+  ...
+# Subtest: theme with no argument lists the current theme
+ok 345 - theme with no argument lists the current theme
+  ---
+  duration_ms: 0.159958
+  type: 'test'
+  ...
+# Subtest: theme survives storage that throws (ambient owns persistence)
+ok 346 - theme survives storage that throws (ambient owns persistence)
+  ---
+  duration_ms: 0.982292
+  type: 'test'
+  ...
+# Subtest: crt and skyline toggle and validate
+ok 347 - crt and skyline toggle and validate
+  ---
+  duration_ms: 0.152208
+  type: 'test'
+  ...
+# Subtest: clear and history
+ok 348 - clear and history
+  ---
+  duration_ms: 0.24525
+  type: 'test'
+  ...
+# Subtest: neofetch uses the banner and live counts, never invented ones
+ok 349 - neofetch uses the banner and live counts, never invented ones
+  ---
+  duration_ms: 0.662084
+  type: 'test'
+  ...
+# Subtest: neofetch when the api is down shows unavailable, not numbers
+ok 350 - neofetch when the api is down shows unavailable, not numbers
+  ---
+  duration_ms: 0.581875
+  type: 'test'
+  ...
+# Subtest: capScrollback keeps the last 1000 by default
+ok 351 - capScrollback keeps the last 1000 by default
+  ---
+  duration_ms: 1.746042
+  type: 'test'
+  ...
+# Subtest: capScrollback leaves short lists alone and honours max
+ok 352 - capScrollback leaves short lists alone and honours max
+  ---
+  duration_ms: 0.534042
+  type: 'test'
+  ...
+# Subtest: maskCommand masks the auth token only
+ok 353 - maskCommand masks the auth token only
+  ---
+  duration_ms: 1.667125
+  type: 'test'
+  ...
+# Subtest: renderTable puts hostile strings in text, never elements
+ok 354 - renderTable puts hostile strings in text, never elements
+  ---
+  duration_ms: 0.223875
+  type: 'test'
+  ...
+# Subtest: renderLine, renderKv, renderListing and renderPre use text only
+ok 355 - renderLine, renderKv, renderListing and renderPre use text only
+  ---
+  duration_ms: 0.249666
+  type: 'test'
+  ...
+# Subtest: renderBanner wraps the art in div.title-card > pre.banner as text only
+ok 356 - renderBanner wraps the art in div.title-card > pre.banner as text only
+  ---
+  duration_ms: 0.085417
+  type: 'test'
+  ...
+# Subtest: renderTable passes (rowIndex, colIndex) to cellClass
+ok 357 - renderTable passes (rowIndex, colIndex) to cellClass
+  ---
+  duration_ms: 0.171834
+  type: 'test'
+  ...
+# Subtest: maskCommand masks quoted and obfuscated auth forms
+ok 358 - maskCommand masks quoted and obfuscated auth forms
+  ---
+  duration_ms: 0.121667
+  type: 'test'
+  ...
+# Subtest: status bar carries the ui link and addSisterLink adds the ingress link
+ok 359 - status bar carries the ui link and addSisterLink adds the ingress link
+  ---
+  duration_ms: 2.83075
+  type: 'test'
+  ...
+# Subtest: addSisterLink is a no-op without a status bar
+ok 360 - addSisterLink is a no-op without a status bar
+  ---
+  duration_ms: 1.9655
+  type: 'test'
+  ...
+# Subtest: multi-line paste inserts the first line, warns, and never runs
+ok 361 - multi-line paste inserts the first line, warns, and never runs
+  ---
+  duration_ms: 10.750208
+  type: 'test'
+  ...
+# Subtest: ArrowDown with no history navigation keeps typed text
+ok 362 - ArrowDown with no history navigation keeps typed text
+  ---
+  duration_ms: 0.3755
+  type: 'test'
+  ...
+# Subtest: live display masks an auth line while typing
+ok 363 - live display masks an auth line while typing
+  ---
+  duration_ms: 0.197959
+  type: 'test'
+  ...
+# Subtest: Ctrl+C frees the prompt even when the command ignores its signal
+ok 364 - Ctrl+C frees the prompt even when the command ignores its signal
+  ---
+  duration_ms: 18.43775
+  type: 'test'
+  ...
+# Subtest: Tab only prevents default when there is a ghost to complete
+ok 365 - Tab only prevents default when there is a ghost to complete
+  ---
+  duration_ms: 0.742458
+  type: 'test'
+  ...
+# Subtest: input can be made read-only until boot finishes
+ok 366 - input can be made read-only until boot finishes
+  ---
+  duration_ms: 0.744167
+  type: 'test'
+  ...
+# Subtest: scrollback is capped with a while loop on childElementCount
+ok 367 - scrollback is capped with a while loop on childElementCount
+  ---
+  duration_ms: 5.915
+  type: 'test'
+  ...
+# Subtest: man animation is abortable and does not re-announce
+ok 368 - man animation is abortable and does not re-announce
+  ---
+  duration_ms: 2.023
+  type: 'test'
+  ...
+# Subtest: banner and divider are aria-hidden
+ok 369 - banner and divider are aria-hidden
+  ---
+  duration_ms: 0.09425
+  type: 'test'
+  ...
+# Subtest: takeover draw builds spans via textContent; hostile text stays text
+ok 370 - takeover draw builds spans via textContent; hostile text stays text
+  ---
+  duration_ms: 5.695208
+  type: 'test'
+  ...
+# Subtest: takeover draw caps rows at 200 and each row at 400 chars
+ok 371 - takeover draw caps rows at 200 and each row at 400 chars
+  ---
+  duration_ms: 6.562417
+  type: 'test'
+  ...
+# Subtest: second takeover returns null while one is active
+ok 372 - second takeover returns null while one is active
+  ---
+  duration_ms: 6.554542
+  type: 'test'
+  ...
+# Subtest: takeover routes keys to onKey, not the input; release is idempotent and restores input
+ok 373 - takeover routes keys to onKey, not the input; release is idempotent and restores input
+  ---
+  duration_ms: 6.183458
+  type: 'test'
+  ...
+# Subtest: Ctrl+C releases an active takeover and frees the prompt
+ok 374 - Ctrl+C releases an active takeover and frees the prompt
+  ---
+  duration_ms: 5.184
+  type: 'test'
+  ...
+# Subtest: lines submitted during a takeover are queued
+ok 375 - lines submitted during a takeover are queued
+  ---
+  duration_ms: 6.029375
+  type: 'test'
+  ...
+# Subtest: lines entered while a command runs are queued and drained in order
+ok 376 - lines entered while a command runs are queued and drained in order
+  ---
+  duration_ms: 23.838458
+  type: 'test'
+  ...
+# Subtest: an engine failure is printed loudly instead of swallowed
+ok 377 - an engine failure is printed loudly instead of swallowed
+  ---
+  duration_ms: 0.689542
+  type: 'test'
+  ...
+# Subtest: a throwing viewer key handler is reported, not swallowed
+ok 378 - a throwing viewer key handler is reported, not swallowed
+  ---
+  duration_ms: 0.136917
+  type: 'test'
+  ...
+1..378
+# tests 378
+# suites 0
+# pass 378
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2333.302584

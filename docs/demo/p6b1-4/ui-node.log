@@ -1,0 +1,82 @@
+TAP version 13
+# Subtest: isHttpBase accepts only plain http(s) bases
+ok 1 - isHttpBase accepts only plain http(s) bases
+  ---
+  duration_ms: 0.708541
+  type: 'test'
+  ...
+# Subtest: isHttpBase rejects hostile and non-URL values
+ok 2 - isHttpBase rejects hostile and non-URL values
+  ---
+  duration_ms: 0.607292
+  type: 'test'
+  ...
+# Subtest: mergeLinks drops javascript:/data: and non-http values, keeping defaults
+ok 3 - mergeLinks drops javascript:/data: and non-http values, keeping defaults
+  ---
+  duration_ms: 0.196625
+  type: 'test'
+  ...
+# Subtest: mergeLinks strips trailing slashes and keeps valid http(s) bases
+ok 4 - mergeLinks strips trailing slashes and keeps valid http(s) bases
+  ---
+  duration_ms: 0.118333
+  type: 'test'
+  ...
+# Subtest: mergeLinks ignores non-string values and a non-object body
+ok 5 - mergeLinks ignores non-string values and a non-object body
+  ---
+  duration_ms: 0.51875
+  type: 'test'
+  ...
+# Subtest: mergeLinks never mutates the defaults object
+ok 6 - mergeLinks never mutates the defaults object
+  ---
+  duration_ms: 0.083666
+  type: 'test'
+  ...
+# Subtest: statusPill maps known statuses to the right class
+ok 7 - statusPill maps known statuses to the right class
+  ---
+  duration_ms: 0.14725
+  type: 'test'
+  ...
+# Subtest: statusPill shows an unknown status as "?" with a muted class
+ok 8 - statusPill shows an unknown status as "?" with a muted class
+  ---
+  duration_ms: 0.056375
+  type: 'test'
+  ...
+# Subtest: runLinks builds encoded replay/grafana/phoenix hrefs
+ok 9 - runLinks builds encoded replay/grafana/phoenix hrefs
+  ---
+  duration_ms: 0.315042
+  type: 'test'
+  ...
+# Subtest: auditSummary reports a verified chain
+ok 10 - auditSummary reports a verified chain
+  ---
+  duration_ms: 0.400208
+  type: 'test'
+  ...
+# Subtest: auditSummary reports a broken chain with its index
+ok 11 - auditSummary reports a broken chain with its index
+  ---
+  duration_ms: 0.11775
+  type: 'test'
+  ...
+# Subtest: auditSummary treats a missing chain as broken, never OK
+ok 12 - auditSummary treats a missing chain as broken, never OK
+  ---
+  duration_ms: 0.11425
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55.679
