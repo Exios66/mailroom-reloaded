@@ -84,6 +84,9 @@ ANNOTATION_KEYS: frozenset[str] = frozenset(
         "maud_label_count",
         "related_document_ids",
         "relationships",
+        # Document-level subclass label (corpus differentiator, mailroom
+        # GROUND_TRUTH_KEYS) — scored by the classifier, never as a field.
+        "expected_subclass",
     }
 )
 

@@ -394,6 +394,16 @@ _SMART_QUOTES = str.maketrans(
     {"\u201c": '"', "\u201d": '"', "\u2018": "'", "\u2019": "'"}
 )
 _TYPO = re.compile(r"fundermental", re.IGNORECASE)
+#: Comparison symbols carry meaning in the class names (``5 business days``
+#: vs ``> 5 business days``). Spell them out before punctuation is stripped
+#: so the fold cannot collapse distinct classes; ``> 5`` and ``Greater than
+#: 5`` then share one fold, which is the intended equivalence.
+_COMPARATORS = (
+    (re.compile(r"\s*(>=|≥)\s*"), " at least "),
+    (re.compile(r"\s*(<=|≤)\s*"), " at most "),
+    (re.compile(r"\s*>\s*"), " greater than "),
+    (re.compile(r"\s*<\s*"), " less than "),
+)
 
 #: Yes/No surface aliases (only valid where the question's classes include
 #: Yes/No — the index decides).
@@ -414,7 +424,10 @@ def _canon(text: object) -> str:
 
 
 def _fold(text: object) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", _canon(text).lower()).strip()
+    value = _canon(text).lower()
+    for pattern, words in _COMPARATORS:
+        value = pattern.sub(words, value)
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
 
 
 def maud_class_index(
@@ -448,26 +461,34 @@ def canonical_maud_class(
 ) -> str:
     """Canonical folded form of *value* under the question's class surface.
 
-    Whole-string class match first (class names themselves contain commas);
-    otherwise all comma components must map and the canonical components are
-    rejoined. Recognized Yes/No aliases fold to ``yes`` / ``no`` only when
-    the question's surface actually carries Yes/No. Unrecognized text falls
+    When every comma component is itself a class, the canonical components are
+    rejoined in sorted order, so a multi-class answer is order-insensitive
+    (``"B, A"`` and ``"A, B"`` are the same set of classes); this also covers
+    composite classes such as ``"General R&Ws, fundamental/Special R&Ws"``.
+    Otherwise the whole string is matched as one class (class names themselves
+    contain commas).
+
+    Recognized Yes/No aliases fold to ``yes`` / ``no`` only when the question's
+    surface actually carries Yes/No. Unrecognized text falls
     back to the folded raw value so exact-match scoring stays deterministic.
     """
     if value is None or str(value).strip() == "":
         return ""
     index = maud_class_index(question, valid_classes)
     folded = _fold(value)
+    # Components first: a composite class whose parts are themselves classes
+    # ("General R&Ws, Capitalization R&Ws") must canonicalize to the same
+    # sorted set as any reordering of it.
+    parts = _components(str(value))
+    if len(parts) > 1:
+        canonical = [index.get(_fold(part)) for part in parts]
+        if all(part is not None for part in canonical):
+            return ", ".join(sorted({_fold(part) for part in canonical}))
     if folded in index:
         return _fold(index[folded])
     alias = _YES_NO_ALIASES.get(folded)
     if alias and alias in index:
         return alias
-    parts = _components(str(value))
-    if len(parts) > 1:
-        canonical = [index.get(_fold(part)) for part in parts]
-        if all(part is not None for part in canonical):
-            return ", ".join(_fold(part) for part in canonical)
     return folded
 
 

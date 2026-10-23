@@ -47,7 +47,7 @@ embeddings = ["scipy", "sentence-transformers"]
 deploy = ["modal==1.5.5"]
 dev = ["pytest", "pytest-asyncio", "scikit-learn", "ruff"]
 anchor = ["psycopg[binary]"]
-parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.21.0"]
+parity = ["llm-dojo-scoring @ git+https://github.com/Exios66/llm-dojo-scoring.git@v0.22.0"]
 
 [project.scripts]
 mailroom = "mailroom_reloaded.cli:main"
@@ -69,7 +69,7 @@ markers = [
 ]
 
 [tool.ruff]
-# Vendored verbatim from llm-dojo-scoring v0.21.0 (see scoring/PARITY.md); keep upstream bytes.
+# Vendored from llm-dojo-scoring v0.22.0 (see scoring/PARITY.md); keep upstream bytes.
 extend-exclude = [
   "src/mailroom_reloaded/scoring/classification.py",
   "src/mailroom_reloaded/scoring/config.py",

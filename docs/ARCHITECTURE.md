@@ -185,7 +185,7 @@ src/mailroom_reloaded/
   schemas/              extraction.py (strict response_format), manifest.py, audit.py
   prompts/              frozen_v1/ (5 specialists + lineage.json), sand37/, sorter_v14.md,
                         judge_*.md, boss.md, arbiter.md, loader.py
-  scoring/              vendored llm-dojo-scoring v0.21.0 subset + PARITY.md
+  scoring/              vendored llm-dojo-scoring v0.22.0 subset + PARITY.md
   llm/                  client.py (provider resolve + structured calls), retry.py,
                         usage.py, tooling.py (tool loop + inline fallback)
   tools.py              one definition → CrewAI BaseTool and OpenAI function spec
